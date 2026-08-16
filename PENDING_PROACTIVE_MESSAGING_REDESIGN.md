@@ -214,6 +214,46 @@ like a live plan. Reconciliation must be idempotent and must not send a message
 solely because `current_intent` exists; the normal proactive gates still make
 the final send decision.
 
+### 7a. Add a manual immediate intent check (agreed)
+
+Add a compact refresh-icon action with a tooltip such as `立即檢查當下意圖`
+to the current-intent card in `PlayerGoalsPanel.vue`. It is available to the
+character owner/admin and is an explicit request to reconcile only that
+character's current intent.
+
+The action has two phases:
+
+1. Run the same cheap deterministic check immediately: reload the latest
+   character state and schedule, classify the intent, and persist any safe
+   idempotent correction. The UI can show `有效` / `已更新` / `已排入檢查` /
+   `已過期` without waiting for an LLM.
+2. Only when that check is ambiguous or requires a replacement intent, enqueue
+   or join one `manual_intent_reconcile` background job. Return its accepted /
+   already-running state to the UI, show an inline progress state, and refresh
+   the card when the job completes. "Immediate" means that the check starts
+   now, not that an LLM result is forced into the same HTTP response.
+
+The manual path uses the same controls as automatic fallback, plus:
+
+- at most one active manual reconciliation job per character; a second click
+  joins the existing job instead of starting another one;
+- a short UI debounce for the deterministic pass and a configurable manual LLM
+  fallback cooldown (initially five minutes per character);
+- a per-character idempotency key and state-version/update-time comparison, so
+  a completed manual job cannot overwrite a newer player turn or post-turn
+  state update;
+- explicit result/audit values such as `unchanged`, `updated`, `scheduled`,
+  `cleared`, `queued_for_llm`, `rate_limited`, and `superseded`;
+- no bypass of proactive consent, cooldown, sleep/night rules, duplicate-topic
+  protection, or the normal send decision. The action never sends an outgoing
+  message by itself.
+
+The endpoint should be a separate, owner-authorized action (for example,
+`POST .../current-intent/reconcile`), not part of `send_message`. It must reuse
+the existing scheduler/job infrastructure and must not introduce a new Docker
+process. An LLM-backed manual check may take seconds for the button requester,
+but it must not delay, lock, or compete unboundedly with a normal chat turn.
+
 ### 8. Deduplicate pending replies and scheduled promises
 
 There are two different queues that should not be conflated:
@@ -281,6 +321,9 @@ player's chat response path. The following are acceptance constraints:
   per turn, background tick duration, and reconciliation fallback count. A
   rollout is not accepted if normal chat gains an extra LLM call or a material
   p95 regression.
+- A manual check is an explicit separate request. It may show a short progress
+  state while an LLM fallback runs, but it must never delay the normal chat
+  request or create more than one active fallback for the same character.
 
 ## Implementation Order
 
@@ -302,10 +345,13 @@ player's chat response path. The following are acceptance constraints:
    deterministic checks and idempotent schedule links first; add the bounded
    LLM fallback only for stale/ambiguous cases. Add intent age/status to the UI
    after the backend state is reliable.
-6. If observation still shows a need for user-controlled frequency, add a
+6. Add the owner-authorized manual intent-check endpoint and the compact UI
+   action. Prove rate limiting, idempotent job joining, state-version safety,
+   and that a manual LLM fallback cannot block normal chat.
+7. If observation still shows a need for user-controlled frequency, add a
    separate `proactive_frequency` relationship setting. Do not reuse
    `operator_pace_preference` and do not make this setting an extra LLM call.
-7. Roll out in stages, compare the recorded latency and token metrics, inspect
+8. Roll out in stages, compare the recorded latency and token metrics, inspect
    proactive-attempt reasons for one day, and only then decide whether a second
    adjustment is justified.
 
