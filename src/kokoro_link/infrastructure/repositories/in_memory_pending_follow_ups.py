@@ -13,6 +13,7 @@ from kokoro_link.contracts.pending_follow_up import (
 )
 from kokoro_link.domain.entities.pending_follow_up import (
     PendingFollowUp,
+    PendingFollowUpKind,
     PendingFollowUpStatus,
 )
 
@@ -27,8 +28,24 @@ class InMemoryPendingFollowUpRepository(PendingFollowUpRepositoryPort):
     def __init__(self) -> None:
         self._rows: dict[str, PendingFollowUp] = {}
 
-    async def add(self, follow_up: PendingFollowUp) -> None:
+    async def add(self, follow_up: PendingFollowUp) -> PendingFollowUp:
+        if (
+            follow_up.kind == PendingFollowUpKind.SCHEDULED_PROMISE
+            and follow_up.dedupe_key
+        ):
+            matches = [
+                row for row in self._rows.values()
+                if row.kind == PendingFollowUpKind.SCHEDULED_PROMISE
+                and row.dedupe_key == follow_up.dedupe_key
+                and row.status.value in _OPEN_STATUSES
+            ]
+            if matches:
+                matches.sort(key=lambda row: (row.queued_at, row.id))
+                canonical = matches[0].merged_scheduled_promise_context(follow_up)
+                self._rows[canonical.id] = canonical
+                return canonical
         self._rows[follow_up.id] = follow_up
+        return follow_up
 
     async def save(self, follow_up: PendingFollowUp) -> None:
         self._rows[follow_up.id] = follow_up
@@ -87,6 +104,14 @@ class InMemoryPendingFollowUpRepository(PendingFollowUpRepositoryPort):
             if row.character_id == character_id
             and row.status.value in _OPEN_STATUSES
         ]
+
+    async def list_open_scheduled_promises(self) -> list[PendingFollowUp]:
+        rows = [
+            row for row in self._rows.values()
+            if row.kind == PendingFollowUpKind.SCHEDULED_PROMISE
+            and row.status.value in _OPEN_STATUSES
+        ]
+        return sorted(rows, key=lambda row: (row.scheduled_for, row.queued_at, row.id))
 
     async def delete_for_conversation(self, conversation_id: str) -> int:
         ids = [

@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type {
+  CurrentIntentReconcileResponse,
   ProactiveAttempt,
   ProactiveEvaluateResponse,
 } from '@/types/proactive'
@@ -22,6 +23,15 @@ export async function evaluateProactiveNow(
 ): Promise<ProactiveEvaluateResponse> {
   const { data } = await axios.post<ProactiveEvaluateResponse>(
     `${BASE}/${characterId}/proactive/evaluate`,
+  )
+  return data
+}
+
+export async function reconcileCurrentIntentNow(
+  characterId: string,
+): Promise<CurrentIntentReconcileResponse> {
+  const { data } = await axios.post<CurrentIntentReconcileResponse>(
+    `${BASE}/${characterId}/current-intent/reconcile`,
   )
   return data
 }

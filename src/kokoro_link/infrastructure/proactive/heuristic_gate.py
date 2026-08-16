@@ -37,8 +37,8 @@ from kokoro_link.domain.value_objects.proactive_trigger import ProactiveTrigger
 
 _MIN_IDLE_MINUTES = 10.0
 _QUIET_CATEGORY_TOKENS: frozenset[str] = frozenset({
-    "sleep", "asleep", "rest", "resting", "nap", "napping",
-    "睡", "睡眠", "休息", "安眠", "就寢",
+    "sleep", "asleep", "nap", "napping",
+    "睡眠", "安眠", "就寢",
 })
 _LOW_ENERGY_THRESHOLD = 15
 _QUIET_HOUR_START = 0   # inclusive — 00:00 local

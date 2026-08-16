@@ -28,3 +28,9 @@ export interface ProactiveEvaluateResponse {
   attempt: ProactiveAttempt | null
   message?: string | null
 }
+
+export interface CurrentIntentReconcileResponse {
+  action: string
+  status: string
+  queued: boolean
+}

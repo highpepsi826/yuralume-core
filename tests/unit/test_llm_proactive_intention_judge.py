@@ -182,9 +182,40 @@ async def test_parses_negative_intention_json_and_prompt_has_self_questions() ->
     assert decision.best_timing == "evening"
     prompt = model.captured_prompt or ""
     assert "素材不是動機" in prompt
-    assert "我希望對方怎麼回" in prompt
+    assert "低壓表達" in prompt
     assert "今日剩餘額度：2" in prompt
     assert "昨天對方說今天要去面試" in prompt
+
+
+@pytest.mark.asyncio
+async def test_prompt_surfaces_due_internal_intent_candidate_as_non_binding_fact() -> None:
+    from dataclasses import replace
+    from datetime import timedelta
+
+    model = _StubModel(
+        '{"should_consume_slot": false, "inner_motive": "", '
+        '"conversation_purpose": "", "expected_reply": "", '
+        '"risk": "", "best_timing": "later", "reason": ""}',
+    )
+    judge = LLMProactiveIntentionJudge(model=model)
+    context = _context()
+    state = replace(
+        context.character.state,
+        current_intent="下班後想找桃桃說說今天的事。",
+        current_intent_updated_at=context.now - timedelta(hours=1),
+        current_intent_candidate_at=context.now - timedelta(minutes=1),
+        current_intent_candidate_key="a" * 64,
+        current_intent_status="needs_review",
+    )
+
+    await judge.judge(replace(context, character=replace(context.character, state=state)))
+
+    prompt = model.captured_prompt or ""
+    assert "角色私下的短期念頭" in prompt
+    assert "下班後想找桃桃說說今天的事" in prompt
+    assert "內部檢查時間已到" in prompt
+    assert "可以選擇不發" in prompt
+    assert "a" * 64 not in prompt
 
 
 @pytest.mark.asyncio
@@ -306,12 +337,13 @@ async def test_prompt_surfaces_deferred_intents_block_when_present() -> None:
     prompt = model.captured_prompt or ""
 
     # The block header lands so the LLM knows this is a remembered urge.
-    assert "先前你曾想過、但被自己壓下來的念頭" in prompt
+    assert "先前你曾想過、但被自己暫緩的念頭" in prompt
     # The motive itself is quoted, not paraphrased.
     assert "想分享今天讀完的小說的後勁" in prompt
     # Supporting fields show up so the LLM can re-judge timing.
     assert "延續上週的閱讀話題" in prompt
-    assert "剛聊完工作不適合立刻切" in prompt
+    assert "當時選的時機：evening" in prompt
+    assert "剛聊完工作不適合立刻切" not in prompt
     # Elapsed marker is present so the LLM can sense the half-life
     # without inferring from raw timestamps.
     assert "已等候" in prompt
@@ -389,13 +421,13 @@ async def test_prompt_shows_whether_a_parked_alarm_has_arrived() -> None:
 
     await judge.judge(replace(ctx, deferred_intents=(parked,)))
     prompt = model.captured_prompt or ""
-    assert "當時記下的明確時點" in prompt
-    assert "已經到了" in prompt
+    assert "已到原先記下的時點" in prompt
+    assert "現在必須重新判斷" in prompt
 
     future = replace(parked, revisit_at=ctx.now + timedelta(minutes=30))
     await judge.judge(replace(ctx, deferred_intents=(future,)))
     prompt_future = model.captured_prompt or ""
-    assert "還沒到" in prompt_future
+    assert "原先記下的時點" in prompt_future
 
 
 @pytest.mark.asyncio
@@ -423,7 +455,7 @@ async def test_prompt_omits_the_alarm_line_for_a_motive_without_one() -> None:
 
     await judge.judge(replace(ctx, deferred_intents=(parked,)))
 
-    assert "當時記下的明確時點" not in (model.captured_prompt or "")
+    assert "原先記下的時點" not in (model.captured_prompt or "")
 
 
 @pytest.mark.asyncio
@@ -446,7 +478,7 @@ async def test_prompt_surfaces_pace_preference_when_set() -> None:
     await judge.judge(ctx_quiet)
     prompt_quiet = model.captured_prompt or ""
     assert "對方對這個角色的期望節奏" in prompt_quiet
-    assert "安靜一點" in prompt_quiet
+    assert "對話留白" in prompt_quiet
 
 
 @pytest.mark.asyncio
@@ -489,13 +521,13 @@ async def test_prompt_surfaces_unanswered_streak_block_when_high() -> None:
     judge = LLMProactiveIntentionJudge(model=model)
     await judge.judge(_context(unanswered_streak=4))
     prompt = model.captured_prompt or ""
-    assert "連續主動傳了 4 則" in prompt
-    # Self-question 4 was rewritten to separate 跳針 from real evolution.
-    assert "跳針" in prompt
+    assert "主動傳了 4 則訊息" in prompt
+    # Self-question 4 distinguishes literal repetition from a real evolution.
+    assert "隨時間有了新的變化" in prompt
 
 
 @pytest.mark.asyncio
-async def test_prompt_omits_streak_block_when_not_a_run() -> None:
+async def test_prompt_surfaces_single_unanswered_message() -> None:
     model = _StubModel(
         '{"should_consume_slot": false, "inner_motive": "", '
         '"conversation_purpose": "", "expected_reply": "", '
@@ -504,7 +536,7 @@ async def test_prompt_omits_streak_block_when_not_a_run() -> None:
     judge = LLMProactiveIntentionJudge(model=model)
     await judge.judge(_context(unanswered_streak=1))
     prompt = model.captured_prompt or ""
-    assert "連續未獲回應" not in prompt
+    assert "尚未獲回應" in prompt
 
 
 @pytest.mark.asyncio

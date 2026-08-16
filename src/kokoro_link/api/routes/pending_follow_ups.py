@@ -20,7 +20,11 @@ from kokoro_link.api.dependencies import (
     require_admin,
 )
 from kokoro_link.bootstrap.container import ServiceContainer
-from kokoro_link.domain.entities.pending_follow_up import PendingFollowUp
+from kokoro_link.domain.entities.pending_follow_up import (
+    PendingFollowUp,
+    ScheduledPromiseDuplicateGroup,
+    group_open_scheduled_promise_duplicates,
+)
 
 router = APIRouter(tags=["pending-follow-ups"])
 
@@ -67,6 +71,47 @@ class PendingFollowUpResponse(BaseModel):
         )
 
 
+class ScheduledPromiseDuplicateRowResponse(BaseModel):
+    id: str
+    conversation_id: str
+    status: str
+    queued_at: datetime
+
+
+class ScheduledPromiseDuplicateGroupResponse(BaseModel):
+    """Read-only report item; no queued message body is returned."""
+
+    fingerprint: str
+    character_id: str
+    promise_intent: str
+    scheduled_for: datetime
+    canonical_id: str
+    duplicate_ids: list[str]
+    rows: list[ScheduledPromiseDuplicateRowResponse]
+
+    @classmethod
+    def from_domain(
+        cls, group: ScheduledPromiseDuplicateGroup,
+    ) -> "ScheduledPromiseDuplicateGroupResponse":
+        return cls(
+            fingerprint=group.dedupe_key,
+            character_id=group.character_id,
+            promise_intent=group.promise_intent,
+            scheduled_for=group.scheduled_for,
+            canonical_id=group.canonical.id,
+            duplicate_ids=[row.id for row in group.rows[1:]],
+            rows=[
+                ScheduledPromiseDuplicateRowResponse(
+                    id=row.id,
+                    conversation_id=row.conversation_id,
+                    status=row.status.value,
+                    queued_at=row.queued_at,
+                )
+                for row in group.rows
+            ],
+        )
+
+
 @router.get(
     "/admin/pending-follow-ups",
     response_model=list[PendingFollowUpResponse],
@@ -89,6 +134,32 @@ async def list_due_pending_follow_ups(
         )
     rows = await repo.list_due(now=datetime.now(tz=__import__("datetime").timezone.utc))
     return [PendingFollowUpResponse.from_domain(r) for r in rows]
+
+
+@router.get(
+    "/admin/pending-follow-ups/scheduled-promise-duplicates",
+    response_model=list[ScheduledPromiseDuplicateGroupResponse],
+)
+async def report_open_scheduled_promise_duplicates(
+    container: ServiceContainer = Depends(get_container),
+    _admin: object = Depends(require_admin),
+) -> list[ScheduledPromiseDuplicateGroupResponse]:
+    """Report existing open duplicate promises without touching any row.
+
+    New rows are protected by the partial unique index. This endpoint exists
+    solely for a human review of older blank-key rows before any separately
+    approved cleanup is attempted.
+    """
+    repo = container.pending_follow_up_repository
+    if repo is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="pending-follow-up repository not wired",
+        )
+    groups = group_open_scheduled_promise_duplicates(
+        await repo.list_open_scheduled_promises(),
+    )
+    return [ScheduledPromiseDuplicateGroupResponse.from_domain(group) for group in groups]
 
 
 @router.get(

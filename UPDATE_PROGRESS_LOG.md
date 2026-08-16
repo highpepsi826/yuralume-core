@@ -20,6 +20,28 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-17 - Proactive messaging and current-intent lifecycle redesign
+
+- Status: completed in source; deployment pending explicit approval
+- Type: local customization
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: verified on `local/customizations`; commit is local-only and
+  will not be pushed automatically
+- Backup: not required yet; a verified PostgreSQL dump is required before the
+  additive migrations are deployed
+- Deployment: not performed. The source adds the proactive-message policy
+  changes, lifecycle reconciliation and manual intent check, plus scheduled
+  promise deduplication and a read-only legacy duplicate report.
+- Verification: Alembic reports one head (`m5d2r8q10041`); 191 focused backend
+  tests passed for the new behavior; 1,148 frontend tests, i18n checks, and a
+  production build passed. The full backend run completed with 8,729 passes;
+  its unrelated failures were caused by missing monorepo manifest files,
+  inherited storage/deployment test settings, and one existing time-sensitive
+  dispatcher case.
+- Follow-up: after approval, create and verify a database backup, build the
+  local `app` image, run migrations through the existing Compose stack, then
+  check health and observe proactive-attempt reasons and latency for one day.
+
 ### 2026-08-16 - Native ElevenLabs Video provider
 
 - Status: completed

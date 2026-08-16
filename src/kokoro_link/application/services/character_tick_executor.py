@@ -139,6 +139,7 @@ class CharacterTickExecutor:
         schedule_service=None,
         schedule_memorializer=None,
         schedule_weather_drift=None,
+        current_intent_reconciler=None,  # noqa: ANN001 - optional background service
         goal_review_service=None,
         story_scene_timeout_closer=None,
         feed_composer=None,
@@ -151,6 +152,7 @@ class CharacterTickExecutor:
         self._schedule_service = schedule_service
         self._schedule_memorializer = schedule_memorializer
         self._schedule_weather_drift = schedule_weather_drift
+        self._current_intent_reconciler = current_intent_reconciler
         self._goal_review_service = goal_review_service
         self._story_scene_timeout_closer = story_scene_timeout_closer
         self._feed_composer = feed_composer
@@ -237,6 +239,18 @@ class CharacterTickExecutor:
                 character, now=now, abort_check=abort_check,
             ),
         )
+        # (d1) Current intent lifecycle check. It sits immediately after the
+        # schedule is available, so it can safely clear an obviously obsolete
+        # sleep/wake intent or queue a bounded background review before the
+        # later proactive dispatch reads that state. The service itself skips
+        # fresh/recently-checked characters.
+        if _aborted():
+            return
+        if self._current_intent_reconciler is not None:
+            await timer(
+                "current_intent_reconcile",
+                self._run_current_intent_reconcile(character, now=now),
+            )
         # (e) Schedule memorialization.
         if _aborted():
             return
@@ -398,6 +412,21 @@ class CharacterTickExecutor:
         except Exception:
             _LOGGER.exception(
                 "proactive scheduler: schedule memorializer crashed character=%s",
+                character.id,
+            )
+
+    async def _run_current_intent_reconcile(
+        self, character: Character, *, now: datetime,
+    ) -> None:
+        if self._current_intent_reconciler is None:
+            return
+        try:
+            await self._current_intent_reconciler.reconcile_character(
+                character, now=now,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "proactive scheduler: current intent reconcile crashed character=%s",
                 character.id,
             )
 
@@ -686,6 +715,10 @@ class CharacterTickExecutor:
         ``proactive_enabled`` is re-checked (the chain may outlive a toggle); the
         allows_proactive multiplier was already spent scaling the cadence, so it is
         not re-applied. Returns whether a dispatch was attempted."""
+        # Per-kind hosted execution does not necessarily run the full tick in
+        # the same job. Reuse the same throttled check here before reading the
+        # intent for a proactive judgement.
+        await self._run_current_intent_reconcile(character, now=now)
         if not character.proactive_enabled:
             return False
         if not allow_dispatch:

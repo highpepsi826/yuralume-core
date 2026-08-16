@@ -388,6 +388,13 @@ class CharacterStatePayload(BaseModel):
     energy: int = Field(default=100, ge=0, le=100)
     last_active_at: datetime | None = None
     current_intent: str | None = None
+    current_intent_updated_at: datetime | None = None
+    current_intent_checked_at: datetime | None = None
+    current_intent_reviewed_at: datetime | None = None
+    current_intent_status: str = "unknown"
+    current_intent_source: str = ""
+    current_intent_candidate_at: datetime | None = None
+    current_intent_candidate_key: str = ""
 
 
 class InitialRelationshipSafeUserProfilePayload(BaseModel):
@@ -937,6 +944,13 @@ def payload_to_state(payload: CharacterStatePayload) -> CharacterState:
         energy=payload.energy,
         last_active_at=payload.last_active_at,
         current_intent=payload.current_intent,
+        current_intent_updated_at=payload.current_intent_updated_at,
+        current_intent_checked_at=payload.current_intent_checked_at,
+        current_intent_reviewed_at=payload.current_intent_reviewed_at,
+        current_intent_status=payload.current_intent_status,
+        current_intent_source=payload.current_intent_source,
+        current_intent_candidate_at=payload.current_intent_candidate_at,
+        current_intent_candidate_key=payload.current_intent_candidate_key,
     )
 
 
@@ -949,4 +963,11 @@ def state_to_payload(state: CharacterState) -> CharacterStatePayload:
         energy=state.energy,
         last_active_at=state.last_active_at,
         current_intent=state.current_intent,
+        current_intent_updated_at=state.current_intent_updated_at,
+        current_intent_checked_at=state.current_intent_checked_at,
+        current_intent_reviewed_at=state.current_intent_reviewed_at,
+        current_intent_status=state.current_intent_status,
+        current_intent_source=state.current_intent_source,
+        current_intent_candidate_at=state.current_intent_candidate_at,
+        current_intent_candidate_key=state.current_intent_candidate_key,
     )

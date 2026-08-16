@@ -68,6 +68,7 @@ class PendingFollowUpBackupRecord(BackupRecord):
     last_error: str | None = None
     kind: str = "busy_defer"
     promise_intent: str = ""
+    dedupe_key: str = ""
 
 
 class DeferredIntentBackupRecord(BackupRecord):

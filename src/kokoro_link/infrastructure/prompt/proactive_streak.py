@@ -22,29 +22,65 @@ model's call from persona + disposition + current state.
 
 from __future__ import annotations
 
-# 1 unanswered push is already conveyed by the per-message
-# "（對方還沒回）" reply tag, so we only add the dedicated streak block
-# once it becomes a *run* worth reacting to as its own fact.
-_STREAK_SURFACE_THRESHOLD = 2
+from datetime import datetime
 
 
-def render_unanswered_streak_lines(streak: int) -> list[str]:
-    """Lines describing a run of ignored proactive pushes, or ``[]``.
+def render_unanswered_streak_lines(
+    streak: int,
+    *,
+    latest_sent_at: datetime | None = None,
+    now: datetime | None = None,
+) -> list[str]:
+    """Render the unanswered-message fact layer for one or more pushes.
 
-    Returns an empty list below the threshold so the prompt stays clean
-    in the steady state. Callers concatenate with ``"\\n".join(...)``.
+    A single unanswered push is useful context too: it tells the model that
+    temporary silence is normal, while elapsed time distinguishes initial
+    restraint from a later, genuine relational change. It never instructs the
+    model to send a message.
     """
-    if streak < _STREAK_SURFACE_THRESHOLD:
+    if streak <= 0:
         return []
-    return [
-        f"連續未獲回應（事實）：自對方上次發話以來，你已經連續主動傳了 "
-        f"{streak} 則訊息，都還沒有得到任何回應。",
-        "這不是要你再追問同一件事。重點是——「被晾著 / 已讀不回」這件事，"
-        "在你心裡會不會留下什麼？你的態度與情緒會不會慢慢起變化（更在意、"
-        "有點受傷、賭氣、識相地退一步給對方空間、或換一種完全不同的方式靠近）？"
-        "方向與強度完全由你的性格、你們的關係與你當下的心情決定，"
-        "就像真人面對一直沒回的訊息那樣自然演進。",
-        "唯一的硬規則：不要用同樣的語氣、同樣的題材、同樣的問題再重來一次——"
-        "若你選擇再開口，必須反映出這份『已經連續被冷落 N 次』之後的新心境，"
-        "而不是把昨天的話換句話重講。",
-    ]
+    elapsed = _format_elapsed(latest_sent_at=latest_sent_at, now=now)
+    count = "一則" if streak == 1 else f"{streak} 則"
+    first = (
+        "尚未獲回應（事實）：自對方上次發話以來，你已經主動傳了 "
+        f"{count}訊息，仍沒有新的回覆。"
+    )
+    if elapsed:
+        first += f" 最近一則是在{elapsed}送出的。"
+    lines = [first]
+    if latest_sent_at is not None and now is not None:
+        age_seconds = max(0.0, (now - latest_sent_at).total_seconds())
+        if age_seconds >= 2 * 60 * 60:
+            lines.append(
+                "這段沉默已經過了一段時間；依角色性格，關心、想修復關係、"
+                "受傷或給空間，都可能形成真正新的心境。這是可以重新衡量的動機，"
+                "不是必須再發一則訊息。"
+            )
+        else:
+            lines.append(
+                "暫時沒有回覆是正常資訊，不等於被拒絕，也不等於只能沉默。"
+                "先看這次是否有獨立而自然的動機。"
+            )
+    else:
+        lines.append(
+            "暫時沒有回覆是正常資訊，不等於被拒絕，也不等於只能沉默。"
+        )
+    lines.append(
+        "唯一的硬規則：不要用同樣的語氣、同樣的題材、同樣的問題再重來一次。"
+        "若你選擇再開口，必須是真正不同的方向、角度或隨時間演變的新心境；"
+        "系統沒有讀取狀態，不可聲稱對方已讀。"
+    )
+    return lines
+
+
+def _format_elapsed(*, latest_sent_at: datetime | None, now: datetime | None) -> str:
+    if latest_sent_at is None or now is None:
+        return ""
+    seconds = max(0.0, (now - latest_sent_at).total_seconds())
+    if seconds < 60 * 60:
+        return f"約 {max(1, round(seconds / 60))} 分鐘前"
+    hours = seconds / (60 * 60)
+    if hours < 24:
+        return f"約 {hours:.1f} 小時前"
+    return f"約 {hours / 24:.1f} 天前"

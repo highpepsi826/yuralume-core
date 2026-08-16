@@ -117,6 +117,27 @@ class CharacterRow(Base):
     state_energy: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     state_last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     state_current_intent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    state_current_intent_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    state_current_intent_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    state_current_intent_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    state_current_intent_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unknown", server_default="unknown",
+    )
+    state_current_intent_source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="", server_default="",
+    )
+    state_current_intent_candidate_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    state_current_intent_candidate_key: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default="",
+    )
 
     # Site-level cost-control freeze (CHARACTER_FREEZE_PLAN). ``frozen``
     # halts ALL background scheduler activity for this character while
@@ -1770,6 +1791,23 @@ class PendingFollowUpRow(Base):
     """
 
     __tablename__ = "pending_follow_ups"
+    __table_args__ = (
+        Index(
+            "uq_pending_follow_ups_open_scheduled_promise_dedupe",
+            "dedupe_key",
+            unique=True,
+            postgresql_where=text(
+                "kind = 'scheduled_promise' "
+                "AND status IN ('queued', 'resolving') "
+                "AND dedupe_key <> ''",
+            ),
+            sqlite_where=text(
+                "kind = 'scheduled_promise' "
+                "AND status IN ('queued', 'resolving') "
+                "AND dedupe_key <> ''",
+            ),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     character_id: Mapped[str] = mapped_column(
@@ -1820,6 +1858,11 @@ class PendingFollowUpRow(Base):
     )
     """Natural-language description of what the character promised to do
     at ``scheduled_for``. Empty string for ``kind=busy_defer`` rows."""
+    dedupe_key: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default="",
+    )
+    """Stable promise identity for partial-unique open-row deduplication.
+    Blank legacy and busy-defer values intentionally bypass the index."""
 
 
 class OperatorProfileFieldRow(Base):

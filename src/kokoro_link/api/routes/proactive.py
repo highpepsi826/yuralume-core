@@ -53,6 +53,14 @@ class ProactiveEvaluateResponse(BaseModel):
     message: str | None = None
 
 
+class CurrentIntentReconcileResponse(BaseModel):
+    """Immediate result of a bounded current-intent maintenance pass."""
+
+    action: str
+    status: str
+    queued: bool = False
+
+
 @router.get(
     "/characters/{character_id}/proactive/attempts",
     response_model=list[ProactiveAttemptResponse],
@@ -101,4 +109,38 @@ async def evaluate_now(
     )
     return ProactiveEvaluateResponse(
         ok=True, attempt=ProactiveAttemptResponse.from_domain(attempt),
+    )
+
+
+@router.post(
+    "/characters/{character_id}/current-intent/reconcile",
+    response_model=CurrentIntentReconcileResponse,
+)
+async def reconcile_current_intent_now(
+    character_id: str,
+    container: ServiceContainer = Depends(get_container),
+    _owned_character_id: str = Depends(ensure_owned_character_id),
+) -> CurrentIntentReconcileResponse:
+    """Start an owner-requested current-intent check without sending a push.
+
+    The deterministic schedule/state pass completes before this response.  A
+    stale or ambiguous intent can then join one bounded LLM review task; that
+    task is deliberately detached from the normal chat response path.
+    """
+    reconciler = container.current_intent_reconciler
+    if reconciler is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Current intent reconciliation is not wired",
+        )
+    result = await reconciler.reconcile(character_id, manual=True)
+    if result.action == "not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Character not found",
+        )
+    return CurrentIntentReconcileResponse(
+        action=result.action,
+        status=result.status,
+        queued=result.queued,
     )

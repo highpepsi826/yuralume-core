@@ -40,4 +40,11 @@ def project_state_from_emotion_events(
         energy=snapshot.energy,
         last_active_at=state.last_active_at,
         current_intent=state.current_intent,
+        current_intent_updated_at=state.current_intent_updated_at,
+        current_intent_checked_at=state.current_intent_checked_at,
+        current_intent_reviewed_at=state.current_intent_reviewed_at,
+        current_intent_status=state.current_intent_status,
+        current_intent_source=state.current_intent_source,
+        current_intent_candidate_at=state.current_intent_candidate_at,
+        current_intent_candidate_key=state.current_intent_candidate_key,
     )

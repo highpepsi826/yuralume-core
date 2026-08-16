@@ -39,12 +39,35 @@ def state_to_dict(state: CharacterState) -> dict[str, Any]:
             state.last_active_at.isoformat() if state.last_active_at else None
         ),
         "current_intent": state.current_intent,
+        "current_intent_updated_at": (
+            state.current_intent_updated_at.isoformat()
+            if state.current_intent_updated_at else None
+        ),
+        "current_intent_checked_at": (
+            state.current_intent_checked_at.isoformat()
+            if state.current_intent_checked_at else None
+        ),
+        "current_intent_reviewed_at": (
+            state.current_intent_reviewed_at.isoformat()
+            if state.current_intent_reviewed_at else None
+        ),
+        "current_intent_status": state.current_intent_status,
+        "current_intent_source": state.current_intent_source,
+        "current_intent_candidate_at": (
+            state.current_intent_candidate_at.isoformat()
+            if state.current_intent_candidate_at else None
+        ),
+        "current_intent_candidate_key": state.current_intent_candidate_key,
     }
 
 
 def state_from_dict(payload: dict[str, Any]) -> CharacterState:
     raw_last = payload.get("last_active_at")
     last = datetime.fromisoformat(raw_last) if raw_last else None
+    raw_intent_updated = payload.get("current_intent_updated_at")
+    raw_intent_checked = payload.get("current_intent_checked_at")
+    raw_intent_reviewed = payload.get("current_intent_reviewed_at")
+    raw_intent_candidate_at = payload.get("current_intent_candidate_at")
     return CharacterState(
         emotion=str(payload.get("emotion", "neutral")),
         affection=int(payload.get("affection", 50)),
@@ -53,6 +76,27 @@ def state_from_dict(payload: dict[str, Any]) -> CharacterState:
         energy=int(payload.get("energy", 70)),
         last_active_at=last,
         current_intent=payload.get("current_intent"),
+        current_intent_updated_at=(
+            datetime.fromisoformat(raw_intent_updated)
+            if raw_intent_updated else None
+        ),
+        current_intent_checked_at=(
+            datetime.fromisoformat(raw_intent_checked)
+            if raw_intent_checked else None
+        ),
+        current_intent_reviewed_at=(
+            datetime.fromisoformat(raw_intent_reviewed)
+            if raw_intent_reviewed else None
+        ),
+        current_intent_status=str(payload.get("current_intent_status") or "unknown"),
+        current_intent_source=str(payload.get("current_intent_source") or ""),
+        current_intent_candidate_at=(
+            datetime.fromisoformat(raw_intent_candidate_at)
+            if raw_intent_candidate_at else None
+        ),
+        current_intent_candidate_key=str(
+            payload.get("current_intent_candidate_key") or "",
+        ),
     )
 
 

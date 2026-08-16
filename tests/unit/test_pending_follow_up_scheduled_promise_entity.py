@@ -10,6 +10,7 @@ from kokoro_link.domain.entities.pending_follow_up import (
     PendingFollowUp,
     PendingFollowUpKind,
     PendingFollowUpStatus,
+    group_open_scheduled_promise_duplicates,
 )
 from kokoro_link.domain.entities.conversation import MessageContentMode
 
@@ -29,6 +30,7 @@ def test_new_promise_creates_scheduled_kind() -> None:
     assert row.kind == PendingFollowUpKind.SCHEDULED_PROMISE
     assert row.is_scheduled_promise is True
     assert row.promise_intent == "叫使用者起床"
+    assert len(row.dedupe_key) == 64
     assert row.status == PendingFollowUpStatus.QUEUED
     # source text becomes the entity's first (and only) message
     assert row.messages[0].content == "明天 10 點叫我起床"
@@ -70,6 +72,30 @@ def test_new_promise_synthesises_message_when_source_blank() -> None:
     assert row.messages[0].content == "提醒喝水"
 
 
+def test_promise_dedupe_key_normalizes_case_and_scheduled_minute() -> None:
+    first = PendingFollowUp.new_promise(
+        character_id="c1",
+        conversation_id="conv1",
+        promise_intent="Send   a photo",
+        scheduled_for=datetime(2026, 5, 18, 10, 0, 1, tzinfo=UTC),
+    )
+    retry = PendingFollowUp.new_promise(
+        character_id="c1",
+        conversation_id="conv-other",
+        promise_intent="send a photo",
+        scheduled_for=datetime(2026, 5, 18, 10, 0, 59, tzinfo=UTC),
+    )
+    changed_time = PendingFollowUp.new_promise(
+        character_id="c1",
+        conversation_id="conv1",
+        promise_intent="send a photo",
+        scheduled_for=datetime(2026, 5, 18, 10, 1, tzinfo=UTC),
+    )
+
+    assert retry.dedupe_key == first.dedupe_key
+    assert changed_time.dedupe_key != first.dedupe_key
+
+
 def test_legacy_busy_defer_default_unchanged() -> None:
     """The legacy busy-defer constructor must still produce kind=BUSY_DEFER."""
     from kokoro_link.domain.entities.pending_follow_up import (
@@ -87,3 +113,32 @@ def test_legacy_busy_defer_default_unchanged() -> None:
     assert row.kind == PendingFollowUpKind.BUSY_DEFER
     assert row.is_scheduled_promise is False
     assert row.promise_intent == ""
+    assert row.dedupe_key == ""
+
+
+def test_duplicate_report_groups_legacy_open_promises_without_mutating_them() -> None:
+    from dataclasses import replace
+
+    first = PendingFollowUp.new_promise(
+        character_id="c1",
+        conversation_id="conv-a",
+        promise_intent="提醒喝水",
+        scheduled_for=datetime(2026, 5, 18, 14, 0, tzinfo=UTC),
+        now=datetime(2026, 5, 18, 10, 0, tzinfo=UTC),
+    )
+    second = PendingFollowUp.new_promise(
+        character_id="c1",
+        conversation_id="conv-b",
+        promise_intent="提醒喝水",
+        scheduled_for=datetime(2026, 5, 18, 14, 0, tzinfo=UTC),
+        now=datetime(2026, 5, 18, 10, 5, tzinfo=UTC),
+    )
+    # Blank keys model old rows imported before the unique-index migration.
+    legacy_rows = (replace(first, dedupe_key=""), replace(second, dedupe_key=""))
+
+    groups = group_open_scheduled_promise_duplicates(legacy_rows)
+
+    assert len(groups) == 1
+    assert groups[0].canonical.id == first.id
+    assert [row.id for row in groups[0].rows] == [first.id, second.id]
+    assert all(row.dedupe_key == "" for row in legacy_rows)

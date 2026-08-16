@@ -7,6 +7,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from kokoro_link.api.routes.proactive import router as proactive_router
+from kokoro_link.application.services.current_intent_reconciler import (
+    CurrentIntentReconciler,
+)
 from kokoro_link.application.services.proactive_dispatcher import ProactiveDispatcher
 from kokoro_link.contracts.proactive import ProactiveDecision
 from kokoro_link.domain.entities.channel_binding import ChannelBinding
@@ -19,6 +22,9 @@ from kokoro_link.infrastructure.proactive.heuristic_gate import HeuristicProacti
 from kokoro_link.infrastructure.proactive.null_decider import NullProactiveDecider
 from kokoro_link.infrastructure.repositories.in_memory_proactive_attempts import (
     InMemoryProactiveAttemptRepository,
+)
+from kokoro_link.infrastructure.repositories.in_memory_schedules import (
+    InMemoryScheduleRepository,
 )
 from tests.unit._messaging_harness import (
     build_messaging_harness,
@@ -153,3 +159,35 @@ async def test_evaluate_missing_character_returns_404() -> None:
 
     response = client.post("/api/v1/characters/ghost/proactive/evaluate")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_manual_current_intent_reconcile_returns_immediate_result() -> None:
+    harness, container = await _build_wired_container()
+    dto = await create_character(harness)
+    character = await harness.character_repository.get(dto.id)
+    assert character is not None
+    now = datetime.now(tz=timezone.utc)
+    await harness.character_repository.save(character.with_state(
+        character.state.with_current_intent(
+            "有件事想理清。",
+            updated_at=now - timedelta(hours=13),
+            source="post_turn",
+        ),
+    ))
+    container.current_intent_reconciler = CurrentIntentReconciler(
+        character_repository=harness.character_repository,
+        schedule_repository=InMemoryScheduleRepository(),
+    )
+    client = _client(container)
+
+    response = client.post(
+        f"/api/v1/characters/{dto.id}/current-intent/reconcile",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "action": "needs_review",
+        "status": "needs_review",
+        "queued": False,
+    }

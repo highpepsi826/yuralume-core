@@ -27,8 +27,12 @@ from kokoro_link.domain.entities.pending_follow_up import PendingFollowUp
 
 
 class PendingFollowUpRepositoryPort(Protocol):
-    async def add(self, follow_up: PendingFollowUp) -> None:
-        """Persist a new row."""
+    async def add(self, follow_up: PendingFollowUp) -> PendingFollowUp:
+        """Persist a new row and return its canonical stored record.
+
+        Scheduled promises are idempotent: a retry for an existing open promise
+        returns that existing row rather than creating another release target.
+        """
 
     async def save(self, follow_up: PendingFollowUp) -> None:
         """Upsert. Used when status / messages mutate."""
@@ -91,6 +95,14 @@ class PendingFollowUpRepositoryPort(Protocol):
     ) -> list[PendingFollowUp]:
         """All open rows belonging to ``character_id``. Used by tests
         and by the cascading delete flow."""
+
+    async def list_open_scheduled_promises(self) -> list[PendingFollowUp]:
+        """Return all open scheduled-promise rows for read-only auditing.
+
+        This is deliberately a narrow administrative lookup used to report
+        legacy duplicates before any human-approved cleanup. It must not
+        mutate rows or enqueue releases.
+        """
 
     async def delete_for_conversation(self, conversation_id: str) -> int:
         """Cascade-delete every row tied to a conversation."""

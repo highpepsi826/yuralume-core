@@ -39,6 +39,10 @@ def _ensure_utc(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=timezone.utc)
 
 
+def _matches_expected(column, expected):  # noqa: ANN001, ANN202
+    return column.is_(None) if expected is None else column == expected
+
+
 class SACharacterRepository(CharacterRepositoryPort):
     def __init__(self, session_factory: sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -159,6 +163,62 @@ class SACharacterRepository(CharacterRepositoryPort):
                     ),
                 )
                 .values(last_consolidated_at=now)
+            )
+            await session.commit()
+            return bool(result.rowcount)
+
+    async def update_current_intent_if_unchanged(
+        self,
+        character_id: str,
+        *,
+        expected_intent: str | None,
+        expected_updated_at: datetime | None,
+        expected_reviewed_at: datetime | None,
+        expected_candidate_at: datetime | None,
+        expected_candidate_key: str,
+        current_intent: str | None,
+        updated_at: datetime | None,
+        checked_at: datetime,
+        reviewed_at: datetime | None,
+        status: str,
+        source: str,
+        candidate_at: datetime | None,
+        candidate_key: str,
+    ) -> bool:
+        """Atomically update intent lifecycle data without clobbering a new turn."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                update(CharacterRow)
+                .where(CharacterRow.id == character_id)
+                .where(_matches_expected(
+                    CharacterRow.state_current_intent, expected_intent,
+                ))
+                .where(_matches_expected(
+                    CharacterRow.state_current_intent_updated_at,
+                    expected_updated_at,
+                ))
+                .where(_matches_expected(
+                    CharacterRow.state_current_intent_reviewed_at,
+                    expected_reviewed_at,
+                ))
+                .where(_matches_expected(
+                    CharacterRow.state_current_intent_candidate_at,
+                    expected_candidate_at,
+                ))
+                .where(
+                    CharacterRow.state_current_intent_candidate_key
+                    == (expected_candidate_key or "").strip(),
+                )
+                .values(
+                    state_current_intent=(current_intent or "").strip() or None,
+                    state_current_intent_updated_at=updated_at,
+                    state_current_intent_checked_at=checked_at,
+                    state_current_intent_reviewed_at=reviewed_at,
+                    state_current_intent_status=(status or "unknown").strip(),
+                    state_current_intent_source=(source or "").strip(),
+                    state_current_intent_candidate_at=candidate_at,
+                    state_current_intent_candidate_key=(candidate_key or "").strip(),
+                )
             )
             await session.commit()
             return bool(result.rowcount)
@@ -553,6 +613,27 @@ def _row_to_domain(row: CharacterRow) -> Character:
             energy=row.state_energy,
             last_active_at=_ensure_utc(row.state_last_active_at),
             current_intent=row.state_current_intent,
+            current_intent_updated_at=_ensure_utc(
+                getattr(row, "state_current_intent_updated_at", None),
+            ),
+            current_intent_checked_at=_ensure_utc(
+                getattr(row, "state_current_intent_checked_at", None),
+            ),
+            current_intent_reviewed_at=_ensure_utc(
+                getattr(row, "state_current_intent_reviewed_at", None),
+            ),
+            current_intent_status=(
+                getattr(row, "state_current_intent_status", None) or "unknown"
+            ),
+            current_intent_source=(
+                getattr(row, "state_current_intent_source", None) or ""
+            ),
+            current_intent_candidate_at=_ensure_utc(
+                getattr(row, "state_current_intent_candidate_at", None),
+            ),
+            current_intent_candidate_key=(
+                getattr(row, "state_current_intent_candidate_key", None) or ""
+            ),
         ),
         proactive_enabled=row.proactive_enabled,
         proactive_daily_limit=row.proactive_daily_limit,
@@ -640,6 +721,13 @@ def _domain_to_row(
     row.state_energy = character.state.energy
     row.state_last_active_at = character.state.last_active_at
     row.state_current_intent = character.state.current_intent
+    row.state_current_intent_updated_at = character.state.current_intent_updated_at
+    row.state_current_intent_checked_at = character.state.current_intent_checked_at
+    row.state_current_intent_reviewed_at = character.state.current_intent_reviewed_at
+    row.state_current_intent_status = character.state.current_intent_status
+    row.state_current_intent_source = character.state.current_intent_source
+    row.state_current_intent_candidate_at = character.state.current_intent_candidate_at
+    row.state_current_intent_candidate_key = character.state.current_intent_candidate_key
     row.proactive_enabled = character.proactive_enabled
     row.proactive_daily_limit = character.proactive_daily_limit
     row.proactive_cooldown_minutes = character.proactive_cooldown_minutes

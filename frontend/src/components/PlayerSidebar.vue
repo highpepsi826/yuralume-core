@@ -494,7 +494,11 @@ function sidebarTabLabel(tab: (typeof SIDEBAR_TABS)[number]): string {
           :title="t('playerSidebar.life.intentionsSectionTitle')"
           :default-open="false"
         >
-          <PlayerGoalsPanel :key="selectedCharacter.id" :character="selectedCharacter" />
+          <PlayerGoalsPanel
+            :key="selectedCharacter.id"
+            :character="selectedCharacter"
+            @character-updated="emit('characterUpdated', $event)"
+          />
           <PlayerFollowUpsCard
             :character-id="selectedCharacter.id"
             :show-admin-link="showAdminEntrances"

@@ -40,6 +40,9 @@ from kokoro_link.domain.value_objects.timezone import to_timezone
 from kokoro_link.infrastructure.prompt.character_identity import (
     render_character_identity_lines,
 )
+from kokoro_link.infrastructure.prompt.current_intent import (
+    render_current_intent_fact_lines,
+)
 from kokoro_link.infrastructure.prompt.operator_language import (
     render_operator_language_hint,
 )
@@ -234,9 +237,15 @@ def _build_prompt(context: ProactiveContext) -> str:
         f"- 精力：{state.energy}/100",
         f"- 信任：{state.trust}/100",
     ]
-    if state.current_intent:
-        state_lines.append(f"- 當下意圖：{state.current_intent}")
     sections.append("當前狀態：\n" + "\n".join(state_lines))
+
+    current_intent_lines = render_current_intent_fact_lines(
+        state,
+        now=context.now,
+        local_tz=context.local_tz,
+    )
+    if current_intent_lines:
+        sections.append("\n".join(current_intent_lines))
 
     time_lines = render_current_time_fact_lines(
         context.now, context.local_tz, heading=None,
@@ -333,7 +342,16 @@ def _build_prompt(context: ProactiveContext) -> str:
     # *evolve* (interest → worry → sulking → giving space) across days
     # of being ignored instead of re-deriving the same opener. Shared
     # with the intention judge so both paths react to the same number.
-    streak_lines = render_unanswered_streak_lines(context.unanswered_streak)
+    latest_sent_at = (
+        context.recent_sent_attempts[0].decided_at
+        if context.unanswered_streak and context.recent_sent_attempts
+        else None
+    )
+    streak_lines = render_unanswered_streak_lines(
+        context.unanswered_streak,
+        latest_sent_at=latest_sent_at,
+        now=context.now,
+    )
     if streak_lines:
         sections.append("\n".join(streak_lines))
 

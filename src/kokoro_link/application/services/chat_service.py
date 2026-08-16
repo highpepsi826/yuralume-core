@@ -3305,13 +3305,22 @@ class ChatService:
             return pending_state
         if drift.is_empty:
             return pending_state
+        intent_kwargs: dict = {}
+        if drift.current_intent is not None:
+            intent_kwargs["current_intent"] = drift.current_intent
         drifted = pending_state.adjust(
             emotion=drift.emotion,
             affection_delta=drift.affection_delta,
             fatigue_delta=drift.fatigue_delta,
             energy_delta=drift.energy_delta,
-            current_intent=drift.current_intent,
+            **intent_kwargs,
         )
+        if drift.current_intent is not None:
+            drifted = drifted.with_current_intent(
+                drift.current_intent,
+                updated_at=self._resolve_now(),
+                source="idle_drift",
+            )
         try:
             await self._track(
                 character.id, SOURCE_LLM_REFINEMENT,
@@ -6844,16 +6853,18 @@ class ChatService:
                 now=now,
             )
             try:
-                await repo.add(row)
+                canonical_row = await repo.add(row)
                 _LOGGER.info(
-                    "scheduled-promise queued character=%s intent=%r "
+                    "scheduled-promise persisted character=%s intent=%r "
                     "scheduled_for=%s",
                     character_id, promise.intent[:60],
                     scheduled.isoformat(),
                 )
                 # Event-driven release (§5 priority 1): the promised instant is
                 # known now → enqueue its one-shot job (no-op on embedded).
-                await self._maybe_enqueue_follow_up_release(row, now=now)
+                await self._maybe_enqueue_follow_up_release(
+                    canonical_row, now=now,
+                )
             except Exception:
                 _LOGGER.exception(
                     "scheduled-promise persist failed character=%s",
@@ -6909,6 +6920,12 @@ class ChatService:
             energy_delta=suggestion.energy_delta,
             **intent_kwargs,
         )
+        if suggestion.current_intent is not None:
+            refined = refined.with_current_intent(
+                suggestion.current_intent,
+                updated_at=self._resolve_now(),
+                source="post_turn",
+            )
         await self._track(character_id, SOURCE_LLM_REFINEMENT, current.state, refined)
         await self._character_repository.save(current.with_state(refined))
 
@@ -6927,7 +6944,11 @@ class ChatService:
         current = await self._character_repository.get(character_id)
         if current is None:
             return
-        refined = current.state.adjust(current_intent=suggestion.current_intent)
+        refined = current.state.with_current_intent(
+            suggestion.current_intent,
+            updated_at=self._resolve_now(),
+            source="post_turn",
+        )
         await self._track(character_id, SOURCE_LLM_REFINEMENT, current.state, refined)
         await self._character_repository.save(current.with_state(refined))
 

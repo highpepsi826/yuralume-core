@@ -10,11 +10,14 @@
  * 從 PlayerSidebar 抽出來；同檔內維護 goals 載入、新增、狀態切換、刪除。
  * 跟 follow-ups 卡片分開放在 sidebar 的 goals tab 內。
  */
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
+import { ReloadOutlined } from '@ant-design/icons-vue'
 import { useI18n } from 'vue-i18n'
 import type { Character } from '@/types/character'
 import type { Goal, GoalStatus } from '@/types/goal'
+import { getCharacter } from '@/utils/api/characters'
 import { createGoal, deleteGoal, listGoals, updateGoal } from '@/utils/api/goals'
+import { reconcileCurrentIntentNow } from '@/utils/api/proactive'
 import { UiButton } from '@/components/ui'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 
@@ -22,7 +25,11 @@ const props = defineProps<{
   character: Character
 }>()
 
-const { t } = useI18n()
+const emit = defineEmits<{
+  characterUpdated: [character: Character]
+}>()
+
+const { t, locale } = useI18n()
 const confirmDialog = useConfirmDialog()
 
 const goals = ref<Goal[]>([])
@@ -30,12 +37,27 @@ const goalsLoading = ref(false)
 const newGoalContent = ref('')
 const newGoalPriority = ref(3)
 const goalActionBusy = ref<string | null>(null)
+const intentReconcileBusy = ref(false)
+const intentFeedback = ref<string | null>(null)
+let intentRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const STATUS_LABEL_KEY: Record<GoalStatus, string> = {
   active: 'playerGoals.status.active',
   paused: 'playerGoals.status.paused',
   done: 'playerGoals.status.done',
   abandoned: 'playerGoals.status.abandoned',
+}
+
+const INTENT_STATUS_LABEL_KEY: Record<string, string> = {
+  fresh: 'playerGoals.intent.status.fresh',
+  valid: 'playerGoals.intent.status.valid',
+  needs_review: 'playerGoals.intent.status.needsReview',
+  reviewing: 'playerGoals.intent.status.reviewing',
+  expired: 'playerGoals.intent.status.expired',
+  cleared: 'playerGoals.intent.status.cleared',
+  updated: 'playerGoals.intent.status.updated',
+  needs_schedule: 'playerGoals.intent.status.needsSchedule',
+  candidate: 'playerGoals.intent.status.candidate',
 }
 
 async function reloadGoals() {
@@ -82,7 +104,83 @@ async function handleDeleteGoal(goal: Goal) {
   } finally { goalActionBusy.value = null }
 }
 
+function intentStatusLabel(status: string | undefined): string {
+  const key = status ? INTENT_STATUS_LABEL_KEY[status] : undefined
+  return key ? t(key) : t('playerGoals.intent.status.unknown')
+}
+
+function formatIntentCandidateAt(value: string | null | undefined): string {
+  return formatIntentTimestamp(value)
+}
+
+function formatIntentTimestamp(value: string | null | undefined): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat(locale.value, {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+function intentCandidateLabel(value: string | null | undefined): string {
+  if (!value) return ''
+  const date = new Date(value)
+  const formatted = formatIntentCandidateAt(value)
+  if (!formatted || Number.isNaN(date.getTime())) return ''
+  return date.getTime() <= Date.now()
+    ? t('playerGoals.intent.dueCheck', { time: formatted })
+    : t('playerGoals.intent.nextCheck', { time: formatted })
+}
+
+async function refreshCharacter(): Promise<Character | null> {
+  try {
+    const fresh = await getCharacter(props.character.id)
+    emit('characterUpdated', fresh)
+    return fresh
+  } catch {
+    return null
+  }
+}
+
+async function refreshAfterReview(remaining: number): Promise<void> {
+  if (remaining <= 0) return
+  await new Promise<void>((resolve) => {
+    intentRefreshTimer = setTimeout(resolve, 1200)
+  })
+  intentRefreshTimer = null
+  const fresh = await refreshCharacter()
+  if (fresh?.state.current_intent_status === 'reviewing') {
+    void refreshAfterReview(remaining - 1)
+  }
+}
+
+async function handleReconcileCurrentIntent() {
+  if (intentReconcileBusy.value) return
+  intentReconcileBusy.value = true
+  intentFeedback.value = null
+  try {
+    const result = await reconcileCurrentIntentNow(props.character.id)
+    intentFeedback.value = t(`playerGoals.intent.result.${result.action}`)
+    await refreshCharacter()
+    if (result.queued) {
+      void refreshAfterReview(25)
+    }
+  } catch {
+    intentFeedback.value = t('playerGoals.intent.reconcileFailed')
+  } finally {
+    intentReconcileBusy.value = false
+  }
+}
+
 watch(() => props.character.id, () => { void reloadGoals() }, { immediate: true })
+
+onBeforeUnmount(() => {
+  if (intentRefreshTimer !== null) clearTimeout(intentRefreshTimer)
+})
 </script>
 
 <template>
@@ -95,9 +193,31 @@ watch(() => props.character.id, () => { void reloadGoals() }, { immediate: true 
     </header>
 
     <div v-if="character.state.current_intent" class="intent-card">
-      <div class="intent-label">{{ t('playerGoals.intent.label') }}</div>
+      <div class="intent-head">
+        <div class="intent-label">{{ t('playerGoals.intent.label') }}</div>
+        <button
+          type="button"
+          class="intent-refresh"
+          :disabled="intentReconcileBusy"
+          :title="t('playerGoals.intent.reconcile')"
+          :aria-label="t('playerGoals.intent.reconcile')"
+          @click="handleReconcileCurrentIntent"
+        ><ReloadOutlined :spin="intentReconcileBusy" /></button>
+      </div>
       <div class="intent-text">{{ character.state.current_intent }}</div>
-      <div class="intent-foot">{{ t('playerGoals.intent.autoUpdated') }}</div>
+      <div class="intent-foot">
+        <span>{{ t('playerGoals.intent.autoUpdated') }}</span>
+        <span class="intent-status">{{ intentStatusLabel(character.state.current_intent_status) }}</span>
+      </div>
+      <div v-if="formatIntentTimestamp(character.state.current_intent_updated_at)" class="intent-updated-at">
+        {{ t('playerGoals.intent.lastUpdated', { time: formatIntentTimestamp(character.state.current_intent_updated_at) }) }}
+      </div>
+      <div v-if="intentCandidateLabel(character.state.current_intent_candidate_at)" class="intent-next-check">
+        {{ intentCandidateLabel(character.state.current_intent_candidate_at) }}
+      </div>
+      <div v-if="intentFeedback" class="intent-feedback" role="status" aria-live="polite">
+        {{ intentFeedback }}
+      </div>
     </div>
 
     <div class="goal-create">
@@ -222,6 +342,12 @@ watch(() => props.character.id, () => { void reloadGoals() }, { immediate: true 
   flex-direction: column;
   gap: 4px;
 }
+.intent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .intent-label {
   font-size: 11px;
   font-weight: 600;
@@ -229,15 +355,57 @@ watch(() => props.character.id, () => { void reloadGoals() }, { immediate: true 
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+.intent-refresh {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #8cb4cc;
+  cursor: pointer;
+}
+.intent-refresh:hover:not(:disabled) {
+  background: rgba(140, 180, 204, 0.14);
+  color: var(--color-text);
+}
+.intent-refresh:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 .intent-text {
   font-size: 13px;
   line-height: 1.5;
   color: var(--color-text);
 }
 .intent-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 10px;
   color: var(--color-text-secondary);
   font-style: italic;
+}
+.intent-status {
+  flex: 0 0 auto;
+  font-style: normal;
+}
+.intent-feedback {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+.intent-next-check {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+.intent-updated-at {
+  font-size: 10px;
+  color: var(--color-text-secondary);
 }
 .goal-create {
   display: flex;

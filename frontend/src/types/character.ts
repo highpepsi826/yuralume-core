@@ -5,6 +5,13 @@ export interface CharacterState {
   trust: number
   energy: number
   current_intent?: string | null
+  current_intent_updated_at?: string | null
+  current_intent_checked_at?: string | null
+  current_intent_reviewed_at?: string | null
+  current_intent_status?: string
+  current_intent_source?: string
+  current_intent_candidate_at?: string | null
+  current_intent_candidate_key?: string
 }
 
 export interface CharacterLora {

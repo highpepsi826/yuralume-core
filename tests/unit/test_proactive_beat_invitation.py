@@ -427,7 +427,7 @@ async def test_judge_prompt_offers_the_waiting_scene_as_a_candidate_motive() -> 
         "  · 對方在這場戲裡的位置：這場戲是關於對方的，沒有他就演不下去"
     ) in prompt
     assert "昨天就該發生了，已經等了 1 天" in prompt
-    assert "是真實的內在動機，不是刷存在感" in prompt
+    assert "是真實的內在動機，不是空泛推播" in prompt
     # Still a candidate, never a mandate — quota discipline is untouched.
     assert "它不是必發理由" in prompt
 

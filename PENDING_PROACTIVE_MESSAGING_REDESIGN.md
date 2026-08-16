@@ -1,8 +1,34 @@
 # Pending Proactive Messaging Redesign
 
-This file tracks proposed local self-host changes that have been agreed in
-principle but are not yet implemented. It deliberately contains no private
-message, character, schedule, or database data.
+This file tracks the agreed local self-host design and its implementation
+state. It deliberately contains no private message, character, schedule, or
+database data.
+
+## Implementation Status - 2026-08-17
+
+The following work is implemented and verified on `local/customizations` in
+source form. It awaits commit and an explicitly approved Docker deployment;
+no runtime database rows, character memories, conversations, or schedules have
+been changed by this work.
+
+- **Implemented:** opt-in proactive-message policy, low-pressure relational
+  messages, unanswered-message elapsed-time cues, narrowed sleep gate, and
+  removal of stale deferred-intent refusal feedback.
+- **Implemented:** lifecycle metadata and a bounded, fail-soft background
+  reconciler for `current_intent`, including a character-owner manual check in
+  the Player Goals panel. The action never sends a message by itself.
+- **Implemented:** open `scheduled_promise` deduplication at the repository
+  and database boundary, plus a read-only duplicate report for legacy rows.
+- **Deliberately not implemented yet:** a separate player-facing
+  `proactive_frequency` control. `operator_pace_preference` remains a
+  dialogue-register preference and has not been repurposed.
+- **Still required before rollout:** compare normal chat and background-tick
+  latency in the running stack, inspect proactive-attempt reasons for a day,
+  and decide separately whether the frequency control is needed.
+
+The two migrations are additive. Existing intent values are treated as legacy
+and reviewed conservatively; existing duplicate promise rows are reported but
+are never automatically deleted or merged.
 
 ## Goal
 
@@ -12,9 +38,9 @@ approach after conflict, and show changing emotions. The system must still
 prevent literal repetition, coercive messages, accidental overnight delivery,
 and unbounded volume.
 
-## Agreed Changes
+## Agreed Changes and Implemented Behavior
 
-### 1. Treat proactive messaging as opt-in RP
+### 1. Treat proactive messaging as opt-in RP (implemented)
 
 Replace the intention judge's default-silence / reply-pressure framing with:
 
@@ -28,7 +54,7 @@ Replace the intention judge's default-silence / reply-pressure framing with:
 Remove operative uses of `刷存在感` as a rejection reason. Keep blocking ads,
 diary broadcasts, fabricated urgency, and literal duplicate messages.
 
-### 2. Relax the Decider's motive policy
+### 2. Relax the Decider's motive policy (implemented)
 
 Delete this hard rule from `decider_instructions.txt`:
 
@@ -38,7 +64,7 @@ Keep the existing no-literal-repeat protection. Keep the unanswered-message
 emotional-evolution rule for the first release so its behavior can be observed
 after the conservative bias is removed.
 
-### 3. Make unanswered-message emotional evolution explicit (agreed)
+### 3. Make unanswered-message emotional evolution explicit (implemented)
 
 Current implementation leaves "new emotional state or angle" entirely to the
 LLM. It counts messages sent after the player's most recent recorded turn and
@@ -78,7 +104,7 @@ Implementation direction agreed for the first implementation:
 - Add regression cases for an upset or withdrawn player: an early restraint,
   then a later, low-pressure repair attempt that is allowed to send.
 
-### 3a. Allow low-pressure messages that do not demand a reply
+### 3a. Allow low-pressure messages that do not demand a reply (implemented)
 
 The current Decider says every proactive message must leave a reply hook. That
 is incompatible with a natural repair or reassurance message after conflict:
@@ -95,7 +121,7 @@ Add a second valid message shape for relationship moments:
 This is not permission for diary broadcasts. It is limited to a genuine
 relationship development and remains subject to the duplicate-topic rule.
 
-### 4. Narrow the quiet-activity gate
+### 4. Narrow the quiet-activity gate (implemented)
 
 The gate currently does substring matching, so `睡` and `休息` incorrectly
 block normal free time such as `睡前閱讀` and `睡前空閒`.
@@ -110,7 +136,7 @@ Keep only actual-sleep terms:
 Remove `rest`, `resting`, `睡`, and `休息`. Keep the 00:00-07:00 night floor,
 cooldown, daily cap, and promise-trigger bypass unchanged.
 
-### 5. Break the deferred-intent refusal loop
+### 5. Break the deferred-intent refusal loop (implemented)
 
 The current prompt can receive up to five active deferred intents, including
 their previous risk and rejection reason. This lets earlier "怕打擾／怕重複"
@@ -126,7 +152,7 @@ First implementation should avoid a database migration:
   due for a fresh judgment; it is not an instruction to defer again.
 - Let existing rows expire through TTL. Do not alter current rows manually.
 
-### 6. Keep `operator_pace_preference` as dialogue pacing
+### 6. Keep `operator_pace_preference` as dialogue pacing (implemented)
 
 Do not redefine upstream `quiet` / `balanced` / `lively`. They remain the
 author's cadence controls, which map to daily limit and cooldown.
@@ -170,7 +196,7 @@ motivation threshold truly needs it; do not mix it into the observed dialogue
 register block. Adding this separate setting will require an explicit schema,
 backup, and migration decision; it is not a free reuse of the existing field.
 
-### 7. Reconcile stale `current_intent` before it becomes misleading
+### 7. Reconcile stale `current_intent` before it becomes misleading (implemented)
 
 `current_intent` is currently a short-lived string in `CharacterState`, with no
 intent-specific timestamp and no link to a schedule. Post-turn processing and
@@ -214,7 +240,7 @@ like a live plan. Reconciliation must be idempotent and must not send a message
 solely because `current_intent` exists; the normal proactive gates still make
 the final send decision.
 
-### 7a. Add a manual immediate intent check (agreed)
+### 7a. Add a manual immediate intent check (implemented)
 
 Add a compact refresh-icon action with a tooltip such as `立即檢查當下意圖`
 to the current-intent card in `PlayerGoalsPanel.vue`. It is available to the
@@ -254,7 +280,7 @@ the existing scheduler/job infrastructure and must not introduce a new Docker
 process. An LLM-backed manual check may take seconds for the button requester,
 but it must not delay, lock, or compete unboundedly with a normal chat turn.
 
-### 8. Deduplicate pending replies and scheduled promises
+### 8. Deduplicate pending replies and scheduled promises (implemented for new scheduled promises)
 
 There are two different queues that should not be conflated:
 
@@ -325,35 +351,30 @@ player's chat response path. The following are acceptance constraints:
   state while an LLM fallback runs, but it must never delay the normal chat
   request or create more than one active fallback for the same character.
 
-## Implementation Order
+## Implementation Order and Rollout State
 
-1. Add latency/LLM-call/tick-duration instrumentation and focused regression
-   tests. This step has no behavior change and establishes the comparison
-   baseline.
-2. Update the Judge/Decider policy, unanswered-message emotional evolution,
+1. **Pending rollout measurement:** establish before/after normal chat and
+   background-tick latency from the running stack. This is operational
+   observation, not a new foreground LLM stage.
+2. **Complete:** Judge/Decider policy, unanswered-message emotional evolution,
    low-pressure message shape, quiet-activity tokens, and deferred-intent
-   feedback. Keep these as prompt/rule changes in the existing calls; do not
-   introduce a new LLM round trip.
-3. Extend the existing post-turn state output with `intent_updated_at`, source,
-   and time-anchor metadata. Add the smallest required persistence/backup
-   migration and tests; keep legacy unstructured intents readable.
-4. Add promise/follow-up deduplication at repository/database boundaries,
-   including the unique index, idempotent release behavior, and a read-only
-   report for existing duplicates. This is data integrity work, not an LLM
-   step.
-5. Add the background `current_intent` reconciler behind a feature flag. Use
-   deterministic checks and idempotent schedule links first; add the bounded
-   LLM fallback only for stale/ambiguous cases. Add intent age/status to the UI
-   after the backend state is reliable.
-6. Add the owner-authorized manual intent-check endpoint and the compact UI
-   action. Prove rate limiting, idempotent job joining, state-version safety,
-   and that a manual LLM fallback cannot block normal chat.
-7. If observation still shows a need for user-controlled frequency, add a
-   separate `proactive_frequency` relationship setting. Do not reuse
-   `operator_pace_preference` and do not make this setting an extra LLM call.
-8. Roll out in stages, compare the recorded latency and token metrics, inspect
-   proactive-attempt reasons for one day, and only then decide whether a second
-   adjustment is justified.
+   feedback were updated in the existing calls without a new round trip.
+3. **Complete:** post-turn and state writers persist intent lifecycle metadata;
+   legacy unstructured values remain readable and are treated as stale/unknown.
+4. **Complete for future rows:** scheduled-promise deduplication uses a stable
+   fingerprint, repository race handling, a partial unique index, and a
+   read-only legacy duplicate report. Existing rows are untouched.
+5. **Complete:** the background reconciler performs deterministic checks first
+   and queues at most two short LLM fallbacks for stale/ambiguous intents.
+   It creates only an internal candidate checkpoint, never a shared
+   appointment or automatic message.
+6. **Complete:** the owner-authorized manual check joins an in-flight review,
+   uses a five-minute manual fallback cooldown, and cannot block a chat turn.
+7. **Deferred intentionally:** add `proactive_frequency` only after observing
+   the new behavior. It must remain separate from `operator_pace_preference`.
+8. **Pending deployment:** run migrations after a verified database backup,
+   rebuild the local app image, then inspect proactive-attempt reasons and
+   latency for one day before considering another adjustment.
 
 ## Guardrails That Must Remain
 

@@ -67,18 +67,29 @@ def test_streak_zero_when_latest_push_already_answered() -> None:
     assert _count_unanswered_streak(attempts, idle_minutes=5.0, now=NOW) == 0
 
 
-def test_render_is_empty_below_threshold() -> None:
+def test_render_is_empty_only_without_unanswered_messages() -> None:
     assert render_unanswered_streak_lines(0) == []
-    # A single unanswered push is already conveyed by the per-message
-    # reply tag, so the dedicated block stays silent.
-    assert render_unanswered_streak_lines(1) == []
+    body = "\n".join(
+        render_unanswered_streak_lines(
+            1,
+            latest_sent_at=NOW - timedelta(hours=3),
+            now=NOW,
+        ),
+    )
+    assert "一則" in body
+    assert "3.0 小時前" in body
+    assert "重新衡量" in body
 
 
 def test_render_surfaces_count_and_evolution_licence() -> None:
-    lines = render_unanswered_streak_lines(3)
+    lines = render_unanswered_streak_lines(
+        3,
+        latest_sent_at=NOW - timedelta(hours=3),
+        now=NOW,
+    )
     body = "\n".join(lines)
-    assert "連續主動傳了 3 則" in body
+    assert "主動傳了 3 則訊息" in body
     # Licence to let it land emotionally (the fix for "no progress").
     assert "賭氣" in body or "受傷" in body
     # Still forbids parroting (the fix for "跳針").
-    assert "換句話重講" in body
+    assert "同樣的題材" in body

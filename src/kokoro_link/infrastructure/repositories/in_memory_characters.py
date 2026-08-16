@@ -38,6 +38,49 @@ class InMemoryCharacterRepository(CharacterRepositoryPort):
         self._consolidation_claims[character_id] = now
         return True
 
+    async def update_current_intent_if_unchanged(
+        self,
+        character_id: str,
+        *,
+        expected_intent: str | None,
+        expected_updated_at: datetime | None,
+        expected_reviewed_at: datetime | None,
+        expected_candidate_at: datetime | None,
+        expected_candidate_key: str,
+        current_intent: str | None,
+        updated_at: datetime | None,
+        checked_at: datetime,
+        reviewed_at: datetime | None,
+        status: str,
+        source: str,
+        candidate_at: datetime | None,
+        candidate_key: str,
+    ) -> bool:
+        existing = self._characters.get(character_id)
+        if existing is None:
+            return False
+        state = existing.state
+        if (
+            state.current_intent != expected_intent
+            or state.current_intent_updated_at != expected_updated_at
+            or state.current_intent_reviewed_at != expected_reviewed_at
+            or state.current_intent_candidate_at != expected_candidate_at
+            or state.current_intent_candidate_key != expected_candidate_key
+        ):
+            return False
+        self._characters[character_id] = existing.with_state(replace(
+            state,
+            current_intent=(current_intent or "").strip() or None,
+            current_intent_updated_at=updated_at,
+            current_intent_checked_at=checked_at,
+            current_intent_reviewed_at=reviewed_at,
+            current_intent_status=(status or "unknown").strip(),
+            current_intent_source=(source or "").strip(),
+            current_intent_candidate_at=candidate_at,
+            current_intent_candidate_key=(candidate_key or "").strip(),
+        ))
+        return True
+
     async def list(self) -> list[Character]:
         return list(self._characters.values())
 

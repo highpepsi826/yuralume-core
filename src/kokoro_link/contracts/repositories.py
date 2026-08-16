@@ -133,6 +133,33 @@ class CharacterRepositoryPort(Protocol):
         adapters, never the caller's wall clock, because replicas' clocks
         drift and a skewed replica must not shorten the shared cooldown."""
 
+    async def update_current_intent_if_unchanged(
+        self,
+        character_id: str,
+        *,
+        expected_intent: str | None,
+        expected_updated_at: datetime | None,
+        expected_reviewed_at: datetime | None,
+        expected_candidate_at: datetime | None,
+        expected_candidate_key: str,
+        current_intent: str | None,
+        updated_at: datetime | None,
+        checked_at: datetime,
+        reviewed_at: datetime | None,
+        status: str,
+        source: str,
+        candidate_at: datetime | None,
+        candidate_key: str,
+    ) -> bool:
+        """Compare-and-set only the current-intent lifecycle fields.
+
+        Background reconciliation must never overwrite a newer post-turn
+        intent. Implementations compare the text, writer timestamp, and
+        internal candidate identity, then update only these state columns;
+        all unrelated character fields stay untouched. ``True`` means this
+        caller won the update.
+        """
+
     async def get(self, character_id: str) -> Character | None:
         """Fetch character by id."""
 

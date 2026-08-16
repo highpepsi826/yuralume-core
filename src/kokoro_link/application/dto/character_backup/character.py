@@ -58,6 +58,13 @@ class CharacterBackupRecord(BackupRecord):
     state_energy: int = 100
     state_last_active_at: datetime | None = None
     state_current_intent: str | None = None
+    state_current_intent_updated_at: datetime | None = None
+    state_current_intent_checked_at: datetime | None = None
+    state_current_intent_reviewed_at: datetime | None = None
+    state_current_intent_status: str = "unknown"
+    state_current_intent_source: str = ""
+    state_current_intent_candidate_at: datetime | None = None
+    state_current_intent_candidate_key: str = ""
     frozen: bool = False
     frozen_at: datetime | None = None
     frozen_reason: str | None = None

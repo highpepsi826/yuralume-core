@@ -344,3 +344,29 @@ async def test_completion_promise_reaches_pending_follow_ups() -> None:
     assert len(rows) == 1
     assert rows[0].is_scheduled_promise is True
     assert rows[0].promise_intent == intent
+
+
+@pytest.mark.asyncio
+async def test_repeated_extraction_keeps_one_scheduled_promise() -> None:
+    scheduled = _future_iso(2)
+    promise = MessagePromise(
+        scheduled_for_iso=scheduled,
+        intent="晚上提醒使用者準備遊戲活動",
+        source_text="晚上記得叫我準備活動",
+    )
+    pending_repo = InMemoryPendingFollowUpRepository()
+    chat = _chat_service(pending_repo)
+
+    await chat._persist_message_promises(
+        character_id="char-1",
+        conversation_id="conv-promise",
+        promises=[promise],
+    )
+    await chat._persist_message_promises(
+        character_id="char-1",
+        conversation_id="conv-promise",
+        promises=[promise],
+    )
+
+    rows = await pending_repo.list_open_for_character("char-1")
+    assert len(rows) == 1

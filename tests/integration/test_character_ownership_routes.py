@@ -146,6 +146,7 @@ def test_cross_user_character_crud_is_hidden(
         ("GET", "/api/v1/characters/{id}/album", None),
         ("GET", "/api/v1/characters/{id}/pending-follow-ups", None),
         ("GET", "/api/v1/characters/{id}/proactive/attempts", None),
+        ("POST", "/api/v1/characters/{id}/current-intent/reconcile", None),
         ("GET", "/api/v1/characters/{id}/story-events", None),
         ("GET", "/api/v1/characters/{id}/story-seeds", None),
         ("GET", "/api/v1/characters/{id}/story-arcs", None),

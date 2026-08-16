@@ -33,6 +33,9 @@ from kokoro_link.domain.value_objects.timezone import to_timezone
 from kokoro_link.infrastructure.prompt.character_identity import (
     render_character_identity_lines,
 )
+from kokoro_link.infrastructure.prompt.current_intent import (
+    render_current_intent_fact_lines,
+)
 from kokoro_link.infrastructure.prompt.operator_language import (
     render_operator_language_hint,
 )
@@ -178,6 +181,7 @@ def _build_prompt(context: ProactiveContext) -> str:
         interaction_block="\n".join(_interaction_lines(context)),
         now_local=format_local_current_time(context.now, context.local_tz),
         schedule_block="\n".join(_schedule_lines(context)),
+        optional_current_intent=_optional_current_intent_block(context),
         optional_recent_sent=_optional_recent_sent_block(context),
         optional_unanswered_streak=_optional_unanswered_streak_block(context),
         optional_dialogue_summary=_optional_dialogue_summary_block(context),
@@ -208,6 +212,17 @@ def _section(header: str, body_lines: list[str]) -> str:
     return "\n\n" + header + "\n" + "\n".join(body_lines)
 
 
+def _optional_current_intent_block(context: ProactiveContext) -> str:
+    lines = render_current_intent_fact_lines(
+        context.character.state,
+        now=context.now,
+        local_tz=context.local_tz,
+    )
+    if not lines:
+        return ""
+    return "\n\n" + "\n".join(lines)
+
+
 def _optional_recent_sent_block(context: ProactiveContext) -> str:
     if not context.recent_sent_attempts:
         return ""
@@ -219,10 +234,19 @@ def _optional_recent_sent_block(context: ProactiveContext) -> str:
 
 def _optional_unanswered_streak_block(context: ProactiveContext) -> str:
     """Surface the consecutive-unanswered streak so the judge can tell a
-    cheap "刷存在感的重複" apart from an authentic, evolving reaction to
-    being ignored. Shared phrasing with the decider keeps the two paths
-    from pulling in opposite directions on the same streak."""
-    lines = render_unanswered_streak_lines(context.unanswered_streak)
+    literal repeat apart from an authentic, evolving reaction to silence.
+    Shared phrasing with the decider keeps the two paths from pulling in
+    opposite directions on the same fact."""
+    latest_sent_at = (
+        context.recent_sent_attempts[0].decided_at
+        if context.unanswered_streak and context.recent_sent_attempts
+        else None
+    )
+    lines = render_unanswered_streak_lines(
+        context.unanswered_streak,
+        latest_sent_at=latest_sent_at,
+        now=context.now,
+    )
     if not lines:
         return ""
     return "\n\n" + "\n".join(lines)
@@ -367,16 +391,15 @@ def _optional_active_arc_block(context: ProactiveContext) -> str:
 
 _PACE_PHRASES: dict[str, str] = {
     "more_active": (
-        "對方明確希望這個角色「主動一點 / 多話一點」——"
-        "在通過其他標準的前提下，可以稍微放寬主動傳訊息的傾向；"
-        "但仍要符合角色性格與當下時機，不要因此變成廣告或刷存在感。"
+        "對方偏好這個角色在對話中主動一點、願意多說一些；"
+        "這是回覆與互動的表達節奏，不是要求你額外發起主動訊息。"
     ),
     "balanced": (
         "對方對對話節奏沒有特別偏好；維持角色既有的內在動機節奏即可。"
     ),
     "more_quiet": (
-        "對方明確希望這個角色「安靜一點 / 多留白」——"
-        "在通過其他標準的前提下，更傾向保留額度；只在動機特別清楚時消耗 slot。"
+        "對方偏好對話留白、不要太密集；"
+        "這是回覆與互動的表達節奏，不是對角色自主意願的硬性限制。"
     ),
 }
 
@@ -472,52 +495,40 @@ def _optional_deferred_intents_block(context: ProactiveContext) -> str:
     """HUMANIZATION_ROADMAP §3.4 — re-surface motives that prior judge
     calls blocked but kept under TTL.
 
-    The block is a *fact* layer: it states what the character previously
-    wanted to say, why it was held back, and when the LLM itself
-    suggested would be a better timing. The decision whether to act on
-    them this round belongs to the LLM. We do not pre-rank, do not
-    auto-promote, do not collapse to a score.
+    The block intentionally shows only the newest representative motive.
+    Earlier rejection reasons are historical and must not become a self-
+    reinforcing instruction to keep refusing the same thought.
     """
     if not context.deferred_intents:
         return ""
     now = context.now
-    body: list[str] = []
-    for intent in context.deferred_intents[:5]:
-        elapsed_minutes = max(
-            0.0,
-            (now - intent.created_at).total_seconds() / 60.0,
-        )
-        remaining_minutes = max(
-            0.0,
-            (intent.expires_at - now).total_seconds() / 60.0,
-        )
-        parts: list[str] = [
-            f"- 想做的事：{intent.inner_motive[:200]}",
-        ]
-        if intent.conversation_purpose:
-            parts.append(f"  · 對話目的：{intent.conversation_purpose[:160]}")
-        if intent.expected_reply:
-            parts.append(f"  · 期待對方的回應：{intent.expected_reply[:160]}")
-        if intent.risk:
-            parts.append(f"  · 上次判斷的風險：{intent.risk[:160]}")
-        if intent.best_timing:
-            parts.append(f"  · 上次建議時機：{intent.best_timing[:80]}")
-        if intent.reason:
-            parts.append(f"  · 上次未發的原因：{intent.reason[:160]}")
-        if intent.revisit_at is not None:
-            local_revisit = to_timezone(intent.revisit_at, context.local_tz)
-            arrived = "已經到了" if intent.revisit_at <= now else "還沒到"
-            parts.append(
-                f"  · 當時記下的明確時點："
-                f"{local_revisit.strftime('%m/%d %H:%M')}（{arrived}）",
+    intent = context.deferred_intents[0]
+    elapsed_minutes = max(0.0, (now - intent.created_at).total_seconds() / 60.0)
+    remaining_minutes = max(0.0, (intent.expires_at - now).total_seconds() / 60.0)
+    body: list[str] = [f"- 想做的事：{intent.inner_motive[:200]}"]
+    if intent.conversation_purpose:
+        body.append(f"  · 對話目的：{intent.conversation_purpose[:160]}")
+    if intent.expected_reply:
+        body.append(f"  · 期待對方的回應：{intent.expected_reply[:160]}")
+    if intent.best_timing:
+        body.append(f"  · 當時選的時機：{intent.best_timing[:80]}")
+    if intent.revisit_at is not None:
+        local_revisit = to_timezone(intent.revisit_at, context.local_tz)
+        if intent.revisit_at <= now:
+            body.append(
+                f"  · 已到原先記下的時點：{local_revisit.strftime('%m/%d %H:%M')}。"
+                "現在必須重新判斷，不可把舊的拒絕理由當成現在的結論。",
             )
-        parts.append(
-            f"  · 已等候 {_format_elapsed_minutes(elapsed_minutes)}，"
-            f"距離自然遺忘還有約 {_format_elapsed_minutes(remaining_minutes)}",
-        )
-        body.append("\n".join(parts))
+        else:
+            body.append(
+                f"  · 原先記下的時點：{local_revisit.strftime('%m/%d %H:%M')}。",
+            )
+    body.append(
+        f"  · 已等候 {_format_elapsed_minutes(elapsed_minutes)}，"
+        f"距離自然遺忘還有約 {_format_elapsed_minutes(remaining_minutes)}",
+    )
     return _section(
-        "先前你曾想過、但被自己壓下來的念頭（請判斷時機是否到了，或讓它自然淡掉）：",
+        "先前你曾想過、但被自己暫緩的念頭（請以現在狀況重新判斷，或讓它自然淡掉）：",
         body,
     )
 

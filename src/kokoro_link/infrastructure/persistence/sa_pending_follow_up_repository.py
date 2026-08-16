@@ -6,7 +6,8 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import asc, delete, desc, select
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from kokoro_link.contracts.pending_follow_up import (
     PendingFollowUpRepositoryPort,
@@ -30,8 +31,14 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
     def __init__(self, session_factory: async_sessionmaker) -> None:
         self._session_factory = session_factory
 
-    async def add(self, follow_up: PendingFollowUp) -> None:
+    async def add(self, follow_up: PendingFollowUp) -> PendingFollowUp:
+        if (
+            follow_up.kind == PendingFollowUpKind.SCHEDULED_PROMISE
+            and follow_up.dedupe_key
+        ):
+            return await self._add_scheduled_promise(follow_up)
         await self._upsert(follow_up)
+        return follow_up
 
     async def save(self, follow_up: PendingFollowUp) -> None:
         await self._upsert(follow_up)
@@ -110,6 +117,25 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
             rows = (await session.execute(stmt)).scalars().all()
             return [_row_to_domain(r) for r in rows]
 
+    async def list_open_scheduled_promises(self) -> list[PendingFollowUp]:
+        """Read-only source for legacy duplicate reporting."""
+        async with self._session_factory() as session:
+            stmt = (
+                select(PendingFollowUpRow)
+                .where(
+                    PendingFollowUpRow.kind
+                    == PendingFollowUpKind.SCHEDULED_PROMISE.value,
+                )
+                .where(PendingFollowUpRow.status.in_(_OPEN_STATUSES))
+                .order_by(
+                    asc(PendingFollowUpRow.scheduled_for),
+                    asc(PendingFollowUpRow.queued_at),
+                    asc(PendingFollowUpRow.id),
+                )
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            return [_row_to_domain(row) for row in rows]
+
     async def delete_for_conversation(self, conversation_id: str) -> int:
         async with self._session_factory() as session, session.begin():
             result = await session.execute(
@@ -153,6 +179,7 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
                     last_error=follow_up.last_error,
                     kind=follow_up.kind.value,
                     promise_intent=follow_up.promise_intent,
+                    dedupe_key=follow_up.dedupe_key,
                 ))
             else:
                 existing.character_id = follow_up.character_id
@@ -170,6 +197,117 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
                 existing.last_error = follow_up.last_error
                 existing.kind = follow_up.kind.value
                 existing.promise_intent = follow_up.promise_intent
+                existing.dedupe_key = follow_up.dedupe_key
+
+    async def _add_scheduled_promise(
+        self, follow_up: PendingFollowUp,
+    ) -> PendingFollowUp:
+        """Insert an open promise or return the concurrent canonical row.
+
+        The lookup avoids the usual retry path.  The partial unique index is
+        still required: two post-turn workers can both observe no existing row
+        before either commits.  In that race PostgreSQL rejects one insert, then
+        this method re-reads the winner after rolling back its failed session.
+        """
+        async with self._session_factory() as session:
+            existing = await _find_open_by_dedupe_key(
+                session, follow_up.dedupe_key,
+            )
+            if existing is not None:
+                return await _merge_scheduled_promise_context(
+                    session, existing, follow_up,
+                )
+            session.add(_domain_to_row(follow_up))
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                existing = await _find_open_by_dedupe_key(
+                    session, follow_up.dedupe_key,
+                )
+                if existing is not None:
+                    return await _merge_scheduled_promise_context(
+                        session, existing, follow_up,
+                    )
+                raise
+        return follow_up
+
+
+async def _find_open_by_dedupe_key(
+    session: AsyncSession,
+    dedupe_key: str,
+) -> PendingFollowUpRow | None:
+    stmt = (
+        select(PendingFollowUpRow)
+        .where(PendingFollowUpRow.kind == PendingFollowUpKind.SCHEDULED_PROMISE.value)
+        .where(PendingFollowUpRow.dedupe_key == dedupe_key)
+        .where(PendingFollowUpRow.status.in_(_OPEN_STATUSES))
+        .order_by(asc(PendingFollowUpRow.queued_at), asc(PendingFollowUpRow.id))
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def _merge_scheduled_promise_context(
+    session: AsyncSession,
+    existing: PendingFollowUpRow,
+    incoming: PendingFollowUp,
+) -> PendingFollowUp:
+    canonical = _row_to_domain(existing)
+    merged = canonical.merged_scheduled_promise_context(incoming)
+    if merged == canonical:
+        return canonical
+    _copy_domain_to_row(existing, merged)
+    await session.commit()
+    return merged
+
+
+def _domain_to_row(follow_up: PendingFollowUp) -> PendingFollowUpRow:
+    messages_payload = json.dumps(
+        [_message_to_payload(m) for m in follow_up.messages],
+        ensure_ascii=False,
+    )
+    return PendingFollowUpRow(
+        id=follow_up.id,
+        character_id=follow_up.character_id,
+        conversation_id=follow_up.conversation_id,
+        status=follow_up.status.value,
+        activity_id=follow_up.activity_id,
+        brief_reply=follow_up.brief_reply,
+        defer_reason=follow_up.defer_reason,
+        messages_json=messages_payload,
+        scheduled_for=follow_up.scheduled_for,
+        queued_at=follow_up.queued_at,
+        updated_at=follow_up.updated_at,
+        resolved_at=follow_up.resolved_at,
+        resolved_message=follow_up.resolved_message,
+        last_error=follow_up.last_error,
+        kind=follow_up.kind.value,
+        promise_intent=follow_up.promise_intent,
+        dedupe_key=follow_up.dedupe_key,
+    )
+
+
+def _copy_domain_to_row(row: PendingFollowUpRow, follow_up: PendingFollowUp) -> None:
+    row.character_id = follow_up.character_id
+    row.conversation_id = follow_up.conversation_id
+    row.status = follow_up.status.value
+    row.activity_id = follow_up.activity_id
+    row.brief_reply = follow_up.brief_reply
+    row.defer_reason = follow_up.defer_reason
+    row.messages_json = json.dumps(
+        [_message_to_payload(message) for message in follow_up.messages],
+        ensure_ascii=False,
+    )
+    row.scheduled_for = follow_up.scheduled_for
+    row.queued_at = follow_up.queued_at
+    row.updated_at = follow_up.updated_at
+    row.resolved_at = follow_up.resolved_at
+    row.resolved_message = follow_up.resolved_message
+    row.last_error = follow_up.last_error
+    row.kind = follow_up.kind.value
+    row.promise_intent = follow_up.promise_intent
+    row.dedupe_key = follow_up.dedupe_key
 
 
 def _message_to_payload(message: PendingFollowUpMessage) -> dict:
@@ -234,6 +372,7 @@ def _row_to_domain(row: PendingFollowUpRow) -> PendingFollowUp:
         last_error=row.last_error,
         kind=PendingFollowUpKind(kind_raw),
         promise_intent=getattr(row, "promise_intent", "") or "",
+        dedupe_key=getattr(row, "dedupe_key", "") or "",
     )
 
 

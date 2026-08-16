@@ -8,6 +8,7 @@ import pytest
 
 from kokoro_link.domain.entities.pending_follow_up import (
     PendingFollowUp,
+    PendingFollowUpKind,
     PendingFollowUpMessage,
     PendingFollowUpStatus,
 )
@@ -48,6 +49,22 @@ def _row(
     return row
 
 
+def _promise(
+    *,
+    conversation_id: str = "conv-1",
+    scheduled_for_offset_min: int = 30,
+    source_message_content: str = "",
+) -> PendingFollowUp:
+    return PendingFollowUp.new_promise(
+        character_id="char-1",
+        conversation_id=conversation_id,
+        promise_intent="提醒使用者喝水",
+        scheduled_for=_now() + timedelta(minutes=scheduled_for_offset_min),
+        source_message_content=source_message_content,
+        now=_now(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_add_and_get() -> None:
     repo = InMemoryPendingFollowUpRepository()
@@ -55,6 +72,43 @@ async def test_add_and_get() -> None:
     await repo.add(row)
     assert await repo.get(row.id) == row
     assert await repo.get("missing") is None
+
+
+@pytest.mark.asyncio
+async def test_add_returns_canonical_open_scheduled_promise() -> None:
+    repo = InMemoryPendingFollowUpRepository()
+    original = _promise(
+        conversation_id="conv-original", source_message_content="第一個提醒來源",
+    )
+    retry = _promise(
+        conversation_id="conv-retry", source_message_content="補充的第二個來源",
+    )
+
+    assert original.kind == PendingFollowUpKind.SCHEDULED_PROMISE
+    assert await repo.add(original) == original
+    canonical = await repo.add(retry)
+
+    assert canonical.id == original.id
+    assert [message.content for message in canonical.messages] == [
+        "第一個提醒來源", "補充的第二個來源",
+    ]
+    rows = await repo.list_open_for_character("char-1")
+    assert [row.id for row in rows] == [original.id]
+    assert len(rows[0].messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_terminal_promise_no_longer_blocks_a_new_one() -> None:
+    repo = InMemoryPendingFollowUpRepository()
+    original = _promise()
+    await repo.add(original)
+    await repo.save(original.marked_resolved(message_text="done", now=_now()))
+
+    later = _promise()
+    canonical = await repo.add(later)
+
+    assert canonical.id == later.id
+    assert canonical.id != original.id
 
 
 @pytest.mark.asyncio

@@ -3,10 +3,10 @@ ${language_hint}
 這一步只判斷動機與時機，不要撰寫訊息內容。
 
 核心標準：
-- 預設沉默。只有當角色有清楚、自然、可接話的內在理由時，才消耗今日主動訊息額度。
+- 使用者已明確開啟角色主動傳訊。普通聯絡、想念、分享小事、尋求陪伴、關係裡的在意或情緒，都是可以認真衡量的 RP 動機；不要把「對方暫時沒有回覆」本身當成拒絕理由。
 - 不要因為有天氣、行程、小事件、新聞素材就自動發訊息；素材不是動機。
-- 擋掉像廣告、日記廣播、刷存在感、無聊小事通知的推播。
-- 必須想清楚：為什麼現在要說？說了想讓對方怎麼回？對方不回時是否會顯得打擾？
+- 擋掉像廣告、日記廣播、捏造緊急性、或逐字重複同一題材的推播。
+- 必須想清楚：為什麼現在要說？這則話和對方、你們的關係或你此刻的生活有什麼真實連結？措辭能否不施壓、不要求立即回覆？
 - 若現在理由普通但稍晚更自然，請保留額度並指出 best_timing。
 - 若你這次忍住的理由，是「已經存在一個明確、雙方都知道的未來時點，到那時才適合開口」——
   例如你們已經談定了某個時間、對方說了某個時刻之後才有空——請在 revisit_at_iso 填上那個時點的當地時間。
@@ -23,13 +23,13 @@ ${interaction_block}
 
 當下時間與行程：
 - 現在：${now_local}
-${schedule_block}${optional_recent_sent}${optional_unanswered_streak}${optional_dialogue_summary}${optional_initial_relationship}${optional_operator_persona}${optional_persona_curiosity}${optional_memories}${optional_active_goals}${optional_calendar}${optional_weather}${optional_world_event}${optional_story_events}${optional_active_arc}${optional_deferred_intents}${optional_pace_preference}${optional_subjective_time}
+${schedule_block}${optional_current_intent}${optional_recent_sent}${optional_unanswered_streak}${optional_dialogue_summary}${optional_initial_relationship}${optional_operator_persona}${optional_persona_curiosity}${optional_memories}${optional_active_goals}${optional_calendar}${optional_weather}${optional_world_event}${optional_story_events}${optional_active_arc}${optional_deferred_intents}${optional_pace_preference}${optional_subjective_time}
 
 請在心裡完成以下自問，但只輸出 JSON：
-1. 我現在為什麼想開口？這是想分享，還是怕自己消失所以刷存在感？
+1. 我現在為什麼想開口？這是角色真實的分享、關心、想念、情緒或關係動機嗎？
 2. 這則訊息跟對方有什麼關係？
-3. 我希望對方怎麼回？這個期待是否合理、好接？
-4. 如果上方列出我已被連續冷落：我現在想說的，是把同一件事換句話重講（那就忍住、保留額度），還是我的心境真的有了新的變化、值得讓對方知道（在意／受傷／賭氣／想退一步給空間）？後者是真實動機，可以消耗 slot；前者只是跳針，不行。
+3. 這則話可以自然接續嗎？若是關係上的低壓表達，也可以不要求對方回覆；不可催促、內疚施壓、捏造急事或要求立即回答。
+4. 如果上方列出尚未回覆的主動訊息：我現在想說的，是把同一件事換句話重講（那就忍住、保留額度），還是我的心境真的隨時間有了新的變化、值得讓對方知道（在意／受傷／賭氣／想修復關係／想退一步給空間）？後者是真實動機，可以消耗 slot；前者只是重複，不行。沒有讀取狀態，不可聲稱對方已讀。
 5. 現在消耗今日額度是否值得，還是留給稍晚更自然？
 
 輸出格式：只回傳一個 JSON 物件，不要 markdown。

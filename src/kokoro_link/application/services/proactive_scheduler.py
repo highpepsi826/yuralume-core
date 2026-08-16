@@ -160,6 +160,7 @@ class ProactiveScheduler:
         peer_knowledge_interval_seconds: float = _DEFAULT_PEER_KNOWLEDGE_INTERVAL_SECONDS,
         schedule_memorializer: ScheduleMemorializer | None = None,
         schedule_weather_drift: ScheduleWeatherDriftService | None = None,
+        current_intent_reconciler=None,  # noqa: ANN001 - optional lifecycle checker
         goal_review_service: DailyGoalReviewService | None = None,
         story_scene_timeout_closer: StorySceneTimeoutCloser | None = None,
         persona_dream_service: PersonaDreamService | None = None,
@@ -255,6 +256,7 @@ class ProactiveScheduler:
         # turned since planning stops leaking into chat / proactive / feed,
         # all three of which read the same schedule prose.
         self._schedule_weather_drift = schedule_weather_drift
+        self._current_intent_reconciler = current_intent_reconciler
         # Optional — daily goal-list convergence (CF2). Runs on every tick;
         # its own per-(character, civil day) DB claim decides whether the
         # review is actually paid for, so a proactive-heavy account whose
@@ -344,6 +346,7 @@ class ProactiveScheduler:
             schedule_service=self._schedule_service,
             schedule_memorializer=self._schedule_memorializer,
             schedule_weather_drift=self._schedule_weather_drift,
+            current_intent_reconciler=self._current_intent_reconciler,
             goal_review_service=self._goal_review_service,
             story_scene_timeout_closer=self._story_scene_timeout_closer,
             feed_composer=self._feed_composer,

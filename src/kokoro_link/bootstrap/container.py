@@ -392,6 +392,9 @@ from kokoro_link.application.services.feed_reaction_service import (
 from kokoro_link.application.services.proactive_dispatcher import ProactiveDispatcher
 from kokoro_link.application.services.proactive_event_bus import ProactiveEventBus
 from kokoro_link.application.services.proactive_scheduler import ProactiveScheduler
+from kokoro_link.application.services.current_intent_reconciler import (
+    CurrentIntentReconciler,
+)
 from kokoro_link.application.services.character_tick_executor import (
     CharacterTickExecutor,
 )
@@ -869,6 +872,9 @@ from kokoro_link.infrastructure.state.llm_idle_drift import (
     LLMIdleDriftJudge,
     NullIdleDriftJudge,
 )
+from kokoro_link.infrastructure.state.llm_current_intent_reviewer import (
+    LLMCurrentIntentReviewer,
+)
 from kokoro_link.infrastructure.busy.llm_decider import (
     LLMBusyReplyDecider,
 )
@@ -1107,6 +1113,7 @@ class ServiceContainer:
     proactive_attempt_repository: ProactiveAttemptRepositoryPort | None = None
     proactive_dispatcher: ProactiveDispatcher | None = None
     proactive_scheduler: ProactiveScheduler | None = None
+    current_intent_reconciler: CurrentIntentReconciler | None = None
     # P3-A tick executors (HOSTED_CORE_SCALING §13). The scheduler owns these and
     # delegates the per-character / global-social tick bodies to them; stored here
     # too so the distributed worker (P3-C) reuses the byte-identical executors.
@@ -3833,6 +3840,13 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         provider=active_llm_provider,
         feature_key=FEATURE_IDLE_DRIFT,
     )
+    current_intent_reviewer = LLMCurrentIntentReviewer(
+        provider=active_llm_provider,
+        # This is another low-frequency, background state-maintenance call.
+        # Reuse the existing idle-drift route rather than exposing a second
+        # model picker for a fallback that most self-host users never invoke.
+        feature_key=FEATURE_IDLE_DRIFT,
+    )
 
     busy_reply_decider = LLMBusyReplyDecider(
         provider=active_llm_provider,
@@ -5139,6 +5153,13 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
     )
 
     scheduler_metrics = SchedulerMetrics()
+    current_intent_reconciler = CurrentIntentReconciler(
+        character_repository=character_repository,
+        schedule_repository=schedule_repository,
+        reviewer=current_intent_reviewer,
+        schedule_service=schedule_service,
+        clock=clock,
+    )
     proactive_scheduler = ProactiveScheduler(
         dispatcher=proactive_dispatcher,
         character_repository=character_repository,
@@ -5159,6 +5180,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         character_social_knowledge_service=character_social_knowledge_service,
         schedule_memorializer=schedule_memorializer,
         schedule_weather_drift=schedule_weather_drift_service,
+        current_intent_reconciler=current_intent_reconciler,
         goal_review_service=daily_goal_review_service,
         story_scene_timeout_closer=story_scene_timeout_closer,
         persona_dream_service=persona_dream_service,
@@ -6077,6 +6099,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         proactive_attempt_repository=proactive_attempt_repository,
         proactive_dispatcher=proactive_dispatcher,
         proactive_scheduler=proactive_scheduler,
+        current_intent_reconciler=current_intent_reconciler,
         character_tick_executor=proactive_scheduler.character_tick_executor,
         social_tick_executor=proactive_scheduler.social_tick_executor,
         scheduler_metrics=scheduler_metrics,

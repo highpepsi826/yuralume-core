@@ -361,6 +361,32 @@ async def test_prompt_carries_identity_and_signals() -> None:
 
 
 @pytest.mark.asyncio
+async def test_prompt_surfaces_due_internal_intent_candidate_as_non_binding_fact() -> None:
+    from dataclasses import replace
+
+    model = _StubModel('{"should_send": false, "reason": "not now", "message": null}')
+    decider = LLMProactiveDecider(model=model)
+    context = _context()
+    state = replace(
+        context.character.state,
+        current_intent="洗完澡後想找桃桃聊聊。",
+        current_intent_updated_at=context.now - timedelta(hours=1),
+        current_intent_candidate_at=context.now - timedelta(minutes=1),
+        current_intent_candidate_key="b" * 64,
+        current_intent_status="needs_review",
+    )
+
+    await decider.decide(replace(context, character=replace(context.character, state=state)))
+
+    prompt = model.captured_prompt or ""
+    assert "角色私下的短期念頭" in prompt
+    assert "洗完澡後想找桃桃聊聊" in prompt
+    assert "內部檢查時間已到" in prompt
+    assert "可以選擇不發" in prompt
+    assert "b" * 64 not in prompt
+
+
+@pytest.mark.asyncio
 async def test_prompt_has_role_knowledge_boundary_for_user_related_events() -> None:
     model = _StubModel(
         '{"should_send": false, "reason": "checked", "message": null}',
@@ -469,19 +495,19 @@ async def test_prompt_surfaces_unanswered_streak_when_high() -> None:
     decider = LLMProactiveDecider(model=model)
     await decider.decide(_context(unanswered_streak=3))
     prompt = model.captured_prompt or ""
-    assert "連續主動傳了 3 則" in prompt
+    assert "主動傳了 3 則訊息" in prompt
     # Licence to let it land emotionally, plus the anti-parrot guard.
     assert "賭氣" in prompt or "受傷" in prompt
-    assert "換句話重講" in prompt
+    assert "同樣的題材" in prompt
 
 
 @pytest.mark.asyncio
-async def test_prompt_omits_streak_block_when_not_a_run() -> None:
+async def test_prompt_surfaces_single_unanswered_message() -> None:
     model = _StubModel('{"should_send": false, "reason": "ok"}')
     decider = LLMProactiveDecider(model=model)
     await decider.decide(_context(unanswered_streak=1))
     prompt = model.captured_prompt or ""
-    assert "連續未獲回應" not in prompt
+    assert "尚未獲回應" in prompt
 
 
 @pytest.mark.asyncio

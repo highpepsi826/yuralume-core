@@ -28,9 +28,11 @@ Lifecycle:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from hashlib import sha256
 from typing import ClassVar
+from unicodedata import normalize
 from uuid import uuid4
 
 from kokoro_link.domain.entities.conversation import MessageContentMode
@@ -45,6 +47,37 @@ MAX_QUEUED_MESSAGES: int = 8
 the dispatcher force-releases it on the next tick regardless of the
 character's current ``busy_score``. Picked so the eventual follow-up
 prompt fits comfortably within a single LLM call."""
+
+
+def scheduled_promise_dedupe_key(
+    *,
+    character_id: str,
+    promise_intent: str,
+    scheduled_for: datetime,
+) -> str:
+    """Return the stable identity for one open scheduled promise.
+
+    Promise extraction can be retried by the post-turn worker, so the random
+    row UUID is unsuitable for deduplication.  The promise is instead keyed by
+    its character, normalized action, and UTC minute.  Source conversation is
+    deliberately excluded: a player should not receive the same promised
+    action twice merely because the extractor saw mirrored conversation data.
+    """
+    if scheduled_for.tzinfo is None:
+        raise ValueError("scheduled_for must be tz-aware")
+    normalized_intent = " ".join(
+        normalize("NFKC", promise_intent).casefold().split(),
+    )
+    scheduled_minute = scheduled_for.astimezone(timezone.utc).replace(
+        second=0, microsecond=0,
+    )
+    payload = "\x1f".join((
+        character_id.strip(),
+        PendingFollowUpKind.SCHEDULED_PROMISE.value,
+        normalized_intent,
+        scheduled_minute.isoformat(),
+    ))
+    return sha256(payload.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +245,13 @@ class PendingFollowUp:
     ``BUSY_DEFER``. The composer reads this to write the actual message
     — the persona + intent + current context drive content, no
     templating."""
+    dedupe_key: str = ""
+    """Stable key for an open scheduled promise.
+
+    Legacy rows intentionally keep this blank.  Only the database's partial
+    unique index treats a non-empty key as a deduplication constraint, allowing
+    a later promise after a row has reached a terminal status.
+    """
 
     @classmethod
     def new(
@@ -301,6 +341,11 @@ class PendingFollowUp:
             updated_at=timestamp,
             kind=PendingFollowUpKind.SCHEDULED_PROMISE,
             promise_intent=intent[:500],
+            dedupe_key=scheduled_promise_dedupe_key(
+                character_id=character_id,
+                promise_intent=intent[:500],
+                scheduled_for=scheduled_for,
+            ),
         )
 
     @property
@@ -336,6 +381,47 @@ class PendingFollowUp:
             self,
             messages=self.messages + (message,),
             updated_at=now or _utcnow(),
+        )
+
+    def merged_scheduled_promise_context(
+        self,
+        duplicate: "PendingFollowUp",
+    ) -> "PendingFollowUp":
+        """Keep one promise row while retaining distinct source context.
+
+        Repeated extraction can see a mirrored or slightly fuller source turn.
+        That source is useful audit/composer context, but it must not create a
+        second release target. Exact duplicate messages are ignored and the
+        existing queue cap remains in force.
+        """
+        if (
+            self.kind != PendingFollowUpKind.SCHEDULED_PROMISE
+            or duplicate.kind != PendingFollowUpKind.SCHEDULED_PROMISE
+            or not self.dedupe_key
+            or self.dedupe_key != duplicate.dedupe_key
+        ):
+            return self
+        merged = list(self.messages)
+        seen = {
+            (message.content, message.content_mode.value, message.safe_summary)
+            for message in merged
+        }
+        for message in duplicate.messages:
+            identity = (
+                message.content,
+                message.content_mode.value,
+                message.safe_summary,
+            )
+            if identity in seen or len(merged) >= MAX_QUEUED_MESSAGES:
+                continue
+            merged.append(message)
+            seen.add(identity)
+        if len(merged) == len(self.messages):
+            return self
+        return replace(
+            self,
+            messages=tuple(merged),
+            updated_at=max(self.updated_at, duplicate.updated_at),
         )
 
     def marked_resolving(self, *, now: datetime | None = None) -> "PendingFollowUp":
@@ -392,3 +478,70 @@ class PendingFollowUp:
             status=PendingFollowUpStatus.CANCELLED,
             updated_at=timestamp,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledPromiseDuplicateGroup:
+    """Read-only group of legacy open promises with one logical identity.
+
+    The first row is the deterministic canonical candidate (oldest queued
+    timestamp, then id).  This is a reporting value only: callers must not
+    infer that the remaining rows have been deleted, cancelled, or merged.
+    """
+
+    dedupe_key: str
+    character_id: str
+    promise_intent: str
+    scheduled_for: datetime
+    rows: tuple[PendingFollowUp, ...]
+
+    @property
+    def canonical(self) -> PendingFollowUp:
+        return self.rows[0]
+
+
+def group_open_scheduled_promise_duplicates(
+    rows: list[PendingFollowUp] | tuple[PendingFollowUp, ...],
+) -> tuple[ScheduledPromiseDuplicateGroup, ...]:
+    """Group duplicate open scheduled promises without mutating storage.
+
+    Fresh rows already carry ``dedupe_key`` and cannot duplicate because of the
+    partial unique index.  Legacy rows intentionally have an empty stored key,
+    so this computes the same deterministic identity from their content before
+    grouping them for an operator's review.
+    """
+    grouped: dict[str, list[PendingFollowUp]] = {}
+    for row in rows:
+        if (
+            row.kind != PendingFollowUpKind.SCHEDULED_PROMISE
+            or row.status.value not in {
+                PendingFollowUpStatus.QUEUED.value,
+                PendingFollowUpStatus.RESOLVING.value,
+            }
+            or not row.promise_intent.strip()
+        ):
+            continue
+        key = scheduled_promise_dedupe_key(
+            character_id=row.character_id,
+            promise_intent=row.promise_intent,
+            scheduled_for=row.scheduled_for,
+        )
+        grouped.setdefault(key, []).append(row)
+
+    reports: list[ScheduledPromiseDuplicateGroup] = []
+    for key, candidates in grouped.items():
+        if len(candidates) < 2:
+            continue
+        ordered = tuple(sorted(candidates, key=lambda row: (row.queued_at, row.id)))
+        canonical = ordered[0]
+        reports.append(ScheduledPromiseDuplicateGroup(
+            dedupe_key=key,
+            character_id=canonical.character_id,
+            promise_intent=canonical.promise_intent,
+            scheduled_for=canonical.scheduled_for,
+            rows=ordered,
+        ))
+    return tuple(sorted(
+        reports,
+        key=lambda group: (group.scheduled_for, group.character_id, group.dedupe_key),
+    ))

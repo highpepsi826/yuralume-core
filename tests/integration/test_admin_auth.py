@@ -86,6 +86,7 @@ def _auth(token: str) -> dict[str, str]:
         ("GET", "/api/v1/admin/observability/turns"),
         ("GET", "/api/v1/admin/observability/emotion-events"),
         ("GET", "/api/v1/admin/pending-follow-ups"),
+        ("GET", "/api/v1/admin/pending-follow-ups/scheduled-promise-duplicates"),
         ("POST", "/api/v1/admin/pending-follow-ups/tick"),
         ("GET", "/api/v1/admin/providers/catalog"),
         ("GET", "/api/v1/admin/providers"),
@@ -120,6 +121,18 @@ def test_admin_can_list_due_pending_follow_ups(
     client, admin_token, _member = admin_auth_app
     response = client.get(
         "/api/v1/admin/pending-follow-ups",
+        headers=_auth(admin_token),
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_admin_can_read_scheduled_promise_duplicate_report(
+    admin_auth_app: tuple[TestClient, str, str],
+) -> None:
+    client, admin_token, _member = admin_auth_app
+    response = client.get(
+        "/api/v1/admin/pending-follow-ups/scheduled-promise-duplicates",
         headers=_auth(admin_token),
     )
     assert response.status_code == 200

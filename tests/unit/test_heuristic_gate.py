@@ -112,6 +112,12 @@ async def test_blocks_during_quiet_activity_chinese() -> None:
 
 
 @pytest.mark.asyncio
+async def test_allows_normal_rest_or_before_bed_free_time() -> None:
+    assert (await _check(current_activity=_activity("休息"))).passed
+    assert (await _check(current_activity=_activity("睡前閱讀"))).passed
+
+
+@pytest.mark.asyncio
 async def test_allows_non_quiet_activity() -> None:
     verdict = await _check(current_activity=_activity("寫歌詞"))
     assert verdict.passed

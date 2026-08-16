@@ -83,6 +83,13 @@ def test_character_record_round_trip_excludes_b_layer() -> None:
         state_energy=90,
         state_last_active_at=_NOW,
         state_current_intent="泡茶",
+        state_current_intent_updated_at=_NOW,
+        state_current_intent_checked_at=_NOW,
+        state_current_intent_reviewed_at=_NOW,
+        state_current_intent_status="candidate",
+        state_current_intent_source="post_turn",
+        state_current_intent_candidate_at=_NOW,
+        state_current_intent_candidate_key="a" * 64,
         frozen=True,
         frozen_at=_NOW,
         frozen_reason="manual",
@@ -135,6 +142,9 @@ def test_character_record_round_trip_excludes_b_layer() -> None:
     assert rebuilt.name == "芊璃"
     assert rebuilt.date_of_birth == date(2003, 3, 14)
     assert rebuilt.state_last_active_at == _NOW
+    assert rebuilt.state_current_intent_updated_at == _NOW
+    assert rebuilt.state_current_intent_status == "candidate"
+    assert rebuilt.state_current_intent_candidate_key == "a" * 64
     assert rebuilt.frozen is True
     assert rebuilt.companions_json == '[{"name": "室友小美"}]'
 
