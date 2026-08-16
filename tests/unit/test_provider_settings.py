@@ -223,7 +223,14 @@ def test_admin_provider_catalog_lists_byok_providers(monkeypatch) -> None:
 
     assert response.status_code == 200
     ids = {row["id"] for row in response.json()}
-    assert {"openai", "google_gemini", "xai", "google_veo", "custom_tts"} <= ids
+    assert {
+        "openai",
+        "google_gemini",
+        "xai",
+        "google_veo",
+        "elevenlabs_video",
+        "custom_tts",
+    } <= ids
     openai = next(row for row in response.json() if row["id"] == "openai")
     assert "embedding" in openai["capabilities"]
 
@@ -525,6 +532,58 @@ def test_custom_openai_compatible_video_registers_protocol_adapter(monkeypatch) 
     assert isinstance(
         registry.resolve("custom_openai_compatible"),
         OpenAICompatibleVideoProvider,
+    )
+
+
+def test_elevenlabs_video_catalog_and_registry(monkeypatch) -> None:
+    from kokoro_link.infrastructure.provider_settings.catalog import catalog_by_id
+    from kokoro_link.infrastructure.video.elevenlabs_video_provider import (
+        ElevenLabsVideoProvider,
+    )
+
+    entry = catalog_by_id()["elevenlabs_video"]
+    assert entry.capabilities == ("video",)
+    assert entry.default_models == (
+        "veo-3.1-generate-001",
+        "veo-3.1-fast-generate-001",
+    )
+    assert entry.docs_url.endswith("/flows/video/create")
+    assert {field.key for field in entry.config_fields} >= {
+        "base_url",
+        "default_model",
+        "video_poll_interval_seconds",
+        "timeout_seconds",
+    }
+
+    _configure_env(monkeypatch)
+    app = create_app()
+    client = TestClient(app)
+    created = client.post(
+        "/api/v1/admin/providers",
+        json={
+            "provider": "elevenlabs_video",
+            "label": "ElevenLabs Veo",
+            "enabled": True,
+            "capabilities": ["video"],
+            "config": {
+                "default_model": "veo-3.1-fast-generate-001",
+                "video_poll_interval_seconds": 4,
+            },
+            "secret": {"api_key": "elevenlabs-secret"},
+        },
+    )
+
+    assert created.status_code == 201
+    registry = app.state.container.video_profile_registry
+    profile = registry.get_profile("elevenlabs_video")
+    assert profile is not None and profile.api is not None
+    assert profile.api.base_url == "https://api.elevenlabs.io"
+    assert profile.api.model == "veo-3.1-fast-generate-001"
+    assert profile.api.provider == "elevenlabs_video"
+    assert profile.api.poll_interval_seconds == 4.0
+    assert isinstance(
+        registry.resolve("elevenlabs_video"),
+        ElevenLabsVideoProvider,
     )
 
 
@@ -1670,6 +1729,41 @@ def test_test_draft_runs_live_probes_and_reports(monkeypatch) -> None:
     # The request's deep flag reaches the probe engine.
     assert calls and calls[0]["deep"] is True
     assert "sk-unit-secret" not in response.text
+
+
+def test_elevenlabs_video_test_validates_account_without_generating(monkeypatch) -> None:
+    _configure_env(monkeypatch)
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        if request.method == "GET" and request.url.path == "/v1/user":
+            assert request.headers.get("xi-api-key") == "elevenlabs-unit-secret"
+            return httpx.Response(200, json={"user_id": "user-1"})
+        raise AssertionError(f"unexpected probe request {request.method} {request.url}")
+
+    _patch_probe_transport(monkeypatch, handler)
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/admin/providers/test-draft",
+        json={
+            "provider": "elevenlabs_video",
+            "enabled": True,
+            "capabilities": ["video"],
+            "config": {"default_model": "veo-3.1-generate-001"},
+            "secret": {"api_key": "elevenlabs-unit-secret"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert [(probe["action"], probe["ok"]) for probe in body["probes"]] == [
+        ("reachability", True),
+    ]
+    assert "video generation not submitted" in body["probes"][0]["detail"]
+    assert seen == [("GET", "/v1/user")]
+    assert "elevenlabs-unit-secret" not in response.text
 
 
 def test_saved_connection_test_populates_probes_and_status(monkeypatch) -> None:

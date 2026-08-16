@@ -142,6 +142,11 @@ _VIDEO_DEFAULTS: dict[str, tuple[str, str, str]] = {
         "veo-3.1-generate-preview",
         "google_veo",
     ),
+    "elevenlabs_video": (
+        "https://api.elevenlabs.io",
+        "veo-3.1-generate-001",
+        "elevenlabs_video",
+    ),
     # Generic protocol adapter. Operators select a supported wire protocol
     # through ``video_protocol``; this is not a vendor-specific preset.
     "custom_openai_compatible": ("", "", "openai_compatible_video"),
@@ -688,3 +693,26 @@ def build_video_profile(
             ),
         ),
     )
+
+
+def build_video_provider(
+    row: ProviderConnection,
+    secret: dict[str, Any],
+):
+    """Build the runtime video provider for a ``video`` row (probe use).
+
+    Reusing the persisted-row to profile mapping and the runtime registry
+    dispatch keeps the admin Test button on the same native adapter as the
+    active deployment. ``None`` remains a valid outcome for profile kinds
+    that deliberately do not expose a live probe hook.
+    """
+    if row.provider not in _VIDEO_DEFAULTS:
+        return None
+    profile = build_video_profile(row, secret)
+    # Lazy import: the registry pulls in the ComfyUI generator stack, which
+    # normal provider-settings startup does not need merely to show a form.
+    from kokoro_link.infrastructure.video.profile_registry import (
+        VideoProfileRegistry,
+    )
+
+    return VideoProfileRegistry([profile]).resolve(profile.id)

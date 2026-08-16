@@ -13,6 +13,9 @@ from kokoro_link.domain.entities.character import Character
 from kokoro_link.domain.value_objects.character_state import CharacterState
 from kokoro_link.infrastructure.image.gemini_provider import GeminiImageProvider
 from kokoro_link.infrastructure.image.xai_provider import XAIImageProvider
+from kokoro_link.infrastructure.video.elevenlabs_video_provider import (
+    ElevenLabsVideoProvider,
+)
 from kokoro_link.infrastructure.video.google_veo_provider import (
     GoogleVeoVideoProvider,
 )
@@ -378,6 +381,125 @@ async def test_google_veo_provider_still_parses_sdk_normalized_shape(
         character=_character(), positive="quiet street", aspect="portrait",
     )
     assert video == _MP4
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_video_provider_polls_and_downloads_video(
+    restore_httpx: None,
+) -> None:
+    captured: dict[str, Any] = {}
+    poll_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal poll_count
+        if request.method == "POST" and request.url.path == "/v1/flows/video":
+            captured["submit_body"] = json.loads(request.content.decode())
+            captured["api_key"] = request.headers.get("xi-api-key")
+            return httpx.Response(200, json={"id": "generation-1", "status": "pending"})
+        if (
+            request.method == "GET"
+            and request.url.path == "/v1/flows/video/generation-1"
+        ):
+            poll_count += 1
+            captured["poll_api_key"] = request.headers.get("xi-api-key")
+            if poll_count == 1:
+                return httpx.Response(200, json={
+                    "id": "generation-1",
+                    "status": "generating",
+                })
+            return httpx.Response(200, json={
+                "id": "generation-1",
+                "status": "completed",
+                "content_url": "https://storage.example.test/generation-1.mp4",
+                "content_mime_type": "video/mp4",
+            })
+        if str(request.url) == "https://storage.example.test/generation-1.mp4":
+            captured["download_api_key"] = request.headers.get("xi-api-key")
+            return httpx.Response(200, content=_MP4)
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    _patch_httpx(handler)
+    provider = ElevenLabsVideoProvider(
+        api_key="elevenlabs-key",
+        model="veo-3.1-generate-001",
+        poll_interval_seconds=0.01,
+    )
+
+    video = await provider.generate(
+        character=_character(),
+        positive="quiet street",
+        aspect="landscape",
+        length_frames=96,
+    )
+
+    assert video == _MP4
+    assert captured["api_key"] == "elevenlabs-key"
+    assert captured["poll_api_key"] == "elevenlabs-key"
+    # ElevenLabs returns a signed storage URL. The secret must stay with the
+    # ElevenLabs API origin and never travel to the artifact host.
+    assert captured["download_api_key"] is None
+    assert captured["submit_body"]["model_id"] == "veo-3.1-generate-001"
+    assert captured["submit_body"]["duration_secs"] == 6
+    assert captured["submit_body"]["aspect_ratio"] == "16:9"
+    assert captured["submit_body"]["resolution"] == "720p"
+    assert captured["submit_body"]["generate_audio"] is True
+    assert "Character gender identity: 非二元" in captured["submit_body"]["prompt"]
+    assert "Visual gender presentation: androgynous student" in captured["submit_body"]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_video_provider_reports_failed_generation(
+    restore_httpx: None,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/flows/video":
+            return httpx.Response(200, json={"id": "generation-2", "status": "pending"})
+        if request.method == "GET" and request.url.path == "/v1/flows/video/generation-2":
+            return httpx.Response(200, json={
+                "id": "generation-2",
+                "status": "failed",
+                "failure_reason": "moderated",
+                "error_message": "The prompt was moderated.",
+            })
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    _patch_httpx(handler)
+    provider = ElevenLabsVideoProvider(
+        api_key="elevenlabs-key",
+        poll_interval_seconds=0.01,
+    )
+
+    from kokoro_link.contracts.video_provider import VideoGenerationError
+
+    with pytest.raises(VideoGenerationError, match="prompt was moderated"):
+        await provider.generate(character=_character(), positive="quiet street")
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_video_provider_rejects_completed_job_without_url(
+    restore_httpx: None,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/flows/video":
+            return httpx.Response(200, json={"id": "generation-3", "status": "pending"})
+        if request.method == "GET" and request.url.path == "/v1/flows/video/generation-3":
+            return httpx.Response(200, json={
+                "id": "generation-3",
+                "status": "completed",
+                "content_mime_type": "video/mp4",
+            })
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    _patch_httpx(handler)
+    provider = ElevenLabsVideoProvider(
+        api_key="elevenlabs-key",
+        poll_interval_seconds=0.01,
+    )
+
+    from kokoro_link.contracts.video_provider import VideoNoOutputError
+
+    with pytest.raises(VideoNoOutputError, match="without a content URL"):
+        await provider.generate(character=_character(), positive="quiet street")
 
 
 @pytest.mark.asyncio

@@ -8,7 +8,8 @@ request shapes: for each capability it synthesizes an in-memory
 the REAL runtime adapter through the same
 :mod:`adapter_builders` mapping ``runtime_sync`` uses, and calls the
 adapter's optional probe hook (``probe_chat`` / ``probe_embedding`` /
-``probe_tts`` / ``probe_image_generation`` — feature-detected via
+``probe_tts`` / ``probe_image_generation`` / ``probe_video`` —
+feature-detected via
 ``getattr``, mirroring the ``validate_reasoning_effort`` precedent).
 Adapters own their payloads AND their signal-driven retries, so the
 probe automatically inherits every quirk-coping path the runtime learns
@@ -642,7 +643,25 @@ async def _probe_video(
     # Never generate — a job can take minutes even on fast backends, so
     # this deliberately remains a reachability check. Its response must not
     # imply that credentials, the selected protocol, or generation worked.
-    del deep, secret
+    del deep
+    try:
+        provider = adapter_builders.build_video_provider(
+            _draft_row(entry, config, "video"),
+            secret,
+        )
+    except ValueError as exc:
+        return _config_error("video", exc)
+    hook = (
+        getattr(provider, "probe_video", None)
+        if provider is not None
+        else None
+    )
+    if callable(hook):
+        return await _reports_from_hook(
+            "video",
+            "reachability",
+            hook(transport=transport, timeout_seconds=DEFAULT_TIMEOUT_SECONDS),
+        )
     defaults = adapter_builders._VIDEO_DEFAULTS.get(entry.id)
     default_base = defaults[0] if defaults else ""
     base = (_cfg_str(config, "base_url") or default_base).rstrip("/")

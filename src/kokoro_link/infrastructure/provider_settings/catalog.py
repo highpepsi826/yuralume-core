@@ -63,6 +63,13 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
         placeholder="https://api.example.com/v1",
         advanced=True,
     )
+    elevenlabs_base_url = ProviderFieldSpec(
+        key="base_url",
+        label="Base URL",
+        placeholder="https://api.elevenlabs.io",
+        advanced=True,
+        hint="Use the API origin; /v1/flows/video is added automatically.",
+    )
     required_base_url = ProviderFieldSpec(
         key="base_url",
         label="Base URL",
@@ -496,6 +503,28 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
             default_models=("veo-3.1-generate-preview",),
             adapter_kind="google_veo",
             docs_url="https://ai.google.dev/gemini-api/docs/video",
+        ),
+        ProviderCatalogEntry(
+            id="elevenlabs_video",
+            display_name="ElevenLabs Video",
+            capabilities=("video",),
+            auth_fields=(api_key,),
+            config_fields=(
+                elevenlabs_base_url,
+                default_model,
+                video_poll_interval_seconds,
+                timeout_seconds,
+                connection_slug,
+            ),
+            model_catalog_mode="manual",
+            default_models=(
+                "veo-3.1-generate-001",
+                "veo-3.1-fast-generate-001",
+            ),
+            adapter_kind="elevenlabs_video",
+            docs_url=(
+                "https://elevenlabs.io/docs/api-reference/flows/video/create"
+            ),
         ),
         ProviderCatalogEntry(
             id="openrouter",

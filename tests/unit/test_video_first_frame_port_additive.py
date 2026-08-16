@@ -7,7 +7,7 @@ purpose — it is that a later refactor threads it into a prompt builder
 or a payload dict "while we're here" and nobody notices, because the
 adapters have no test that says *nothing changes*.
 
-So each of the four shipped adapters gets the same characterization:
+So each shipped adapter gets the same characterization:
 issue the identical call twice, once without ``first_frame_url`` and
 once with a real-looking URL, and assert the outgoing request and the
 returned bytes are identical. Nondeterministic fields (per-call request
@@ -45,6 +45,9 @@ from kokoro_link.infrastructure.video.cloud_gateway_provider import (
 )
 from kokoro_link.infrastructure.video.external_api_provider import (
     ExternalVideoApiProvider,
+)
+from kokoro_link.infrastructure.video.elevenlabs_video_provider import (
+    ElevenLabsVideoProvider,
 )
 from kokoro_link.infrastructure.video.google_veo_provider import (
     GoogleVeoVideoProvider,
@@ -216,6 +219,51 @@ async def test_google_veo_adapter_ignores_first_frame_url(
     assert len(seen) == 4
     assert seen[0:2] == seen[2:4]
     assert FIRST_FRAME_URL not in json.dumps(seen[2:4])
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_video_adapter_ignores_first_frame_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[dict] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(_recorded(request))
+        if request.method == "POST":
+            return httpx.Response(200, json={
+                "id": "generation-1",
+                "status": "pending",
+            })
+        if request.url.path == "/v1/flows/video/generation-1":
+            return httpx.Response(200, json={
+                "id": "generation-1",
+                "status": "completed",
+                "content_url": "https://api.example/video-1.mp4",
+                "content_mime_type": "video/mp4",
+            })
+        if request.url.path == "/video-1.mp4":
+            return httpx.Response(200, content=b"elevenlabs-mp4")
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    _install_transport(monkeypatch, handler)
+    provider = ElevenLabsVideoProvider(
+        base_url="https://api.example",
+        api_key="key",
+        poll_interval_seconds=0.01,
+    )
+
+    plain = await provider.generate(
+        character=_character(), positive="a walk downtown", length_frames=80,
+    )
+    with_frame = await provider.generate(
+        character=_character(), positive="a walk downtown", length_frames=80,
+        first_frame_url=FIRST_FRAME_URL,
+    )
+
+    assert plain == with_frame == b"elevenlabs-mp4"
+    assert len(seen) == 6
+    assert seen[0:3] == seen[3:6]
+    assert FIRST_FRAME_URL not in json.dumps(seen[3:6])
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,9 @@ from kokoro_link.contracts.video_provider import VideoProviderPort
 from kokoro_link.infrastructure.video.external_api_provider import (
     ExternalVideoApiProvider,
 )
+from kokoro_link.infrastructure.video.elevenlabs_video_provider import (
+    ElevenLabsVideoProvider,
+)
 from kokoro_link.infrastructure.video.google_veo_provider import (
     GoogleVeoVideoProvider,
 )
@@ -80,6 +83,14 @@ class VideoProfileRegistry:
                     api_key=cfg.api_key,
                     model=cfg.model,
                     timeout_seconds=cfg.timeout_seconds,
+                )
+            if provider in {"elevenlabs", "elevenlabs_video"}:
+                return ElevenLabsVideoProvider(
+                    base_url=cfg.base_url,
+                    api_key=cfg.api_key,
+                    model=cfg.model,
+                    timeout_seconds=cfg.timeout_seconds,
+                    poll_interval_seconds=cfg.poll_interval_seconds,
                 )
             if provider in {"openai_video", "openai_compatible_video"}:
                 return OpenAICompatibleVideoProvider(
