@@ -183,8 +183,10 @@ The fix should be a reconciliation pass in the background character tick (or
 an equivalent low-frequency due job), before proactive intention judging:
 
 1. Store `intent_updated_at` and a small source/anchor record when the intent
-   is written. An untimestamped legacy value is treated as stale/unknown, not
-   as a fresh commitment.
+   is written. The existing post-turn processor should emit these small
+   structured fields in its current LLM response; do not add a second LLM call
+   just to timestamp or classify a normal intent. An untimestamped legacy value
+   is treated as stale/unknown, not as a fresh commitment.
 2. Compare the intent's normalized action and time anchor with current and
    upcoming schedule activities, recent promises, conversation state, emotion,
    and the character's local time.
@@ -246,17 +248,66 @@ fulfilled, or no longer possible, and its one-shot release job must follow the
 same state transition. Tests should cover repeated extraction, concurrent
 insertion, rescheduling, distinct times, and resolved rows.
 
+## Performance and Foreground-Wait Constraints (agreed)
+
+The redesign must not turn background character maintenance into part of the
+player's chat response path. The following are acceptance constraints:
+
+- Do not add a Docker service, a second web request, or a second LLM call for a
+  normal player message. Intent metadata is added to the existing post-turn
+  result, and promise deduplication is a database operation.
+- The self-host path may currently await the existing post-turn extraction;
+  that existing wait is the baseline, not a reason to add another synchronous
+  stage. The redesign may add a few structured output fields and one
+  idempotent persistence lookup to that same stage, but reconciliation and
+  new intent-driven schedule creation stay in the background tick.
+- Run intent reconciliation in the existing character scheduler/tick. Start
+  with deterministic time, schedule, and state checks; inspect only characters
+  with a non-empty, stale, or due intent. Do not scan every character on every
+  tick.
+- An ambiguous or impossible intent may use an LLM fallback, but it must be
+  low-frequency, bounded per character, concurrency-limited, and subject to a
+  short timeout. A failed fallback must leave the old state untouched for the
+  next review rather than delaying chat.
+- New intent-driven schedule creation must be asynchronous and idempotent.
+  Existing post-turn promise persistence remains one write point, enhanced with
+  an indexed lookup/unique `dedupe_key`; never run a full duplicate cleanup
+  query inside a player message request.
+- Keep added prompt policy compact. The normal Judge/Decider call may receive
+  a few more facts, but it must not cause an additional model round trip.
+- Background failures are fail-soft: they are logged and retried on a later
+  tick, while the player still receives the normal chat response.
+- Before and after rollout, record chat p50/p95 latency, LLM calls and tokens
+  per turn, background tick duration, and reconciliation fallback count. A
+  rollout is not accepted if normal chat gains an extra LLM call or a material
+  p95 regression.
+
 ## Implementation Order
 
-1. Update judge / decider prompt policy and focused tests.
-2. Narrow quiet-activity tokens and tests.
-3. Add intent timestamps, reconciliation, and schedule-link/idempotency tests.
-4. Add promise/follow-up deduplication at repository/database boundaries and a
-   read-only duplicate report.
-5. If still needed, add a separate `proactive_frequency` setting; do not reuse
-   `operator_pace_preference`.
-6. Build, deploy, observe proactive-attempt reasons for one day, then decide
-   whether the unanswered-message policy needs a second adjustment.
+1. Add latency/LLM-call/tick-duration instrumentation and focused regression
+   tests. This step has no behavior change and establishes the comparison
+   baseline.
+2. Update the Judge/Decider policy, unanswered-message emotional evolution,
+   low-pressure message shape, quiet-activity tokens, and deferred-intent
+   feedback. Keep these as prompt/rule changes in the existing calls; do not
+   introduce a new LLM round trip.
+3. Extend the existing post-turn state output with `intent_updated_at`, source,
+   and time-anchor metadata. Add the smallest required persistence/backup
+   migration and tests; keep legacy unstructured intents readable.
+4. Add promise/follow-up deduplication at repository/database boundaries,
+   including the unique index, idempotent release behavior, and a read-only
+   report for existing duplicates. This is data integrity work, not an LLM
+   step.
+5. Add the background `current_intent` reconciler behind a feature flag. Use
+   deterministic checks and idempotent schedule links first; add the bounded
+   LLM fallback only for stale/ambiguous cases. Add intent age/status to the UI
+   after the backend state is reliable.
+6. If observation still shows a need for user-controlled frequency, add a
+   separate `proactive_frequency` relationship setting. Do not reuse
+   `operator_pace_preference` and do not make this setting an extra LLM call.
+7. Roll out in stages, compare the recorded latency and token metrics, inspect
+   proactive-attempt reasons for one day, and only then decide whether a second
+   adjustment is justified.
 
 ## Guardrails That Must Remain
 
