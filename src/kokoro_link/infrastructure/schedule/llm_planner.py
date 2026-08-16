@@ -161,7 +161,12 @@ class LLMSchedulePlanner(SchedulePlannerPort):
             )
 
         entries = parse_memory_payload(raw)
-        activities = _build_activities(entries, date_=date_, local_tz=local_tz)
+        activities = _build_activities(
+            entries,
+            date_=date_,
+            local_tz=local_tz,
+            operator_primary_language=operator_primary_language,
+        )
         # Defensive merge: if the LLM ignored the commitment directive
         # and didn't emit one of the pre-commitments, splice them back
         # in. ``_resolve_overlaps`` style logic isn't needed here because
@@ -377,13 +382,13 @@ def _schedule_involvement_policy_lines(
     if policy == "invite_required":
         return living_lines + [
             "- 可產生：想邀請使用者、準備邀請、猶豫要不要問對方一起做某事。",
-            "- 邀請尚未被使用者答應時，operator_involvement 請填 operator_invite_pending；description 只寫角色自己的準備或念頭。",
+            "- 這些只是行程中的準備或念頭，operator_involvement 請填 operator_wish；description 只寫角色自己的準備或念頭，絕不可寫成已送出訊息、已問出口或正在等回覆。",
             "- 不可產生：把邀請寫成對方已答應；不可杜撰已約好的時段。",
         ]
     if policy == "shared_allowed":
         return living_lines + [
             "- 可產生：使用者明確允許的共同日常或共同時段。",
-            "- planner 仍不得自行輸出 operator_confirmed_shared；未由 chat 明確確認者請用 operator_invite_pending 或 operator_wish。",
+            "- planner 不得自行輸出 operator_invite_pending 或 operator_confirmed_shared；未由 chat 明確確認者只能用 operator_wish。",
             "- 不可產生：未提供的共同往事、未確認的過去約定或私密背景。",
         ]
     return living_lines + [
@@ -748,6 +753,7 @@ def _build_activities(
     *,
     date_: date,
     local_tz: tzinfo,
+    operator_primary_language: str = "zh-TW",
 ) -> list[ScheduleActivity]:
     day_start = datetime.combine(date_, time(0, 0), tzinfo=local_tz)
     day_end = day_start + timedelta(days=1)
@@ -788,6 +794,13 @@ def _build_activities(
         operator_involvement = _coerce_operator_involvement(
             entry.get("operator_involvement"),
         )
+        if operator_involvement == OPERATOR_WISH_ROLE and _claims_outbound_invitation(
+            description,
+        ):
+            # The day planner has no delivery capability. A message claimed by
+            # its prose would later become a false episodic memory, so keep the
+            # private preparation but remove the invented external action.
+            description = _unsent_invitation_draft(operator_primary_language)
         scene_privacy = _coerce_scene_privacy(entry.get("scene_privacy"))
         meeting_affordance = _coerce_meeting_affordance(
             entry.get("meeting_affordance"),
@@ -910,12 +923,64 @@ def _coerce_operator_involvement(raw: Any) -> str | None:
         return None
     value = raw.strip().lower()
     aliases = {
-        "invite_pending": OPERATOR_INVITE_PENDING_ROLE,
-        OPERATOR_INVITE_PENDING_ROLE: OPERATOR_INVITE_PENDING_ROLE,
+        # A daily plan cannot send a message. Reserve invite_pending for a
+        # post-turn adjustment after the character actually made an invite in
+        # chat; a planner-only draft remains an operator_wish.
+        "invite_pending": OPERATOR_WISH_ROLE,
+        OPERATOR_INVITE_PENDING_ROLE: OPERATOR_WISH_ROLE,
         "wish": OPERATOR_WISH_ROLE,
         OPERATOR_WISH_ROLE: OPERATOR_WISH_ROLE,
     }
     return aliases.get(value)
+
+
+_OUTBOUND_INVITATION_MARKERS = (
+    "最後才送出",
+    "最後送出",
+    "已送出",
+    "送出邀請",
+    "發出邀請",
+    "傳送邀請",
+    "發送邀請",
+    "傳訊給",
+    "私訊給",
+    "問了使用者",
+    "詢問了使用者",
+    "sent an invitation",
+    "sent the invitation",
+    "messaged the user",
+    "invited the user",
+    "asked the user",
+    "送信した",
+    "メッセージを送った",
+)
+
+
+def _claims_outbound_invitation(description: str) -> bool:
+    """Whether a planner-only description incorrectly asserts delivery."""
+
+    lowered = description.lower()
+    return any(marker in lowered for marker in _OUTBOUND_INVITATION_MARKERS)
+
+
+def _unsent_invitation_draft(operator_primary_language: str) -> str:
+    """Return a truthful fallback when the planner invented a sent message."""
+
+    language = (operator_primary_language or "").lower()
+    if language.startswith("ja"):
+        return (
+            "ユーザーを誘う内容を整理したが、まだ送らず、"
+            "次に自然に話せるときに聞いてみることにした。"
+        )
+    if language.startswith("zh"):
+        return (
+            "想邀請使用者的內容已整理好，但暫時沒有送出，"
+            "留待下次自然聊天時再問出口。"
+        )
+    return (
+        "Prepared what to ask the player, but did not send it; "
+        "will bring it up naturally in a later conversation."
+    )
 
 
 def _operator_participant_refs(role: str | None) -> tuple[ParticipantRef, ...]:

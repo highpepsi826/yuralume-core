@@ -20,6 +20,24 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-16 - Preserve unsent schedule invitations
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: updated `local/customizations` with the planner guard and its
+  focused regression coverage.
+- Backup: `pre-unsent-invitation-fix-20260816-211659.dump`
+- Deployment: rebuilt the local `app` image and restarted the Compose stack.
+  The planner now records an unspoken invitation as `operator_wish`; it cannot
+  represent a daily-plan draft as an already-sent invitation.
+- Verification: 51 focused schedule, aftermath, and memorializer tests passed;
+  Docker build succeeded; all services were healthy and
+  `http://127.0.0.1:8012/health` returned `status: ok`. Corrected the affected
+  existing schedule activity and episodic-memory record in one verified
+  transaction.
+- Follow-up: `none`
+
 ### 2026-08-16 - OpenAI-compatible video protocols
 
 - Status: completed

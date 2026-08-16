@@ -9,7 +9,7 @@ import pytest
 from kokoro_link.domain.entities.character import Character
 from kokoro_link.domain.entities.schedule import (
     MeetingAffordance,
-    OPERATOR_INVITE_PENDING_ROLE,
+    OPERATOR_WISH_ROLE,
     ScenePrivacy,
 )
 from kokoro_link.domain.value_objects.character_state import CharacterState
@@ -89,7 +89,7 @@ async def test_parses_scene_access_affordance_without_location_keyword_override(
 
 
 @pytest.mark.asyncio
-async def test_parses_operator_involvement_as_participant_ref() -> None:
+async def test_planner_keeps_an_unsent_invite_as_a_private_wish() -> None:
     payload = (
         '[{"start":"19:00","end":"20:00","description":"想邀請對方看電影",'
         '"category":"social","operator_involvement":"invite_pending",'
@@ -107,7 +107,28 @@ async def test_parses_operator_involvement_as_participant_ref() -> None:
         ref for ref in activity.participant_refs if ref.actor_kind == "operator"
     ]
     assert len(operator_refs) == 1
-    assert operator_refs[0].role == OPERATOR_INVITE_PENDING_ROLE
+    assert operator_refs[0].role == OPERATOR_WISH_ROLE
+
+
+@pytest.mark.asyncio
+async def test_planner_removes_an_invented_outbound_invitation() -> None:
+    payload = (
+        '[{"start":"19:00","end":"20:00",'
+        '"description":"反覆刪改邀請文字後，最後才送出詢問",'
+        '"category":"social","operator_involvement":"invite_pending"}]'
+    )
+    planner = LLMSchedulePlanner(model=FakeModel(payload))
+
+    schedule = await planner.plan_day(
+        character=_character(), date_=date(2026, 4, 18), local_tz=UTC,
+    )
+
+    activity = schedule.activities[0]
+    assert activity.description == (
+        "想邀請使用者的內容已整理好，但暫時沒有送出，"
+        "留待下次自然聊天時再問出口。"
+    )
+    assert activity.participant_refs[0].role == OPERATOR_WISH_ROLE
 
 
 @pytest.mark.asyncio
@@ -563,6 +584,8 @@ async def test_prompt_softens_sleep_privacy_and_adds_cohabitation_co_presence() 
     assert "夜間休息／睡眠屬共同生活" in prompt
     assert "不必另切成不可打擾的獨處硬段" in prompt
     assert "室友／家人／寵物不適用此放寬" in prompt
+    assert "planner 不得自行輸出 operator_invite_pending" in prompt
+    assert "未由 chat 明確確認者只能用 operator_wish" in prompt
 
 
 @pytest.mark.asyncio

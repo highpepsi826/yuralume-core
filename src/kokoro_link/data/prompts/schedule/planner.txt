@@ -27,7 +27,7 @@ ${location_rule_lines}
   0.9+ 真的碰不了手機（睡著、考試、重要會議/面試當下、台上、開車）。
   一天中 0.9+ 的時段通常只有零到兩段、各一兩小時內；不要把一整天排成高 busy_score。大部分現代人即使在工作也能回訊息。
 - companion_names 是 list[str]，列出該時段「跟誰一起」（請優先使用上方『私人 NPC 同伴』清單裡的名字；獨自進行就給 []）。不要強行填入主角自己的名字；睡覺、獨處、自我活動類時段保持 [] 即可。
-- operator_involvement 是使用者參與狀態，只能是 null / "operator_invite_pending" / "operator_wish"。planner 自身不得輸出 "operator_confirmed_shared"；只有 chat 中使用者已明確答應後，系統才會升級成 confirmed_shared。若只是想邀請或想到使用者，請用此結構欄位表達，不要把使用者寫進 description、location 或 companion_names，也不要寫成「和你一起已約好」。
+- operator_involvement 是使用者參與狀態。planner 自身只可輸出 null 或 "operator_wish"，不得輸出 "operator_invite_pending" 或 "operator_confirmed_shared"；後兩者只能由真實 chat 回合中的已提出邀請或已明確答應建立。若只是想邀請、準備邀請或猶豫要不要問使用者，請填 "operator_wish"，不要把使用者寫進 description、location 或 companion_names，也不要寫成「已送出訊息／已問出口／正在等回覆」或「和你一起已約好」。
 - scene_privacy 是語意欄位，只能是 public / semi_public / private / intimate：
   public=公共或開放活動，semi_public=半開放需基本禮貌或場域限制，private=私人生活或住處/工作私域，intimate=高度脆弱或私密狀態。請由你綜合活動、關係與場景語意判斷，不要只看地點字面。
 - meeting_affordance 是語意欄位，只能是 open_to_encounter / invite_only / not_available：
@@ -59,7 +59,7 @@ ${recent_activity_block}${story_events_block}
 - description、category、location 是玩家可見自然語言欄位，必須使用上方「玩家可見自然語言輸出語言（BCP 47 標籤）」指定的語言；固定格式時間與 companion_names 原名照原文。
 - start / end 是 HH:MM 字串，end 必須晚於 start。
 - companion_names 必填，但可以是空陣列 []。
-- operator_involvement 必填；沒有使用者參與時給 null。想邀請但未答應給 "operator_invite_pending"；只是想到/準備話題但未邀請給 "operator_wish"。
+- operator_involvement 必填；沒有使用者參與時給 null。planner 中任何尚未在真實 chat 提出的邀請念頭、草稿或準備都給 "operator_wish"；不得輸出 "operator_invite_pending"。
 - scene_privacy / meeting_affordance 必填；若不確定也請做最佳語意判斷，不要留空或輸出其他字串。
 
 範例：
