@@ -1,0 +1,24 @@
+# Local source-build overlay for the published self-host stack.
+#
+# Copy this file to C:\Entertainment\yuralume\docker-compose.local.yml.
+# It assumes the deployment and source directories are siblings:
+#   C:\Entertainment\yuralume
+#   C:\Entertainment\yuralume-src
+#
+# Only `app` builds. `migrate` uses the same local image, keeping source code
+# and Alembic migrations in sync. Other services continue using upstream images
+# and existing Docker volumes.
+
+services:
+  app:
+    image: yuralume-local/app:custom
+    build:
+      context: ../yuralume-src
+      dockerfile: docker/app/Dockerfile
+      args:
+        YURALUME_BUILD_TAG: local-customizations
+        YURALUME_BUILD_SHA: ${YURALUME_BUILD_SHA:-local}
+        YURALUME_BUILD_TIME: ${YURALUME_BUILD_TIME:-}
+
+  migrate:
+    image: yuralume-local/app:custom
