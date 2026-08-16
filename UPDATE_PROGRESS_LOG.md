@@ -20,6 +20,24 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-16 - Native ElevenLabs Video provider
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed `ba402e4` on `local/customizations`; GitHub push is
+  pending explicit confirmation for this repository egress.
+- Backup: `not required`; no schema or data migration
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated the local
+  `app` and `migrate` services. Added the `ElevenLabs Video` provider for
+  ElevenLabs-hosted Veo 3.1 models, with asynchronous job polling and signed
+  artifact download.
+- Verification: 82 focused backend tests passed; Docker build succeeded; all
+  Compose services were healthy and `http://127.0.0.1:8012/health` returned
+  `status: ok`.
+- Follow-up: create an `ElevenLabs Video` connection in Settings, then select
+  it as the active video profile before running a real generation.
+
 ### 2026-08-16 - Preserve unsent schedule invitations
 
 - Status: completed
