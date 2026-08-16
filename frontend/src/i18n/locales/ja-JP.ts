@@ -4438,6 +4438,13 @@ export const messages: MessageSchema = {
         base_url: { label: 'Base URL', placeholder: 'https://api.example.com/v1' },
         default_model: { label: 'デフォルト model', placeholder: 'プロバイダー既定' },
         image_model: { label: '画像生成 model', placeholder: 'gpt-image-2' },
+        video_model: { label: '動画 model', placeholder: 'sora-2' },
+        video_protocol: {
+          label: '動画 API プロトコル',
+          placeholder: 'プロトコルを選択',
+          hint: 'provider のドキュメントで明示されたプロトコルだけを選んでください。OpenAI Videos は /videos に送信して /content を取得し、Generations polling は /videos/generations に送信して request id をポーリングします。',
+        },
+        video_poll_interval_seconds: { label: '動画ポーリング間隔（秒）', placeholder: '10' },
         embedding_model: { label: 'ベクトル model', placeholder: 'text-embedding-bge-m3' },
         embedding_dimension: { label: 'ベクトル次元', placeholder: '1024' },
         request_dimensions: { label: 'dimensions パラメータを送信' },

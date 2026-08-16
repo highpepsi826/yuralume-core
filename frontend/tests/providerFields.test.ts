@@ -116,6 +116,21 @@ describe('providerFields', () => {
     expect(keys).not.toContain('default_model')
   })
 
+  it('uses video-specific settings instead of the chat default model', () => {
+    const entry = catalogEntry('custom_openai_compatible', ['video'], [
+      'default_model',
+      'video_model',
+      'video_protocol',
+      'video_poll_interval_seconds',
+      'timeout_seconds',
+    ])
+    const keys = fieldsForCapability(entry, 'video').map(f => f.key)
+    expect(keys).toContain('video_model')
+    expect(keys).toContain('video_protocol')
+    expect(keys).toContain('video_poll_interval_seconds')
+    expect(keys).not.toContain('default_model')
+  })
+
   describe('splitRowConfig', () => {
     it('routes stored base_url into the shared bucket', () => {
       const { shared, perCapability } = splitRowConfig(

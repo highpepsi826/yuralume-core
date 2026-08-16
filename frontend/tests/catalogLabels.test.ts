@@ -123,6 +123,9 @@ const PROVIDER_FIELD_KEYS = [
   'thinking_budget_tokens',
   'timeout_seconds',
   'tts_model',
+  'video_model',
+  'video_poll_interval_seconds',
+  'video_protocol',
   'voice_id',
   'workflow_file',
 ] as const
@@ -150,12 +153,18 @@ const PROVIDER_FIELD_KEYS_WITH_PLACEHOLDER = [
   'thinking_budget_tokens',
   'timeout_seconds',
   'tts_model',
+  'video_model',
+  'video_poll_interval_seconds',
+  'video_protocol',
   'voice_id',
   'workflow_file',
 ] as const
 
 // Field keys whose backend spec ships a persistent, non-empty hint.
-const PROVIDER_FIELD_KEYS_WITH_HINT = ['searxng_base_url'] as const
+const PROVIDER_FIELD_KEYS_WITH_HINT = [
+  'searxng_base_url',
+  'video_protocol',
+] as const
 
 const LOCALES = [
   ['zh-TW', zhTW],

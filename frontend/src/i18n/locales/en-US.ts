@@ -4368,6 +4368,13 @@ export const messages: MessageSchema = {
         base_url: { label: 'Base URL', placeholder: 'https://api.example.com/v1' },
         default_model: { label: 'Default model', placeholder: 'provider default' },
         image_model: { label: 'Image model', placeholder: 'gpt-image-2' },
+        video_model: { label: 'Video model', placeholder: 'sora-2' },
+        video_protocol: {
+          label: 'Video API protocol',
+          placeholder: 'Choose a protocol',
+          hint: 'Choose only the protocol documented by your provider. OpenAI Videos submits to /videos and downloads /content; Generations polling submits to /videos/generations and polls a request id.',
+        },
+        video_poll_interval_seconds: { label: 'Video poll interval (seconds)', placeholder: '10' },
         embedding_model: { label: 'Embedding model', placeholder: 'text-embedding-bge-m3' },
         embedding_dimension: { label: 'Embedding dimension', placeholder: '1024' },
         request_dimensions: { label: 'Request dimensions' },

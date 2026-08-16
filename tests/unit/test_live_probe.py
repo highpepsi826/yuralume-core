@@ -633,7 +633,7 @@ def test_video_reachability_only_even_when_deep() -> None:
     assert [(report.action, report.ok) for report in reports] == [
         ("reachability", True),
     ]
-    assert "intentionally unsupported" in reports[0].detail
+    assert "credentials, model, selected protocol" in reports[0].detail
 
 
 def test_unknown_capability_is_not_probed_ok() -> None:

@@ -37,6 +37,8 @@ class ExternalVideoApiProfileConfig:
     model: str
     provider: str = "gateway"
     timeout_seconds: float = 1800.0
+    video_protocol: str = ""
+    poll_interval_seconds: float = 10.0
 
 
 @dataclass(frozen=True, slots=True)

@@ -154,7 +154,7 @@ function supportsModelDiscovery(
     return capability === 'llm' || capability === 'image' || capability === 'video'
   }
   if (entry.adapter_kind === 'openai' || entry.adapter_kind === 'openai_compatible') {
-    return capability === 'llm' || capability === 'embedding' || capability === 'image' || capability === 'tts' || capability === 'search'
+    return capability === 'llm' || capability === 'embedding' || capability === 'image' || capability === 'video' || capability === 'tts' || capability === 'search'
   }
   return false
 }
@@ -164,6 +164,7 @@ function isModelField(field: ProviderFieldSpec): boolean {
     field.key === 'default_model'
     || field.key === 'embedding_model'
     || field.key === 'image_model'
+    || field.key === 'video_model'
     || field.key === 'tts_model'
     || field.key === 'search_model'
   )
@@ -895,6 +896,16 @@ onMounted(loadAll)
                       v-model="form.shared[field.key]"
                       type="checkbox"
                     />
+                    <UiCombobox
+                      v-else-if="field.kind === 'select'"
+                      :model-value="String(form.shared[field.key] ?? '')"
+                      :options="field.options"
+                      :placeholder="fieldPlaceholder(field)"
+                      :aria-label="fieldLabel(field)"
+                      :allow-custom="false"
+                      :clearable="false"
+                      @update:model-value="form.shared[field.key] = $event"
+                    />
                     <input
                       v-else
                       v-model="form.shared[field.key]"
@@ -980,6 +991,16 @@ onMounted(loadAll)
                           v-if="field.kind === 'checkbox'"
                           v-model="form.perCapability[capability].config[field.key]"
                           type="checkbox"
+                        />
+                        <UiCombobox
+                          v-else-if="field.kind === 'select'"
+                          :model-value="String(form.perCapability[capability].config[field.key] ?? '')"
+                          :options="field.options"
+                          :placeholder="fieldPlaceholder(field)"
+                          :aria-label="fieldLabel(field)"
+                          :allow-custom="false"
+                          :clearable="false"
+                          @update:model-value="form.perCapability[capability].config[field.key] = $event"
                         />
                         <template v-else-if="isCheckpointField(field)">
                           <div class="provider-settings__model-row">

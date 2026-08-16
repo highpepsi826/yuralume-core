@@ -142,6 +142,9 @@ _VIDEO_DEFAULTS: dict[str, tuple[str, str, str]] = {
         "veo-3.1-generate-preview",
         "google_veo",
     ),
+    # Generic protocol adapter. Operators select a supported wire protocol
+    # through ``video_protocol``; this is not a vendor-specific preset.
+    "custom_openai_compatible": ("", "", "openai_compatible_video"),
     "custom_media_gateway": ("", "", "gateway"),
     "yuralume_cloud": ("", "", "gateway"),
 }
@@ -663,9 +666,12 @@ def build_video_profile(
         )
     base_url, model, provider = _VIDEO_DEFAULTS[row.provider]
     base_url = _config_str(row, "base_url", base_url)
-    model = _config_str(row, "default_model", model)
+    model_field = (
+        "video_model" if provider == "openai_compatible_video" else "default_model"
+    )
+    model = _config_str(row, model_field, model)
     if not base_url or not model:
-        raise ValueError("video provider requires base_url and default_model")
+        raise ValueError(f"video provider requires base_url and {model_field}")
     return VideoProfile(
         id=runtime_provider_id(row),
         label=row.label,
@@ -676,5 +682,9 @@ def build_video_profile(
             model=model,
             provider=_config_str(row, "provider", provider),
             timeout_seconds=float(_config_int(row, "timeout_seconds", 1800)),
+            video_protocol=_config_str(row, "video_protocol", ""),
+            poll_interval_seconds=float(
+                _config_int(row, "video_poll_interval_seconds", 10),
+            ),
         ),
     )

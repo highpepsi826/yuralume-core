@@ -76,8 +76,8 @@ _GATEWAY_REACHABLE_DETAIL = (
     "endpoint reachable — generation not verified (run deep test)"
 )
 _VIDEO_REACHABLE_DETAIL = (
-    "endpoint reachable — deep video validation is intentionally "
-    "unsupported (generation takes minutes)"
+    "endpoint reachable only — credentials, model, selected protocol, and "
+    "video generation are not verified"
 )
 
 
@@ -639,9 +639,9 @@ async def _probe_video(
     deep: bool,
     transport: httpx.AsyncBaseTransport | None,
 ) -> list[ProbeReport]:
-    # Never generate — video jobs take minutes even on fast backends, so
-    # deep mode intentionally stays a reachability check owned by the
-    # engine (no adapter hook by design).
+    # Never generate — a job can take minutes even on fast backends, so
+    # this deliberately remains a reachability check. Its response must not
+    # imply that credentials, the selected protocol, or generation worked.
     del deep, secret
     defaults = adapter_builders._VIDEO_DEFAULTS.get(entry.id)
     default_base = defaults[0] if defaults else ""

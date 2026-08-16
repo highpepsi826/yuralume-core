@@ -4367,6 +4367,13 @@ export const messages = {
         base_url: { label: 'Base URL', placeholder: 'https://api.example.com/v1' },
         default_model: { label: '預設 model', placeholder: 'provider 預設' },
         image_model: { label: '生圖 model', placeholder: 'gpt-image-2' },
+        video_model: { label: '影片 model', placeholder: 'sora-2' },
+        video_protocol: {
+          label: '影片 API 協定',
+          placeholder: '選擇協定',
+          hint: '只選擇 provider 文件明確支援的協定。OpenAI Videos 會送到 /videos 並下載 /content；Generations polling 會送到 /videos/generations 並輪詢 request id。',
+        },
+        video_poll_interval_seconds: { label: '影片輪詢間隔（秒）', placeholder: '10' },
         embedding_model: { label: '向量 model', placeholder: 'text-embedding-bge-m3' },
         embedding_dimension: { label: '向量維度', placeholder: '1024' },
         request_dimensions: { label: '傳送 dimensions 參數' },

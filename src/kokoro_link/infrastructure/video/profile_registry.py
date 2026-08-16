@@ -22,6 +22,9 @@ from kokoro_link.infrastructure.video.external_api_provider import (
 from kokoro_link.infrastructure.video.google_veo_provider import (
     GoogleVeoVideoProvider,
 )
+from kokoro_link.infrastructure.video.openai_compatible_provider import (
+    OpenAICompatibleVideoProvider,
+)
 from kokoro_link.infrastructure.tools.comfyui.client import (
     AsyncComfyUiClient,
 )
@@ -77,6 +80,15 @@ class VideoProfileRegistry:
                     api_key=cfg.api_key,
                     model=cfg.model,
                     timeout_seconds=cfg.timeout_seconds,
+                )
+            if provider in {"openai_video", "openai_compatible_video"}:
+                return OpenAICompatibleVideoProvider(
+                    base_url=cfg.base_url,
+                    api_key=cfg.api_key,
+                    model=cfg.model,
+                    protocol=cfg.video_protocol,
+                    timeout_seconds=cfg.timeout_seconds,
+                    poll_interval_seconds=cfg.poll_interval_seconds,
                 )
             return ExternalVideoApiProvider(
                 base_url=cfg.base_url,

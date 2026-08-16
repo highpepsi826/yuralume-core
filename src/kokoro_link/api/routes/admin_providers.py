@@ -76,6 +76,7 @@ class ProviderFieldSpecResponse(BaseModel):
     placeholder: str
     secret: bool
     advanced: bool
+    options: list[str] = Field(default_factory=list)
     hint: str = ""
 
 
@@ -393,6 +394,7 @@ def _field(field: ProviderFieldSpec) -> ProviderFieldSpecResponse:
         placeholder=field.placeholder,
         secret=field.secret,
         advanced=field.advanced,
+        options=list(field.options),
         hint=field.hint,
     )
 

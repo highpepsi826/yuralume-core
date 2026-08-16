@@ -39,7 +39,13 @@ export const CAPABILITY_FIELD_KEYS: Record<string, ReadonlySet<string>> = {
     'timeout_seconds',
   ]),
   image: new Set(['image_model', 'default_model', 'timeout_seconds']),
-  video: new Set(['default_model', 'timeout_seconds']),
+  video: new Set([
+    'default_model',
+    'video_model',
+    'video_protocol',
+    'video_poll_interval_seconds',
+    'timeout_seconds',
+  ]),
   tts: new Set([
     'tts_model',
     'default_model',
@@ -74,10 +80,14 @@ export function fieldsForCapability(
   let fields = entry.config_fields.filter(f => keys.has(f.key))
   const hasImageModel = entry.config_fields.some(f => f.key === 'image_model')
   const hasTtsModel = entry.config_fields.some(f => f.key === 'tts_model')
+  const hasVideoModel = entry.config_fields.some(f => f.key === 'video_model')
   if (capability === 'image' && hasImageModel) {
     fields = fields.filter(f => f.key !== 'default_model')
   }
   if (capability === 'tts' && hasTtsModel) {
+    fields = fields.filter(f => f.key !== 'default_model')
+  }
+  if (capability === 'video' && hasVideoModel) {
     fields = fields.filter(f => f.key !== 'default_model')
   }
   return fields

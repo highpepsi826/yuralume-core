@@ -20,6 +20,23 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-16 - OpenAI-compatible video protocols
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: added protocol-based video support on `local/customizations`
+  for Custom OpenAI-Compatible.
+- Backup: `not required`; no schema migration
+- Deployment: rebuilt and force-recreated the local `app` image. Custom
+  OpenAI-Compatible now supports `openai_videos` and `generations_polling`
+  video protocols.
+- Verification: 99 focused backend tests, 51 frontend tests, frontend
+  production build, and Docker app build passed. Compose was healthy and
+  `http://127.0.0.1:8012/health` returned `status: ok`.
+- Follow-up: configure a provider-specific video model and documented
+  protocol before running a real video generation.
+
 ### 2026-08-16 - Local source customization workflow
 
 - Status: completed

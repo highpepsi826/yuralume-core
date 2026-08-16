@@ -9,6 +9,7 @@ export interface ProviderFieldSpec {
   placeholder: string
   secret: boolean
   advanced: boolean
+  options: string[]
   hint?: string
 }
 

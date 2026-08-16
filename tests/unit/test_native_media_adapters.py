@@ -16,6 +16,9 @@ from kokoro_link.infrastructure.image.xai_provider import XAIImageProvider
 from kokoro_link.infrastructure.video.google_veo_provider import (
     GoogleVeoVideoProvider,
 )
+from kokoro_link.infrastructure.video.openai_compatible_provider import (
+    OpenAICompatibleVideoProvider,
+)
 
 
 _PNG = b"\x89PNG\r\n\x1a\nnative-image"
@@ -375,3 +378,105 @@ async def test_google_veo_provider_still_parses_sdk_normalized_shape(
         character=_character(), positive="quiet street", aspect="portrait",
     )
     assert video == _MP4
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_video_provider_uses_openai_videos_protocol(
+    restore_httpx: None,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/videos":
+            captured["submit_body"] = json.loads(request.content.decode())
+            captured["auth"] = request.headers.get("authorization")
+            return httpx.Response(200, json={"id": "vid-1", "status": "queued"})
+        if request.method == "GET" and request.url.path == "/v1/videos/vid-1":
+            return httpx.Response(200, json={"id": "vid-1", "status": "completed"})
+        if request.method == "GET" and request.url.path == "/v1/videos/vid-1/content":
+            return httpx.Response(200, content=_MP4)
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    _patch_httpx(handler)
+    provider = OpenAICompatibleVideoProvider(
+        base_url="https://video.example.test/v1",
+        api_key="video-key",
+        model="sora-2",
+        protocol="openai_videos",
+        poll_interval_seconds=0.01,
+    )
+
+    video = await provider.generate(
+        character=_character(),
+        positive="quiet street",
+        aspect="landscape",
+        length_frames=96,
+    )
+
+    assert video == _MP4
+    assert captured["auth"] == "Bearer video-key"
+    assert captured["submit_body"]["model"] == "sora-2"
+    assert captured["submit_body"]["seconds"] == "8"
+    assert captured["submit_body"]["size"] == "1280x720"
+    assert "Character gender identity: 非二元" in captured["submit_body"]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_video_provider_uses_generations_polling(
+    restore_httpx: None,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/videos/generations":
+            captured["submit_body"] = json.loads(request.content.decode())
+            return httpx.Response(
+                200,
+                json={"request_id": "req-1", "status": "queued"},
+            )
+        if request.method == "GET" and request.url.path == "/v1/videos/req-1":
+            return httpx.Response(200, json={
+                "request_id": "req-1",
+                "status": "succeeded",
+                "video": {"url": "/artifacts/req-1.mp4"},
+            })
+        if request.method == "GET" and request.url.path == "/artifacts/req-1.mp4":
+            captured["download_auth"] = request.headers.get("authorization")
+            return httpx.Response(200, content=_MP4)
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    _patch_httpx(handler)
+    provider = OpenAICompatibleVideoProvider(
+        base_url="https://video.example.test/v1",
+        api_key="video-key",
+        model="provider-video-1",
+        protocol="generations_polling",
+        poll_interval_seconds=0.01,
+    )
+
+    video = await provider.generate(
+        character=_character(),
+        positive="quiet street",
+        aspect="portrait",
+        length_frames=81,
+    )
+
+    assert video == _MP4
+    assert captured["download_auth"] == "Bearer video-key"
+    assert captured["submit_body"] == {
+        "model": "provider-video-1",
+        "prompt": captured["submit_body"]["prompt"],
+        "duration": 5,
+        "aspect_ratio": "9:16",
+        "resolution": "720p",
+    }
+
+
+def test_openai_compatible_video_provider_rejects_unknown_protocol() -> None:
+    with pytest.raises(ValueError, match="unsupported OpenAI-compatible video protocol"):
+        OpenAICompatibleVideoProvider(
+            base_url="https://video.example.test/v1",
+            api_key="video-key",
+            model="video-model",
+            protocol="not-a-protocol",
+        )

@@ -533,7 +533,7 @@ class ProviderConnectionService:
         fields: tuple[Any, ...],
         payload_name: str,
     ) -> dict[str, Any]:
-        allowed = {field.key for field in fields}
+        allowed = {field.key: field for field in fields}
         cleaned: dict[str, Any] = {}
         for key, value in config.items():
             if not isinstance(key, str):
@@ -541,7 +541,8 @@ class ProviderConnectionService:
             normalized_key = key.strip()
             if not normalized_key:
                 continue
-            if normalized_key not in allowed:
+            field = allowed.get(normalized_key)
+            if field is None:
                 raise ProviderConnectionError(
                     f"{entry.id} {payload_name} does not support field: {normalized_key}",
                 )
@@ -549,6 +550,11 @@ class ProviderConnectionService:
                 value = value.strip()
             if value in ("", None):
                 continue
+            if field.options and value not in field.options:
+                raise ProviderConnectionError(
+                    f"{entry.id} {payload_name} field {normalized_key!r} "
+                    f"must be one of: {', '.join(field.options)}",
+                )
             cleaned[normalized_key] = value
         return cleaned
 

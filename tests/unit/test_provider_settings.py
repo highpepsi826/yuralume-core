@@ -487,6 +487,71 @@ def test_admin_provider_create_registers_image_and_video_profiles(monkeypatch) -
     ]
 
 
+def test_custom_openai_compatible_video_registers_protocol_adapter(monkeypatch) -> None:
+    from kokoro_link.infrastructure.video.openai_compatible_provider import (
+        OpenAICompatibleVideoProvider,
+    )
+
+    _configure_env(monkeypatch)
+    app = create_app()
+    client = TestClient(app)
+
+    created = client.post(
+        "/api/v1/admin/providers",
+        json={
+            "provider": "custom_openai_compatible",
+            "label": "Custom video",
+            "enabled": True,
+            "capabilities": ["video"],
+            "config": {
+                "base_url": "https://video.example.test/v1",
+                "video_model": "provider-video-1",
+                "video_protocol": "generations_polling",
+                "video_poll_interval_seconds": 4,
+            },
+            "secret": {"api_key": "video-secret"},
+        },
+    )
+
+    assert created.status_code == 201
+    registry = app.state.container.video_profile_registry
+    profile = registry.get_profile("custom_openai_compatible")
+    assert profile is not None
+    assert profile.api is not None
+    assert profile.api.model == "provider-video-1"
+    assert profile.api.provider == "openai_compatible_video"
+    assert profile.api.video_protocol == "generations_polling"
+    assert profile.api.poll_interval_seconds == 4.0
+    assert isinstance(
+        registry.resolve("custom_openai_compatible"),
+        OpenAICompatibleVideoProvider,
+    )
+
+
+def test_custom_openai_compatible_video_rejects_unknown_protocol(monkeypatch) -> None:
+    _configure_env(monkeypatch)
+    client = TestClient(create_app())
+
+    created = client.post(
+        "/api/v1/admin/providers",
+        json={
+            "provider": "custom_openai_compatible",
+            "label": "Invalid custom video",
+            "enabled": True,
+            "capabilities": ["video"],
+            "config": {
+                "base_url": "https://video.example.test/v1",
+                "video_model": "provider-video-1",
+                "video_protocol": "unknown_protocol",
+            },
+            "secret": {"api_key": "video-secret"},
+        },
+    )
+
+    assert created.status_code == 400
+    assert "must be one of: openai_videos, generations_polling" in created.text
+
+
 def test_admin_provider_create_registers_tts_catalog(monkeypatch) -> None:
     _configure_env(monkeypatch)
     client = TestClient(create_app())

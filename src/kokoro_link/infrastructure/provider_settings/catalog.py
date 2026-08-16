@@ -19,6 +19,7 @@ class ProviderFieldSpec:
     placeholder: str = ""
     secret: bool = False
     advanced: bool = False
+    options: tuple[str, ...] = ()
     # Persistent helper text rendered under the input (never truncated,
     # unlike a placeholder that vanishes once the user types). Routed
     # through the ``providerFields.<key>.hint`` i18n namespace with this
@@ -84,6 +85,12 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
         required=True,
         placeholder="provider default",
     )
+    custom_llm_model = ProviderFieldSpec(
+        key="default_model",
+        label="Default model",
+        placeholder="provider default",
+        required_for_capabilities=("llm",),
+    )
     voice_id = ProviderFieldSpec(
         key="voice_id",
         label="Default voice",
@@ -105,6 +112,33 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
         placeholder="gpt-4o-mini-tts",
         advanced=True,
         required_for_capabilities=("tts",),
+    )
+    video_model = ProviderFieldSpec(
+        key="video_model",
+        label="Video model",
+        placeholder="sora-2",
+        required_for_capabilities=("video",),
+    )
+    video_protocol = ProviderFieldSpec(
+        key="video_protocol",
+        label="Video API protocol",
+        kind="select",
+        placeholder="Choose a protocol",
+        required_for_capabilities=("video",),
+        options=("openai_videos", "generations_polling"),
+        hint=(
+            "Choose only the protocol documented by your provider. "
+            "OpenAI Videos submits to /videos and downloads /content; "
+            "Generations polling submits to /videos/generations and polls "
+            "a request id."
+        ),
+    )
+    video_poll_interval_seconds = ProviderFieldSpec(
+        key="video_poll_interval_seconds",
+        label="Video poll interval seconds",
+        kind="number",
+        placeholder="10",
+        advanced=True,
     )
     timeout_seconds = ProviderFieldSpec(
         key="timeout_seconds",
@@ -579,14 +613,17 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
         ProviderCatalogEntry(
             id="custom_openai_compatible",
             display_name="Custom OpenAI-Compatible",
-            capabilities=("llm", "embedding"),
+            capabilities=("llm", "embedding", "video"),
             auth_fields=(api_key,),
             config_fields=(
                 required_base_url,
-                required_default_model,
+                custom_llm_model,
                 embedding_model,
                 embedding_dimension,
                 request_dimensions,
+                video_model,
+                video_protocol,
+                video_poll_interval_seconds,
                 supports_vision,
                 max_tokens,
                 disable_reasoning,
