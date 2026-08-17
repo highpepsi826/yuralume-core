@@ -20,6 +20,26 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-17 - Merge same-slot scheduled promises
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed `33fcfce` on `local/customizations`; push to the
+  personal fork follows this verified deployment record.
+- Backup: `yuralume-pre-scheduled-promise-slots-20260817-131953.dump`
+  (custom format, verified with `pg_restore -l` before migration)
+- Deployment: rebuilt only `yuralume-local/app:custom`, ran migration
+  `m5d2r8q10042`, and force-recreated `migrate` then `app`. PostgreSQL,
+  storage, WhatsApp sidecar, and their volumes were unchanged.
+- Data maintenance: in one verified transaction, consolidated one approved
+  pre-existing duplicate scheduled-promise pair into one active delivery with
+  both obligations retained; the redundant record is cancelled, not deleted.
+- Verification: 80 direct focused tests and 43 adjacent promise-flow tests
+  passed; all Compose services are healthy and `/health` returned `status: ok`.
+- Follow-up: observe the next scheduled promise delivery; no normal chat path
+  gains an additional LLM call from this change.
+
 ### 2026-08-17 - Harden Telegram replies and promised-media delivery
 
 - Status: completed
