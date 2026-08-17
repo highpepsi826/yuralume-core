@@ -423,6 +423,7 @@ class PendingFollowUpDispatcher:
             recent_dialogue_summary=summary,
             now=now,
             operator_persona_lines=tuple(persona_lines),
+            obligations=resolving.scheduled_promise_obligations,
             operator_primary_language=operator_language,
             local_tz=local_tz,
             promise_content_mode=promise_content_mode,

@@ -12,6 +12,7 @@ from kokoro_link.application.services.character_backup_restore_pipeline import (
     RestoreContext,
 )
 from kokoro_link.domain.entities.pending_follow_up import (
+    scheduled_promise_delivery_slot_key,
     scheduled_promise_dedupe_key,
 )
 from kokoro_link.infrastructure.storage.in_memory import InMemoryObjectStorage
@@ -71,9 +72,16 @@ def test_restore_rekeys_open_promises_for_the_new_character() -> None:
         promise_intent="回家後傳照片給你。",
         scheduled_for=NOW,
     )
+    expected_delivery_slot = scheduled_promise_delivery_slot_key(
+        character_id="new-character",
+        scheduled_for=NOW,
+    )
     assert first["character_id"] == "new-character"
     assert first["dedupe_key"] == expected
     assert first["dedupe_key"] != source_key
-    # Preserve legacy duplicate rows for inspection without violating the
+    assert first["delivery_slot_key"] == expected_delivery_slot
+    # The old exact key remains useful audit data. Only the new delivery-slot
+    # key is constrained, so a legacy duplicate lands without violating the
     # target database's partial unique index.
-    assert duplicate["dedupe_key"] == ""
+    assert duplicate["dedupe_key"] == expected
+    assert duplicate["delivery_slot_key"] == ""

@@ -222,6 +222,7 @@ def _build_prompt(payload: ScheduledPromiseComposeInput) -> str:
     body = get_default_loader().render(
         "busy/scheduled_promise_composer",
         promise_intent=payload.promise_intent.strip()[:300],
+        obligations_block=_obligations_block(payload),
         scheduled_at_local=scheduled_local.strftime("%Y-%m-%d %H:%M"),
         original_block=original_block,
         persona_block=persona,
@@ -241,6 +242,15 @@ def _build_prompt(payload: ScheduledPromiseComposeInput) -> str:
     if language_hint:
         body = f"{language_hint}\n\n{body}"
     return body
+
+
+def _obligations_block(payload: ScheduledPromiseComposeInput) -> str:
+    obligations = payload.obligations
+    if not obligations:
+        return f"- {payload.promise_intent.strip()[:300]}"
+    return "\n".join(
+        f"- {obligation.intent[:300]}" for obligation in obligations
+    )
 
 
 def _tools_block(payload: ScheduledPromiseComposeInput) -> str:

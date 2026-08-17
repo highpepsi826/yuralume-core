@@ -217,6 +217,9 @@ async def test_scheduled_promise_releases_through_promise_composer() -> None:
     assert busy_composer.calls == 0  # busy composer untouched
     assert len(promise_composer.calls) == 1
     assert promise_composer.calls[0].promise_intent == "叫使用者起床"
+    assert [
+        obligation.intent for obligation in promise_composer.calls[0].obligations
+    ] == ["叫使用者起床"]
     assert (
         promise_composer.calls[0].promise_content_mode
         is MessageContentMode.NSFW
@@ -228,6 +231,47 @@ async def test_scheduled_promise_releases_through_promise_composer() -> None:
     stored = await repo.get(row.id)
     assert stored is not None
     assert stored.status == PendingFollowUpStatus.RESOLVED
+
+
+@pytest.mark.asyncio
+async def test_scheduled_promise_composer_receives_all_merged_obligations() -> None:
+    repo = InMemoryPendingFollowUpRepository()
+    first = _promise_row(
+        offset_min=-10,
+        promise_intent="晚上邀請使用者一起慶生",
+    )
+    second = PendingFollowUp.new_promise(
+        character_id="char-1",
+        conversation_id="conv-2",
+        promise_intent="晚上主動確認生日約定",
+        # The first row is 09:50. Keep this one within its 09:45 delivery
+        # window; +7 would cross the 10:00 slot boundary.
+        scheduled_for=first.scheduled_for + timedelta(minutes=5),
+        source_message_content="八點左右再找你慶祝",
+        now=_now() - timedelta(hours=8),
+    )
+    await repo.add(first)
+    await repo.add(second)
+    char = _character()
+    proactive = _StubProactiveDispatcher()
+    promise_composer = _StubPromiseComposer()
+    dispatcher = PendingFollowUpDispatcher(
+        repository=repo,
+        composer=_StubBusyComposer(),
+        proactive_dispatcher=proactive,
+        character_repository=_StubCharacterRepo({char.id: char}),
+        schedule_service=_StubScheduleService(current_activity=None),
+        scheduled_promise_composer=promise_composer,
+    )
+
+    assert await dispatcher.tick(now=_now()) == 1
+    assert [
+        obligation.intent for obligation in promise_composer.calls[0].obligations
+    ] == [
+        "晚上邀請使用者一起慶生",
+        "晚上主動確認生日約定",
+    ]
+    assert len(proactive.calls) == 1
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,7 @@ from typing import Protocol
 from kokoro_link.contracts.prompt import PromptToolDescriptor, ToolOutcomeMessage
 from kokoro_link.domain.entities.character import Character
 from kokoro_link.domain.entities.conversation import MessageContentMode
+from kokoro_link.domain.entities.pending_follow_up import ScheduledPromiseObligation
 from kokoro_link.domain.entities.schedule import ScheduleActivity
 from kokoro_link.domain.value_objects.content_flow import CONTENT_TOLERANCE_FRONTIER
 from kokoro_link.domain.value_objects.tool_call import ToolCall
@@ -65,6 +66,12 @@ class ScheduledPromiseComposeInput:
     """Prompt-ready lines from OperatorPersonaService for this
     character/operator pair. Empty when persona is disabled or not yet
     learned."""
+    obligations: tuple[ScheduledPromiseObligation, ...] = ()
+    """Distinct promises sharing this one delivery window.
+
+    The composer fulfils every item in one natural message.  Empty is accepted
+    for legacy rows, where :attr:`promise_intent` remains the fallback.
+    """
     operator_primary_language: str = "zh-TW"
     """BCP 47 tag of the character owner's pinned content language
     (FRONTEND_I18N_PLAN). The promised callback uses the same language

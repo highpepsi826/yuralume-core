@@ -17,6 +17,7 @@ from kokoro_link.domain.entities.pending_follow_up import (
     PendingFollowUpKind,
     PendingFollowUpMessage,
     PendingFollowUpStatus,
+    ScheduledPromiseObligation,
 )
 from kokoro_link.domain.entities.conversation import MessageContentMode
 from kokoro_link.infrastructure.persistence.models import PendingFollowUpRow
@@ -34,7 +35,7 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
     async def add(self, follow_up: PendingFollowUp) -> PendingFollowUp:
         if (
             follow_up.kind == PendingFollowUpKind.SCHEDULED_PROMISE
-            and follow_up.dedupe_key
+            and follow_up.delivery_slot_key
         ):
             return await self._add_scheduled_promise(follow_up)
         await self._upsert(follow_up)
@@ -180,6 +181,9 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
                     kind=follow_up.kind.value,
                     promise_intent=follow_up.promise_intent,
                     dedupe_key=follow_up.dedupe_key,
+                    delivery_slot_key=follow_up.delivery_slot_key,
+                    source_turn_key=follow_up.source_turn_key,
+                    obligations_json=_obligations_to_json(follow_up.obligations),
                 ))
             else:
                 existing.character_id = follow_up.character_id
@@ -198,6 +202,11 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
                 existing.kind = follow_up.kind.value
                 existing.promise_intent = follow_up.promise_intent
                 existing.dedupe_key = follow_up.dedupe_key
+                existing.delivery_slot_key = follow_up.delivery_slot_key
+                existing.source_turn_key = follow_up.source_turn_key
+                existing.obligations_json = _obligations_to_json(
+                    follow_up.obligations,
+                )
 
     async def _add_scheduled_promise(
         self, follow_up: PendingFollowUp,
@@ -210,8 +219,8 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
         this method re-reads the winner after rolling back its failed session.
         """
         async with self._session_factory() as session:
-            existing = await _find_open_by_dedupe_key(
-                session, follow_up.dedupe_key,
+            existing = await _find_open_by_delivery_slot_key(
+                session, follow_up.delivery_slot_key,
             )
             if existing is not None:
                 return await _merge_scheduled_promise_context(
@@ -222,8 +231,8 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
                 await session.commit()
             except IntegrityError:
                 await session.rollback()
-                existing = await _find_open_by_dedupe_key(
-                    session, follow_up.dedupe_key,
+                existing = await _find_open_by_delivery_slot_key(
+                    session, follow_up.delivery_slot_key,
                 )
                 if existing is not None:
                     return await _merge_scheduled_promise_context(
@@ -233,14 +242,14 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
         return follow_up
 
 
-async def _find_open_by_dedupe_key(
+async def _find_open_by_delivery_slot_key(
     session: AsyncSession,
-    dedupe_key: str,
+    delivery_slot_key: str,
 ) -> PendingFollowUpRow | None:
     stmt = (
         select(PendingFollowUpRow)
         .where(PendingFollowUpRow.kind == PendingFollowUpKind.SCHEDULED_PROMISE.value)
-        .where(PendingFollowUpRow.dedupe_key == dedupe_key)
+        .where(PendingFollowUpRow.delivery_slot_key == delivery_slot_key)
         .where(PendingFollowUpRow.status.in_(_OPEN_STATUSES))
         .order_by(asc(PendingFollowUpRow.queued_at), asc(PendingFollowUpRow.id))
         .limit(1)
@@ -285,6 +294,9 @@ def _domain_to_row(follow_up: PendingFollowUp) -> PendingFollowUpRow:
         kind=follow_up.kind.value,
         promise_intent=follow_up.promise_intent,
         dedupe_key=follow_up.dedupe_key,
+        delivery_slot_key=follow_up.delivery_slot_key,
+        source_turn_key=follow_up.source_turn_key,
+        obligations_json=_obligations_to_json(follow_up.obligations),
     )
 
 
@@ -308,6 +320,9 @@ def _copy_domain_to_row(row: PendingFollowUpRow, follow_up: PendingFollowUp) -> 
     row.kind = follow_up.kind.value
     row.promise_intent = follow_up.promise_intent
     row.dedupe_key = follow_up.dedupe_key
+    row.delivery_slot_key = follow_up.delivery_slot_key
+    row.source_turn_key = follow_up.source_turn_key
+    row.obligations_json = _obligations_to_json(follow_up.obligations)
 
 
 def _message_to_payload(message: PendingFollowUpMessage) -> dict:
@@ -321,6 +336,44 @@ def _message_to_payload(message: PendingFollowUpMessage) -> dict:
     if message.message_id:
         payload["message_id"] = message.message_id
     return payload
+
+
+def _obligations_to_json(
+    obligations: tuple[ScheduledPromiseObligation, ...],
+) -> str:
+    return json.dumps(
+        [
+            {
+                "intent": obligation.intent,
+                "source_turn_key": obligation.source_turn_key,
+                "source_text": obligation.source_text,
+            }
+            for obligation in obligations
+        ],
+        ensure_ascii=False,
+    )
+
+
+def _obligations_from_json(raw: str | None) -> tuple[ScheduledPromiseObligation, ...]:
+    try:
+        payload = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(payload, list):
+        return ()
+    obligations: list[ScheduledPromiseObligation] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        try:
+            obligations.append(ScheduledPromiseObligation(
+                intent=str(item.get("intent") or ""),
+                source_turn_key=str(item.get("source_turn_key") or ""),
+                source_text=str(item.get("source_text") or ""),
+            ))
+        except ValueError:
+            continue
+    return tuple(obligations)
 
 
 def _payload_to_message(payload: dict) -> PendingFollowUpMessage:
@@ -373,6 +426,11 @@ def _row_to_domain(row: PendingFollowUpRow) -> PendingFollowUp:
         kind=PendingFollowUpKind(kind_raw),
         promise_intent=getattr(row, "promise_intent", "") or "",
         dedupe_key=getattr(row, "dedupe_key", "") or "",
+        delivery_slot_key=getattr(row, "delivery_slot_key", "") or "",
+        source_turn_key=getattr(row, "source_turn_key", "") or "",
+        obligations=_obligations_from_json(
+            getattr(row, "obligations_json", "[]"),
+        ),
     )
 
 

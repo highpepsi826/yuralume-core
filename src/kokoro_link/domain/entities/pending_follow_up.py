@@ -48,6 +48,14 @@ the dispatcher force-releases it on the next tick regardless of the
 character's current ``busy_score``. Picked so the eventual follow-up
 prompt fits comfortably within a single LLM call."""
 
+_SCHEDULED_PROMISE_SLOT_MINUTES = 15
+"""Width of one scheduled-promise delivery window.
+
+Post-turn extraction can phrase one appointment in several slightly different
+ways.  Keeping all obligations in one short delivery window produces one
+natural callback instead of several near-identical notifications.
+"""
+
 
 def scheduled_promise_dedupe_key(
     *,
@@ -78,6 +86,52 @@ def scheduled_promise_dedupe_key(
         scheduled_minute.isoformat(),
     ))
     return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def scheduled_promise_delivery_slot_key(
+    *,
+    character_id: str,
+    scheduled_for: datetime,
+) -> str:
+    """Return the stable identity for one character delivery window.
+
+    A character has one player in the self-host model, so the character id
+    represents the player side of the appointment as well.  We intentionally
+    do not include ``conversation_id``: mirrored web/channel conversation
+    records must still collapse into one visible callback.
+    """
+    if scheduled_for.tzinfo is None:
+        raise ValueError("scheduled_for must be tz-aware")
+    scheduled_utc = scheduled_for.astimezone(timezone.utc)
+    slot_start = scheduled_utc.replace(
+        minute=(scheduled_utc.minute // _SCHEDULED_PROMISE_SLOT_MINUTES)
+        * _SCHEDULED_PROMISE_SLOT_MINUTES,
+        second=0,
+        microsecond=0,
+    )
+    payload = "\x1f".join((
+        character_id.strip(),
+        PendingFollowUpKind.SCHEDULED_PROMISE.value,
+        slot_start.isoformat(),
+    ))
+    return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def scheduled_promise_source_turn_key(
+    *,
+    source_text: str,
+) -> str:
+    """Give one extracted source turn a repeat-stable identity.
+
+    The post-turn result does not currently expose a durable source-message id
+    on every channel.  A normalized source-text fingerprint is therefore the
+    best portable key; it is used only inside one delivery window and never
+    shown to the player.
+    """
+    normalized_source = " ".join(
+        normalize("NFKC", source_text).casefold().split(),
+    )
+    return sha256(normalized_source.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +167,36 @@ class PendingFollowUpMessage:
             safe_summary=(safe_summary or "").strip(),
             message_id=message_id,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledPromiseObligation:
+    """One promise that shares a visible scheduled delivery.
+
+    ``PendingFollowUp`` remains the lifecycle record.  This value keeps the
+    individual things the character promised, so duplicate extraction produces
+    one callback without silently discarding a distinct obligation.
+    """
+
+    intent: str
+    source_turn_key: str
+    source_text: str = ""
+
+    def __post_init__(self) -> None:
+        cleaned_intent = (self.intent or "").strip()
+        if not cleaned_intent:
+            raise ValueError("ScheduledPromiseObligation.intent must be non-empty")
+        object.__setattr__(self, "intent", cleaned_intent[:500])
+        object.__setattr__(self, "source_turn_key", (self.source_turn_key or "").strip())
+        object.__setattr__(self, "source_text", (self.source_text or "").strip()[:500])
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        """Identity used when a post-turn retry re-submits the same promise."""
+        normalized_intent = " ".join(
+            normalize("NFKC", self.intent).casefold().split(),
+        )
+        return self.source_turn_key, normalized_intent
 
 
 def _coerce_content_mode(value: MessageContentMode | str) -> MessageContentMode:
@@ -248,10 +332,21 @@ class PendingFollowUp:
     dedupe_key: str = ""
     """Stable key for an open scheduled promise.
 
-    Legacy rows intentionally keep this blank.  Only the database's partial
-    unique index treats a non-empty key as a deduplication constraint, allowing
-    a later promise after a row has reached a terminal status.
+    Retained as the exact source/action fingerprint used by older rows and
+    tooling.  New writes use :attr:`delivery_slot_key` as the database
+    uniqueness guard so differently-worded promises for the same appointment
+    can share one callback.
     """
+    delivery_slot_key: str = ""
+    """Stable identity for the open appointment delivery window.
+
+    Blank legacy values deliberately bypass the partial unique index.  Fresh
+    scheduled promises always carry this key.
+    """
+    source_turn_key: str = ""
+    """Fingerprint of the canonical source turn for audit and idempotency."""
+    obligations: tuple[ScheduledPromiseObligation, ...] = ()
+    """All distinct promises to fulfil in the one visible callback."""
 
     @classmethod
     def new(
@@ -321,6 +416,14 @@ class PendingFollowUp:
         # one queued message, so we synthesise a placeholder when the
         # caller doesn't have the user-turn text handy.
         body = (source_message_content or "").strip() or intent
+        source_turn_key = scheduled_promise_source_turn_key(
+            source_text=body,
+        )
+        obligation = ScheduledPromiseObligation(
+            intent=intent,
+            source_turn_key=source_turn_key,
+            source_text=body,
+        )
         first = PendingFollowUpMessage.new(
             content=body[:500],
             queued_at=timestamp,
@@ -346,6 +449,12 @@ class PendingFollowUp:
                 promise_intent=intent[:500],
                 scheduled_for=scheduled_for,
             ),
+            delivery_slot_key=scheduled_promise_delivery_slot_key(
+                character_id=character_id,
+                scheduled_for=scheduled_for,
+            ),
+            source_turn_key=source_turn_key,
+            obligations=(obligation,),
         )
 
     @property
@@ -355,6 +464,25 @@ class PendingFollowUp:
     @property
     def is_scheduled_promise(self) -> bool:
         return self.kind == PendingFollowUpKind.SCHEDULED_PROMISE
+
+    @property
+    def scheduled_promise_obligations(
+        self,
+    ) -> tuple[ScheduledPromiseObligation, ...]:
+        """Return persisted obligations, synthesising one for legacy rows."""
+        if self.obligations:
+            return self.obligations
+        if not self.is_scheduled_promise or not self.promise_intent.strip():
+            return ()
+        source_text = self.messages[0].content if self.messages else ""
+        source_key = self.source_turn_key or scheduled_promise_source_turn_key(
+            source_text=source_text or self.promise_intent,
+        )
+        return (ScheduledPromiseObligation(
+            intent=self.promise_intent,
+            source_turn_key=source_key,
+            source_text=source_text,
+        ),)
 
     @property
     def latest_user_message(self) -> PendingFollowUpMessage:
@@ -389,16 +517,17 @@ class PendingFollowUp:
     ) -> "PendingFollowUp":
         """Keep one promise row while retaining distinct source context.
 
-        Repeated extraction can see a mirrored or slightly fuller source turn.
-        That source is useful audit/composer context, but it must not create a
-        second release target. Exact duplicate messages are ignored and the
-        existing queue cap remains in force.
+        Every promise inside the same 15-minute delivery window is preserved as
+        an obligation, but the player receives one natural callback.  A retry
+        for the same source/action does not add another obligation.  Exact
+        duplicate messages are ignored and the existing queue cap remains in
+        force.
         """
         if (
             self.kind != PendingFollowUpKind.SCHEDULED_PROMISE
             or duplicate.kind != PendingFollowUpKind.SCHEDULED_PROMISE
-            or not self.dedupe_key
-            or self.dedupe_key != duplicate.dedupe_key
+            or not self.delivery_slot_key
+            or self.delivery_slot_key != duplicate.delivery_slot_key
         ):
             return self
         merged = list(self.messages)
@@ -416,11 +545,25 @@ class PendingFollowUp:
                 continue
             merged.append(message)
             seen.add(identity)
-        if len(merged) == len(self.messages):
+        obligations = list(self.scheduled_promise_obligations)
+        seen_obligations = {obligation.identity for obligation in obligations}
+        for obligation in duplicate.scheduled_promise_obligations:
+            if obligation.identity in seen_obligations:
+                continue
+            obligations.append(obligation)
+            seen_obligations.add(obligation.identity)
+        if (
+            len(merged) == len(self.messages)
+            and tuple(obligations) == self.scheduled_promise_obligations
+            and duplicate.scheduled_for >= self.scheduled_for
+        ):
             return self
         return replace(
             self,
             messages=tuple(merged),
+            scheduled_for=min(self.scheduled_for, duplicate.scheduled_for),
+            promise_intent=_render_scheduled_promise_intent(obligations),
+            obligations=tuple(obligations),
             updated_at=max(self.updated_at, duplicate.updated_at),
         )
 
@@ -480,9 +623,17 @@ class PendingFollowUp:
         )
 
 
+def _render_scheduled_promise_intent(
+    obligations: list[ScheduledPromiseObligation],
+) -> str:
+    """Keep the legacy scalar intent useful for logs and old callers."""
+    combined = "；".join(obligation.intent for obligation in obligations)
+    return combined[:500]
+
+
 @dataclass(frozen=True, slots=True)
 class ScheduledPromiseDuplicateGroup:
-    """Read-only group of legacy open promises with one logical identity.
+    """Read-only group of open promises sharing one delivery window.
 
     The first row is the deterministic canonical candidate (oldest queued
     timestamp, then id).  This is a reporting value only: callers must not
@@ -503,12 +654,12 @@ class ScheduledPromiseDuplicateGroup:
 def group_open_scheduled_promise_duplicates(
     rows: list[PendingFollowUp] | tuple[PendingFollowUp, ...],
 ) -> tuple[ScheduledPromiseDuplicateGroup, ...]:
-    """Group duplicate open scheduled promises without mutating storage.
+    """Group same-window open scheduled promises without mutating storage.
 
-    Fresh rows already carry ``dedupe_key`` and cannot duplicate because of the
-    partial unique index.  Legacy rows intentionally have an empty stored key,
-    so this computes the same deterministic identity from their content before
-    grouping them for an operator's review.
+    Fresh rows already carry ``delivery_slot_key`` and cannot duplicate because
+    of the partial unique index.  Legacy rows intentionally have an empty key,
+    so this computes the same delivery-window identity before grouping them for
+    an operator's review.
     """
     grouped: dict[str, list[PendingFollowUp]] = {}
     for row in rows:
@@ -521,9 +672,8 @@ def group_open_scheduled_promise_duplicates(
             or not row.promise_intent.strip()
         ):
             continue
-        key = scheduled_promise_dedupe_key(
+        key = row.delivery_slot_key or scheduled_promise_delivery_slot_key(
             character_id=row.character_id,
-            promise_intent=row.promise_intent,
             scheduled_for=row.scheduled_for,
         )
         grouped.setdefault(key, []).append(row)

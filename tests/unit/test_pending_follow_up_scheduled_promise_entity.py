@@ -31,6 +31,9 @@ def test_new_promise_creates_scheduled_kind() -> None:
     assert row.is_scheduled_promise is True
     assert row.promise_intent == "叫使用者起床"
     assert len(row.dedupe_key) == 64
+    assert len(row.delivery_slot_key) == 64
+    assert len(row.source_turn_key) == 64
+    assert [obligation.intent for obligation in row.obligations] == ["叫使用者起床"]
     assert row.status == PendingFollowUpStatus.QUEUED
     # source text becomes the entity's first (and only) message
     assert row.messages[0].content == "明天 10 點叫我起床"
@@ -96,6 +99,32 @@ def test_promise_dedupe_key_normalizes_case_and_scheduled_minute() -> None:
     assert changed_time.dedupe_key != first.dedupe_key
 
 
+def test_delivery_slot_groups_differently_worded_promises_in_same_window() -> None:
+    first = PendingFollowUp.new_promise(
+        character_id="c1",
+        conversation_id="conv1",
+        promise_intent="晚上邀請使用者一起慶生",
+        scheduled_for=datetime(2026, 5, 18, 20, 0, tzinfo=UTC),
+        source_message_content="晚上八點一起慶生吧",
+    )
+    retry = PendingFollowUp.new_promise(
+        character_id="c1",
+        conversation_id="conv-other",
+        promise_intent="晚上主動確認生日約定",
+        scheduled_for=datetime(2026, 5, 18, 20, 9, tzinfo=UTC),
+        source_message_content="八點左右再找你慶祝",
+    )
+    later = PendingFollowUp.new_promise(
+        character_id="c1",
+        conversation_id="conv1",
+        promise_intent="晚上主動確認生日約定",
+        scheduled_for=datetime(2026, 5, 18, 20, 15, tzinfo=UTC),
+    )
+
+    assert retry.delivery_slot_key == first.delivery_slot_key
+    assert later.delivery_slot_key != first.delivery_slot_key
+
+
 def test_legacy_busy_defer_default_unchanged() -> None:
     """The legacy busy-defer constructor must still produce kind=BUSY_DEFER."""
     from kokoro_link.domain.entities.pending_follow_up import (
@@ -114,6 +143,8 @@ def test_legacy_busy_defer_default_unchanged() -> None:
     assert row.is_scheduled_promise is False
     assert row.promise_intent == ""
     assert row.dedupe_key == ""
+    assert row.delivery_slot_key == ""
+    assert row.obligations == ()
 
 
 def test_duplicate_report_groups_legacy_open_promises_without_mutating_them() -> None:
@@ -134,7 +165,10 @@ def test_duplicate_report_groups_legacy_open_promises_without_mutating_them() ->
         now=datetime(2026, 5, 18, 10, 5, tzinfo=UTC),
     )
     # Blank keys model old rows imported before the unique-index migration.
-    legacy_rows = (replace(first, dedupe_key=""), replace(second, dedupe_key=""))
+    legacy_rows = (
+        replace(first, dedupe_key="", delivery_slot_key=""),
+        replace(second, dedupe_key="", delivery_slot_key=""),
+    )
 
     groups = group_open_scheduled_promise_duplicates(legacy_rows)
 
@@ -142,3 +176,30 @@ def test_duplicate_report_groups_legacy_open_promises_without_mutating_them() ->
     assert groups[0].canonical.id == first.id
     assert [row.id for row in groups[0].rows] == [first.id, second.id]
     assert all(row.dedupe_key == "" for row in legacy_rows)
+    assert all(row.delivery_slot_key == "" for row in legacy_rows)
+
+
+def test_same_slot_merges_distinct_obligations_into_one_callback() -> None:
+    first = PendingFollowUp.new_promise(
+        character_id="c1",
+        conversation_id="conv1",
+        promise_intent="晚上邀請使用者一起慶生",
+        scheduled_for=datetime(2026, 5, 18, 20, 0, tzinfo=UTC),
+        source_message_content="晚上八點一起慶生吧",
+    )
+    second = PendingFollowUp.new_promise(
+        character_id="c1",
+        conversation_id="conv2",
+        promise_intent="晚上主動確認生日約定",
+        scheduled_for=datetime(2026, 5, 18, 20, 7, tzinfo=UTC),
+        source_message_content="八點左右再找你慶祝",
+    )
+
+    merged = first.merged_scheduled_promise_context(second)
+
+    assert merged.scheduled_for == first.scheduled_for
+    assert [obligation.intent for obligation in merged.obligations] == [
+        "晚上邀請使用者一起慶生",
+        "晚上主動確認生日約定",
+    ]
+    assert "；" in merged.promise_intent

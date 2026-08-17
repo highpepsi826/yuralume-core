@@ -62,6 +62,7 @@ from kokoro_link.domain.entities.character import (
 from kokoro_link.domain.entities.pending_follow_up import (
     PendingFollowUpKind,
     PendingFollowUpStatus,
+    scheduled_promise_delivery_slot_key,
     scheduled_promise_dedupe_key,
 )
 from kokoro_link.infrastructure.character_backup.packager import (
@@ -193,13 +194,13 @@ class RestoreContext:
     series_id_map: dict[str, str] = field(default_factory=dict)
     landed_series_ids: list[str] = field(default_factory=list)
     report: RestoreReport = field(default_factory=RestoreReport)
-    open_scheduled_promise_dedupe_keys: set[str] = field(default_factory=set)
+    open_scheduled_promise_delivery_slot_keys: set[str] = field(default_factory=set)
     """Target-instance keys already assigned while landing promises.
 
     An archive can contain legacy duplicate promises with blank keys. Preserve
     every row for the existing read-only duplicate report, but assign the
-    target-character key to only the first canonical candidate so PostgreSQL's
-    partial unique index cannot reject the restore.
+    target-character delivery-slot key to only the first canonical candidate so
+    PostgreSQL's partial unique index cannot reject the restore.
     """
     source_frozen: SourceFrozenState | None = None
     """Captured by the landing pass from the ``characters`` row (A3);
@@ -698,22 +699,21 @@ class CharacterRestorePipeline:
             kwargs[column] = ctx.tokens.rewrite(value)
 
         if table == "pending_follow_ups":
-            self._rewrite_pending_follow_up_dedupe_key(kwargs, ctx)
+            self._rewrite_pending_follow_up_promise_keys(kwargs, ctx)
 
         return kwargs, deferred
 
     @staticmethod
-    def _rewrite_pending_follow_up_dedupe_key(
+    def _rewrite_pending_follow_up_promise_keys(
         kwargs: dict,
         ctx: RestoreContext,
     ) -> None:
-        """Regenerate an open promise's derived key for the new character id.
+        """Regenerate an open promise's derived keys for the new character id.
 
-        The source fingerprint deliberately includes ``character_id``. A
-        restore allocates a new id, so retaining the exported hash would fail
-        to deduplicate future extraction retries on the target instance.
-        Legacy duplicate rows are retained with a blank key rather than being
-        silently discarded; the first row remains the protected canonical one.
+        A restore allocates a new character id, so the delivery-slot hash must
+        be rebuilt.  Legacy duplicate rows are retained with a blank slot key
+        rather than being silently discarded; the first row remains the
+        protected canonical one.
         """
         is_open_promise = (
             kwargs.get("kind") == PendingFollowUpKind.SCHEDULED_PROMISE.value
@@ -731,6 +731,7 @@ class CharacterRestorePipeline:
             or not intent.strip()
         ):
             kwargs["dedupe_key"] = ""
+            kwargs["delivery_slot_key"] = ""
             return
         try:
             dedupe_key = scheduled_promise_dedupe_key(
@@ -738,14 +739,20 @@ class CharacterRestorePipeline:
                 promise_intent=intent,
                 scheduled_for=scheduled_for,
             )
+            delivery_slot_key = scheduled_promise_delivery_slot_key(
+                character_id=ctx.new_character_id,
+                scheduled_for=scheduled_for,
+            )
         except ValueError:
             kwargs["dedupe_key"] = ""
+            kwargs["delivery_slot_key"] = ""
             return
-        if dedupe_key in ctx.open_scheduled_promise_dedupe_keys:
-            kwargs["dedupe_key"] = ""
-            return
-        ctx.open_scheduled_promise_dedupe_keys.add(dedupe_key)
         kwargs["dedupe_key"] = dedupe_key
+        if delivery_slot_key in ctx.open_scheduled_promise_delivery_slot_keys:
+            kwargs["delivery_slot_key"] = ""
+            return
+        ctx.open_scheduled_promise_delivery_slot_keys.add(delivery_slot_key)
+        kwargs["delivery_slot_key"] = delivery_slot_key
 
     async def _flush_rows(
         self,

@@ -1793,18 +1793,18 @@ class PendingFollowUpRow(Base):
     __tablename__ = "pending_follow_ups"
     __table_args__ = (
         Index(
-            "uq_pending_follow_ups_open_scheduled_promise_dedupe",
-            "dedupe_key",
+            "uq_pending_follow_ups_open_scheduled_promise_delivery_slot",
+            "delivery_slot_key",
             unique=True,
             postgresql_where=text(
                 "kind = 'scheduled_promise' "
                 "AND status IN ('queued', 'resolving') "
-                "AND dedupe_key <> ''",
+                "AND delivery_slot_key <> ''",
             ),
             sqlite_where=text(
                 "kind = 'scheduled_promise' "
                 "AND status IN ('queued', 'resolving') "
-                "AND dedupe_key <> ''",
+                "AND delivery_slot_key <> ''",
             ),
         ),
     )
@@ -1861,8 +1861,19 @@ class PendingFollowUpRow(Base):
     dedupe_key: Mapped[str] = mapped_column(
         String(64), nullable=False, default="", server_default="",
     )
-    """Stable promise identity for partial-unique open-row deduplication.
-    Blank legacy and busy-defer values intentionally bypass the index."""
+    """Legacy exact-promise fingerprint, retained for audit compatibility."""
+    delivery_slot_key: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default="",
+    )
+    """Stable delivery-window identity for open-row deduplication."""
+    source_turn_key: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default="",
+    )
+    """Fingerprint of the canonical source turn for the promise row."""
+    obligations_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]",
+    )
+    """JSON array of all obligations merged into this visible callback."""
 
 
 class OperatorProfileFieldRow(Base):

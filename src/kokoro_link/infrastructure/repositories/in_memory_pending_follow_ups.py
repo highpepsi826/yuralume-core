@@ -31,12 +31,12 @@ class InMemoryPendingFollowUpRepository(PendingFollowUpRepositoryPort):
     async def add(self, follow_up: PendingFollowUp) -> PendingFollowUp:
         if (
             follow_up.kind == PendingFollowUpKind.SCHEDULED_PROMISE
-            and follow_up.dedupe_key
+            and follow_up.delivery_slot_key
         ):
             matches = [
                 row for row in self._rows.values()
                 if row.kind == PendingFollowUpKind.SCHEDULED_PROMISE
-                and row.dedupe_key == follow_up.dedupe_key
+                and row.delivery_slot_key == follow_up.delivery_slot_key
                 and row.status.value in _OPEN_STATUSES
             ]
             if matches:

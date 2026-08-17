@@ -69,6 +69,9 @@ class PendingFollowUpBackupRecord(BackupRecord):
     kind: str = "busy_defer"
     promise_intent: str = ""
     dedupe_key: str = ""
+    delivery_slot_key: str = ""
+    source_turn_key: str = ""
+    obligations_json: str = "[]"
 
 
 class DeferredIntentBackupRecord(BackupRecord):
