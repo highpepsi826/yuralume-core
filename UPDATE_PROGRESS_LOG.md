@@ -20,6 +20,24 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-17 - Reliable image requests from chat and Telegram
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: updated `local/customizations` so Telegram forwards `/pic`,
+  explicit natural-language image requests force the image tool, and failed
+  or unavailable image generation cannot produce a false delivery claim.
+- Backup: `not required`; no schema migration or data change
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated only the local
+  `app` and `migrate` services; PostgreSQL, storage, WhatsApp sidecar,
+  uploads, and volumes were preserved.
+- Verification: 56 image/chat/localization tests, 70 chat-service tests, and
+  17 Telegram polling tests passed; Docker build succeeded; all Compose
+  services were healthy and `http://127.0.0.1:8012/health` returned
+  `status: ok`.
+- Follow-up: `none`
+
 ### 2026-08-17 - Merge same-slot scheduled promises
 
 - Status: completed

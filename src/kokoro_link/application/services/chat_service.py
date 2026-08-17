@@ -4258,10 +4258,23 @@ class ChatService:
             ):
                 novelty_retry_count = 1
                 text, trace = await generate_no_tool_once(novelty_verdict.feedback)
+            forced_without_tools = bool(force_image)
+            if forced_without_tools:
+                _LOGGER.warning(
+                    "forced image request could not enter tool cycle: "
+                    "registry=%s orchestrator=%s character=%s",
+                    self._tool_registry is not None,
+                    self._tool_orchestrator is not None,
+                    character.id,
+                )
+                text = localized_fallback_text(
+                    "chat.image_tool_unavailable",
+                    operator_primary_language,
+                )
             return ChatGenerationResult(
                 text=text,
                 attachments=[],
-                forced_fired=False,
+                forced_fired=forced_without_tools,
                 trace=trace,
                 persona_curiosity_plan=persona_curiosity_plan,
                 material_digest=material_digest,
@@ -4808,6 +4821,17 @@ class ChatService:
                 novelty_verdict.feedback,
             )
             traces.append(retry_trace)
+        if forced_fired and not collected:
+            _LOGGER.warning(
+                "forced image request completed without an attachment: "
+                "tool_executed=%s character=%s",
+                image_tool_executed,
+                character.id,
+            )
+            last_text = localized_fallback_text(
+                "chat.image_tool_generation_failed",
+                operator_primary_language,
+            )
         return ChatGenerationResult(
             text=last_text,
             attachments=collected,
@@ -7266,7 +7290,25 @@ def _render_scene_chip_lines(
 
 
 _FORCED_IMAGE_TOOL_NAME = "generate_image"
-_FORCED_IMAGE_TRIGGER_RE = re.compile(r"(?<!\S)/pic(?!\S)", re.IGNORECASE)
+_FORCED_IMAGE_TRIGGER_RE = re.compile(
+    r"(?<!\S)/pic(?:@[A-Za-z0-9_]+)?(?!\S)",
+    re.IGNORECASE,
+)
+_EXPLICIT_IMAGE_REQUEST_RE = re.compile(
+    r"(?:請|请|幫我|帮我|我要|我想|想要|想看|要看|給我|给我|"
+    r"傳我|传我|發我|发我|拍|截|生成|生)"
+    r"[^。！？!?\n]{0,16}"
+    r"(?:照片|相片|圖片|图片|截圖|截图|自拍|圖|图|圖像|图像|"
+    r"樣子|样子|長相|长相|image|photo|picture|screenshot)",
+    re.IGNORECASE,
+)
+_EXPLICIT_IMAGE_REQUEST_NEGATION_RE = re.compile(
+    r"(?:不要|別|别|不用|不必|不想|沒要|没有要|don't|do not|not)"
+    r"[^。！？!?\n]{0,10}"
+    r"(?:拍|照片|相片|圖片|图片|截圖|截图|自拍|圖|图|"
+    r"image|photo|picture|screenshot)",
+    re.IGNORECASE,
+)
 
 _RECENT_DIALOGUE_TURN_LIMIT = 4
 _RECENT_DIALOGUE_CHAR_CAP = 800
@@ -7730,8 +7772,8 @@ def _resolve_image_trigger(
     """Return ``(forced, cleaned_message)``.
 
     ``forced`` is ``True`` when the user explicitly includes the system
-    image command (``/pic`` as a standalone token) and ``generate_image``
-    is in ``allowed_tools``.
+    image command (``/pic`` as a standalone token) or clearly asks for
+    a photograph/image, and ``generate_image`` is in ``allowed_tools``.
 
     ``cleaned_message`` is the user's text with the matched portion
     stripped out (and surrounding whitespace collapsed). Downstream
@@ -7751,14 +7793,33 @@ def _resolve_image_trigger(
     if not text.strip():
         return False, user_message
     match = _FORCED_IMAGE_TRIGGER_RE.search(text)
-    if match is None:
-        return False, user_message
-    stripped = (text[: match.start()] + text[match.end():]).strip()
-    # Collapse the whitespace gap the removal left behind so the
-    # cleaned message doesn't have doubled spaces.
-    stripped = re.sub(r"[ \t]+", " ", stripped).strip()
-    cleaned = stripped if stripped else user_message
-    return True, cleaned
+    if match is not None:
+        stripped = (text[: match.start()] + text[match.end():]).strip()
+        # Collapse the whitespace gap the removal left behind so the
+        # cleaned message doesn't have doubled spaces.
+        stripped = re.sub(r"[ \t]+", " ", stripped).strip()
+        cleaned = stripped if stripped else user_message
+        return True, cleaned
+    if _is_explicit_image_request(text):
+        # Natural-language requests remain intact in history; only the
+        # system command marker is implementation detail.
+        return True, user_message
+    return False, user_message
+
+
+def _is_explicit_image_request(text: str) -> bool:
+    """Return whether the player clearly asks for a visual artifact.
+
+    This is intentionally narrower than a generic media keyword search:
+    ordinary discussion about images must remain a normal chat turn. A
+    negative phrase wins so requests such as "我不想看圖片" do not spend an
+    image-generation call.
+    """
+    if not text.strip():
+        return False
+    if _EXPLICIT_IMAGE_REQUEST_NEGATION_RE.search(text):
+        return False
+    return _EXPLICIT_IMAGE_REQUEST_RE.search(text) is not None
 
 
 def _resolve_chat_provider_and_model(

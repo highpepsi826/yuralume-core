@@ -280,6 +280,41 @@ async def test_character_without_tool_registry_behaves_as_before() -> None:
     assert len(scripted.calls) == 1
 
 
+@pytest.mark.asyncio
+async def test_forced_image_without_tool_plumbing_returns_truthful_failure() -> None:
+    character_repository = InMemoryCharacterRepository()
+    conversation_repository = InMemoryConversationRepository()
+    memory_repository = InMemoryMemoryRepository()
+    registry = InMemoryChatModelRegistry(default_provider_id="fake")
+    scripted = _ScriptedModel(["拍好了，傳給你。"])
+    registry.register(scripted)
+
+    chat_service = ChatService(
+        character_repository=character_repository,
+        conversation_repository=conversation_repository,
+        memory_repository=memory_repository,
+        post_turn_processor=NullPostTurnProcessor(),
+        prompt_context_builder=DefaultPromptContextBuilder(),
+        model_registry=registry,
+        state_engine=SimpleStateEngine(),
+        # No tool registry or orchestrator: this simulates a misconfigured
+        # image runtime and must not leave a false delivery claim.
+    )
+    character_service = CharacterService(character_repository)
+    character_id = await _seed_character(
+        character_service,
+        allowed_tools=["generate_image"],
+    )
+
+    response = await chat_service.send_message(SendChatMessageRequest(
+        character_id=character_id,
+        message="請拍一張照片給我",
+    ))
+
+    assert response.assistant_message.attachments == []
+    assert "圖片工具沒有可用" in response.assistant_message.content
+
+
 # ---------------------------------------------------------------------------
 # Image-trigger command: force ``generate_image`` regardless of LLM decision
 # ---------------------------------------------------------------------------
@@ -472,6 +507,63 @@ async def test_pic_command_fallback_synthesises_call_when_llm_ignores_directive(
     assert len(response.assistant_message.attachments) == 1
     assert response.assistant_message.attachments[0].url == "/uploads/stub/forced.png"
     assert response.assistant_message.content == "好啦還是畫了一張給你 ✨"
+
+
+@pytest.mark.asyncio
+async def test_explicit_natural_language_image_request_is_forced() -> None:
+    """A clear request such as "我要看定食圖" must not depend on the
+    model voluntarily choosing the image tool."""
+    chat, chars, model, image_tool = _build_forced_trigger_service(
+        replies=[
+            "我先用文字描述給你聽。",
+            "好啦，這張給你。",
+        ],
+    )
+    character_id = await _seed_trigger_character(
+        chars,
+        allowed_tools=["generate_image"],
+    )
+
+    response = await chat.send_message(SendChatMessageRequest(
+        character_id=character_id,
+        message="我要看鯖魚定食圖安撫我可憐的胃袋",
+    ))
+
+    assert image_tool.invoke_count == 1
+    assert len(response.assistant_message.attachments) == 1
+    assert response.assistant_message.content == "好啦，這張給你。"
+    assert "強制工具呼叫" in model.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_forced_image_failure_cannot_claim_delivery() -> None:
+    class _FailingImageTool(_RealNameImageTool):
+        async def invoke(self, ctx: ToolContext) -> ToolResult:
+            self.invoke_count += 1
+            self.last_positive = str(ctx.arguments.get("positive") or "")
+            return ToolResult.failure("圖片 provider 暫時失敗")
+
+    image_tool = _FailingImageTool()
+    chat, chars, _model, _ = _build_forced_trigger_service(
+        replies=[
+            '```json\n{"tool": "generate_image", "args": '
+            '{"positive": "鯖魚定食"}}\n```',
+            "拍好了，傳給你。",
+        ],
+        image_tool=image_tool,
+    )
+    character_id = await _seed_trigger_character(
+        chars,
+        allowed_tools=["generate_image"],
+    )
+
+    response = await chat.send_message(SendChatMessageRequest(
+        character_id=character_id,
+        message="請拍一張鯖魚定食照片給我",
+    ))
+
+    assert response.assistant_message.attachments == []
+    assert "沒有成功產生或傳送圖片" in response.assistant_message.content
 
 
 @pytest.mark.asyncio

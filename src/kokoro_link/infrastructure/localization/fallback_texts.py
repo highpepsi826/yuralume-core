@@ -80,6 +80,28 @@ _TEXTS: dict[str, dict[str, str]] = {
         ),
         "ja-JP": "（画像は送れたけど、そのあとに言おうとした言葉が詰まっちゃった。）",
     },
+    "chat.image_tool_unavailable": {
+        "zh-TW": "（我收到你要圖片的要求，但目前圖片工具沒有可用的執行通道，所以這次沒有產生或傳送圖片。）",
+        "en-US": (
+            "(I received your request for a picture, but the image tool is "
+            "not available right now, so no picture was generated or sent.)"
+        ),
+        "ja-JP": (
+            "（画像のお願いは受け取ったけど、今は画像ツールが使えないので、"
+            "画像を生成・送信できなかった。）"
+        ),
+    },
+    "chat.image_tool_generation_failed": {
+        "zh-TW": "（我收到你要圖片的要求，但這次沒有成功產生或傳送圖片；我不會假裝已經傳好了。）",
+        "en-US": (
+            "(I received your request for a picture, but it was not generated "
+            "or sent successfully this time. I won't pretend that it was.)"
+        ),
+        "ja-JP": (
+            "（画像のお願いは受け取ったけど、今回は生成または送信に失敗した。"
+            "送れたふりはしない。）"
+        ),
+    },
     # --- promise fulfilment: the tool produced a file, but this deployment
     #     cannot hand it to a messaging platform (no public base URL), so the
     #     attachment was dropped before delivery. Deliberately NOT

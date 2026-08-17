@@ -151,7 +151,7 @@ def render_tools_block(
 
 def _render_forced_call(forced_tool_name: str) -> list[str]:
     return [
-        f"⚡ 本回合強制工具呼叫：使用者訊息命中了操作者設定的觸發規則，"
+        f"⚡ 本回合強制工具呼叫：使用者訊息命中了明確的圖片觸發規則，"
         f"**這回合必須呼叫 `{forced_tool_name}` 工具**，禁止純文字回覆。",
         "- 參數（例如 `generate_image` 的 `positive`）請依當前對話情境與角色處境自行決定，"
         "不要照抄使用者的觸發指令字面（例如 `/pic`、`幫我畫` 這類命令前綴不要當成畫面內容）。",

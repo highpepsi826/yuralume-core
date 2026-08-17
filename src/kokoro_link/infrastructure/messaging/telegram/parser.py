@@ -95,7 +95,9 @@ def _is_bot_command(message: dict[str, Any]) -> bool:
     ``entities`` / ``caption_entities`` as ``type="bot_command"``; when
     the command starts at offset 0 the message is *addressed to the bot
     as a command*, not a piece of dialogue, so we drop it before it
-    enters conversation history, memory extraction, or any prompt.
+    enters conversation history, memory extraction, or any prompt. The
+    application's ``/pic`` command is the one deliberate exception: it
+    must reach the chat service so the normal forced-image path can run.
 
     A trailing ``/start`` inside a regular sentence (offset > 0) is left
     alone — that's the user typing about a command, not invoking one."""
@@ -109,6 +111,14 @@ def _is_bot_command(message: dict[str, Any]) -> bool:
             if entity.get("type") != "bot_command":
                 continue
             if entity.get("offset", -1) == 0:
+                command_text = message.get(
+                    "text" if key == "entities" else "caption",
+                )
+                if isinstance(command_text, str):
+                    command = command_text.split(maxsplit=1)[0]
+                    command = command.split("@", maxsplit=1)[0].casefold()
+                    if command == "/pic":
+                        continue
                 return True
     return False
 

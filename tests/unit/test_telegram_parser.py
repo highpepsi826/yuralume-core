@@ -127,6 +127,42 @@ def test_bot_command_with_bot_username_is_dropped() -> None:
     assert parse_update(update) is None
 
 
+def test_pic_command_is_forwarded_to_chat_pipeline() -> None:
+    update = _base_update(
+        text="/pic",
+        entities=[{"type": "bot_command", "offset": 0, "length": 4}],
+    )
+
+    result = parse_update(update)
+
+    assert result is not None
+    assert result.text == "/pic"
+
+
+def test_pic_command_with_args_is_forwarded_to_chat_pipeline() -> None:
+    update = _base_update(
+        text="/pic 鯖魚定食",
+        entities=[{"type": "bot_command", "offset": 0, "length": 4}],
+    )
+
+    result = parse_update(update)
+
+    assert result is not None
+    assert result.text == "/pic 鯖魚定食"
+
+
+def test_pic_command_with_bot_username_is_forwarded_to_chat_pipeline() -> None:
+    update = _base_update(
+        text="/pic@my_bot 鯖魚定食",
+        entities=[{"type": "bot_command", "offset": 0, "length": 12}],
+    )
+
+    result = parse_update(update)
+
+    assert result is not None
+    assert result.text == "/pic@my_bot 鯖魚定食"
+
+
 def test_slash_in_middle_of_text_is_kept() -> None:
     update = _base_update(
         text="我剛剛輸入了 /start 看看會發生什麼",
