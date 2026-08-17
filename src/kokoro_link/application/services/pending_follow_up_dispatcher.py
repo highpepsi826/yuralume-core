@@ -37,6 +37,7 @@ break the loop. Other characters / other tick steps must keep working.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from datetime import datetime, timezone, tzinfo
 
@@ -92,6 +93,24 @@ character free enough to honour the deferred reply. Mirror of
 ``_BUSY_DECIDER_INVOKE_FLOOR`` in ``chat_service``: if the floor caused
 the decider to skip a defer in the first place, the same floor should
 let us release it now."""
+
+_MEDIA_REFERENCE_RE = re.compile(
+    r"照片|圖片|相片|截圖|圖像|image|photo|picture|screenshot",
+    re.IGNORECASE,
+)
+_MEDIA_DELIVERY_CLAIM_RE = re.compile(
+    r"(?:照片|圖片|相片|截圖|圖像|image|photo|picture|screenshot)"
+    r"[^。！？\n]{0,24}(?:傳|發|寄|附)(?:給|上|了)?"
+    r"|(?:已|已經|先|都)?(?:傳|發|寄|附)(?:給|上|了)?"
+    r"[^。！？\n]{0,24}(?:照片|圖片|相片|截圖|圖像|image|photo|picture|screenshot)",
+    re.IGNORECASE,
+)
+_MEDIA_DELIVERY_FAILURE_RE = re.compile(
+    r"(?:傳|發|寄|附)[^。！？\n]{0,12}(?:不出去|不了|不到)"
+    r"|(?:還沒|沒|無法|不能|不會)[^。！？\n]{0,12}(?:傳|發|寄|附)"
+    r"|(?:not sent|can(?:not|'t) send|unable to send)",
+    re.IGNORECASE,
+)
 
 
 class PendingFollowUpDispatcher:
@@ -436,6 +455,23 @@ class PendingFollowUpDispatcher:
         if not body:
             await self._fail_back_to_queued(
                 resolving, error="empty compose", now=now,
+            )
+            return False
+        if (
+            not composed.attachments
+            and _claims_media_delivery_without_attachment(
+                resolving.promise_intent, body,
+            )
+        ):
+            _LOGGER.warning(
+                "scheduled-promise composer claimed a media delivery without "
+                "an attachment id=%s; leaving the promise queued",
+                row.id,
+            )
+            await self._fail_back_to_queued(
+                resolving,
+                error="media delivery claimed without attachment",
+                now=now,
             )
             return False
 
@@ -900,6 +936,23 @@ def _a_delivery_write_is_still_ours(status: PendingFollowUpStatus) -> bool:
     Anything non-terminal, ``queued`` included — see
     :meth:`PendingFollowUpDispatcher._write_release_outcome`."""
     return status not in _TERMINAL_STATUSES
+
+
+def _claims_media_delivery_without_attachment(
+    promise_intent: str, body: str,
+) -> bool:
+    """Whether a visual promise says it was sent without an attachment.
+
+    The scheduled-promise composer is still LLM-led; this is only a narrow
+    truthfulness backstop at the irreversible boundary where a row becomes
+    ``resolved``. It ignores explicit delivery-failure wording, so an honest
+    explanation can still be sent when an image tool reports it cannot deliver.
+    """
+    if not _MEDIA_REFERENCE_RE.search(promise_intent or ""):
+        return False
+    if _MEDIA_DELIVERY_FAILURE_RE.search(body or ""):
+        return False
+    return bool(_MEDIA_DELIVERY_CLAIM_RE.search(body or ""))
 
 
 def _is_still_busy(current_activity: ScheduleActivity | None) -> bool:

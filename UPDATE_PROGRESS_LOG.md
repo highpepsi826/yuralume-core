@@ -20,6 +20,27 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-17 - Harden Telegram replies and promised-media delivery
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed on `local/customizations` and pushed to the personal
+  fork.
+- Backup: `pre-messaging-reliability-20260817.dump` (custom format, verified
+  with `pg_restore -l` before deployment)
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated the local
+  application stack. Telegram sends now require an explicit successful API
+  acknowledgement before they are recorded as delivered. Malformed successful
+  OpenAI-compatible chat responses are retried once, then report a visible
+  localized failure instead of silently dropping a reply. Image promises cannot
+  be marked completed when no attachment was delivered.
+- Verification: 148 focused LLM, dispatcher, promise, and Telegram tests
+  passed; Docker build passed; all Compose services were healthy and
+  `http://127.0.0.1:8012/health` returned `status: ok`.
+- Follow-up: observe normal Telegram conversations and the next image promise;
+  no historical chat or character data was changed.
+
 ### 2026-08-17 - Deploy proactive messaging and intent lifecycle redesign
 
 - Status: completed

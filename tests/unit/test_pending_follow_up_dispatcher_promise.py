@@ -82,13 +82,14 @@ def _promise_row(
     character_id: str = "char-1",
     conversation_id: str = "conv-1",
     offset_min: int = -1,
+    promise_intent: str = "叫使用者起床",
     source_content_mode: MessageContentMode = MessageContentMode.NORMAL,
     source_safe_summary: str = "",
 ) -> PendingFollowUp:
     return PendingFollowUp.new_promise(
         character_id=character_id,
         conversation_id=conversation_id,
-        promise_intent="叫使用者起床",
+        promise_intent=promise_intent,
         scheduled_for=_now() + timedelta(minutes=offset_min),
         source_message_content="明天 10 點叫我起床",
         source_content_mode=source_content_mode,
@@ -248,6 +249,34 @@ async def test_scheduled_promise_releases_even_when_busy() -> None:
     resolved = await dispatcher.tick(now=_now())
     assert resolved == 1
     assert proactive.calls[0]["trigger"] == ProactiveTrigger.SCHEDULED_PROMISE
+
+
+@pytest.mark.asyncio
+async def test_media_promise_cannot_claim_delivery_without_an_attachment() -> None:
+    repo = InMemoryPendingFollowUpRepository()
+    row = _promise_row(
+        promise_intent="整理完貓素材的截圖後主動傳給使用者",
+    )
+    await repo.add(row)
+    char = _character()
+    proactive = _StubProactiveDispatcher()
+    dispatcher = PendingFollowUpDispatcher(
+        repository=repo,
+        composer=_StubBusyComposer(),
+        proactive_dispatcher=proactive,
+        character_repository=_StubCharacterRepo({char.id: char}),
+        schedule_service=_StubScheduleService(current_activity=None),
+        scheduled_promise_composer=_StubPromiseComposer(
+            "貓素材整理好了，截圖我先傳給你。",
+        ),
+    )
+
+    assert await dispatcher.tick(now=_now()) == 0
+    assert proactive.calls == []
+    stored = await repo.get(row.id)
+    assert stored is not None
+    assert stored.status == PendingFollowUpStatus.QUEUED
+    assert stored.last_error == "media delivery claimed without attachment"
 
 
 @pytest.mark.asyncio
@@ -536,7 +565,9 @@ async def test_denied_tool_reaches_the_second_pass_as_a_failure() -> None:
 @pytest.mark.asyncio
 async def test_generated_image_ships_with_the_promised_message() -> None:
     repo = InMemoryPendingFollowUpRepository()
-    await repo.add(_promise_row())
+    await repo.add(_promise_row(
+        promise_intent="整理完貓素材的截圖後主動傳給使用者",
+    ))
     char = _tooled_character(allowed=["fake_image"])
     proactive = _StubProactiveDispatcher()
     composer = _ScriptedPromiseComposer(

@@ -185,6 +185,7 @@ def test_prompt_covers_rendezvous_and_report_promise_shapes() -> None:
     assert "回報型" in prompt
     # A completion promise must never invent the result it was asked to fetch.
     assert "不要憑空編造具體結果" in prompt
+    assert "不能假裝已送達" in prompt
 
 
 def test_prompt_injects_operator_local_current_time() -> None:

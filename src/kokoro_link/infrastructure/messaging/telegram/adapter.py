@@ -61,6 +61,10 @@ class LocalImageFetchResult:
     content: bytes | None = None
 
 
+class TelegramDeliveryError(RuntimeError):
+    """Telegram did not confirm that an outbound message was accepted."""
+
+
 class TelegramAdapter(ChannelAdapterPort):
     def __init__(
         self,
@@ -94,10 +98,10 @@ class TelegramAdapter(ChannelAdapterPort):
         bot_token = message.credentials.get("bot_token", "")
         if not bot_token:
             _LOGGER.warning(
-                "Telegram send skipped — missing bot_token for chat_ref=%s",
+                "Telegram send rejected — missing bot_token for chat_ref=%s",
                 message.chat_ref,
             )
-            return
+            raise TelegramDeliveryError("Telegram send rejected: missing bot_token")
 
         images = [a for a in message.attachments if a.kind == "image"]
         others = [a for a in message.attachments if a.kind != "image"]
@@ -161,16 +165,14 @@ class TelegramAdapter(ChannelAdapterPort):
         payload = {"chat_id": chat_ref, "text": text}
         try:
             response = await client.post(url, json=payload)
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
             _LOGGER.exception(
                 "Telegram sendMessage transport error chat_ref=%s", chat_ref,
             )
-            return
-        if response.status_code >= 400:
-            _LOGGER.warning(
-                "Telegram sendMessage failed chat_ref=%s status=%s body=%s",
-                chat_ref, response.status_code, response.text[:200],
-            )
+            raise TelegramDeliveryError(
+                "Telegram sendMessage transport error"
+            ) from exc
+        _confirm_delivery(response, operation="sendMessage", chat_ref=chat_ref)
 
     async def _post_send_photo(
         self,
@@ -185,15 +187,15 @@ class TelegramAdapter(ChannelAdapterPort):
         # object storage directly, avoiding public URL round-trips
         # entirely; external CDN URLs still fall back to HTTP GET.
         image_bytes = await self._fetch_image_bytes(client, chat_ref, image.url)
-        if image_bytes is None:
-            return  # already logged
         if len(image_bytes) > _MAX_PHOTO_BYTES:
             _LOGGER.warning(
-                "Telegram sendPhoto skipped chat_ref=%s url=%s — %d bytes "
+                "Telegram sendPhoto rejected chat_ref=%s url=%s — %d bytes "
                 "exceeds 10 MB sendPhoto limit",
                 chat_ref, image.url, len(image_bytes),
             )
-            return
+            raise TelegramDeliveryError(
+                "Telegram sendPhoto rejected: image exceeds 10 MB"
+            )
 
         content_type = _resolve_content_type(image)
         filename = _guess_filename(image.url, content_type)
@@ -222,26 +224,23 @@ class TelegramAdapter(ChannelAdapterPort):
         files = {file_field: (filename, image_bytes, content_type)}
         try:
             response = await client.post(url, data=data, files=files)
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
             _LOGGER.exception(
                 "Telegram %s transport error chat_ref=%s url=%s",
                 endpoint, chat_ref, image.url,
             )
-            return
-        if response.status_code >= 400:
-            _LOGGER.warning(
-                "Telegram %s failed chat_ref=%s url=%s status=%s body=%s",
-                endpoint, chat_ref, image.url,
-                response.status_code, response.text[:200],
-            )
+            raise TelegramDeliveryError(
+                f"Telegram {endpoint} transport error"
+            ) from exc
+        _confirm_delivery(response, operation=endpoint, chat_ref=chat_ref)
 
     async def _fetch_image_bytes(
         self,
         client: httpx.AsyncClient,
         chat_ref: str,
         url: str,
-    ) -> bytes | None:
-        """GET the image from ``url``; return bytes or ``None`` on error.
+    ) -> bytes:
+        """GET the image from ``url`` or raise when it cannot be delivered.
 
         Logs every failure mode separately so ops can tell the difference
         between "our server can't reach the upload URL" (config bug) and
@@ -250,32 +249,42 @@ class TelegramAdapter(ChannelAdapterPort):
         if self._local_image_fetcher is not None:
             try:
                 result = await self._local_image_fetcher(url)
-            except Exception:
+            except Exception as exc:
                 _LOGGER.exception(
                     "Telegram local image fetcher crashed chat_ref=%s url=%s",
                     chat_ref, url,
                 )
-                result = LocalImageFetchResult(handled=True)
+                raise TelegramDeliveryError(
+                    "Telegram local image fetcher crashed"
+                ) from exc
             if isinstance(result, LocalImageFetchResult):
                 if result.handled:
-                    return result.content
+                    if result.content is not None:
+                        return result.content
+                    raise TelegramDeliveryError(
+                        "Telegram local image fetcher returned no image bytes"
+                    )
             elif result is not None:
                 return result
 
         try:
             response = await client.get(url, follow_redirects=True)
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
             _LOGGER.exception(
                 "Telegram image fetch transport error chat_ref=%s url=%s",
                 chat_ref, url,
             )
-            return None
-        if response.status_code >= 400:
+            raise TelegramDeliveryError(
+                "Telegram image fetch transport error"
+            ) from exc
+        if not 200 <= response.status_code < 300:
             _LOGGER.warning(
                 "Telegram image fetch failed chat_ref=%s url=%s status=%s",
                 chat_ref, url, response.status_code,
             )
-            return None
+            raise TelegramDeliveryError(
+                f"Telegram image fetch failed with status {response.status_code}"
+            )
         return response.content
 
     async def set_webhook(
@@ -397,6 +406,58 @@ def _guess_filename(url: str, content_type: str) -> str:
     if name and "." in name:
         return name
     return _CONTENT_TYPE_TO_FILENAME.get(content_type, "photo.bin")
+
+
+def _confirm_delivery(
+    response: httpx.Response,
+    *,
+    operation: str,
+    chat_ref: str,
+) -> None:
+    """Raise unless Telegram explicitly acknowledges an outbound send.
+
+    A transport success only proves that a proxy answered. The Bot API's
+    ``ok`` field is the platform-level acknowledgement, and successful send
+    responses normally include a non-sensitive ``result.message_id`` which is
+    useful when reconciling a delivery log with Telegram.
+    """
+    if not 200 <= response.status_code < 300:
+        _LOGGER.warning(
+            "Telegram %s failed chat_ref=%s status=%s body=%s",
+            operation, chat_ref, response.status_code, response.text[:200],
+        )
+        raise TelegramDeliveryError(
+            f"Telegram {operation} failed with status {response.status_code}"
+        )
+    try:
+        data = response.json()
+    except ValueError as exc:
+        _LOGGER.warning(
+            "Telegram %s returned non-JSON success response chat_ref=%s",
+            operation, chat_ref,
+        )
+        raise TelegramDeliveryError(
+            f"Telegram {operation} returned non-JSON response"
+        ) from exc
+    if not isinstance(data, dict) or data.get("ok") is not True:
+        description = (
+            str(data.get("description", ""))[:200]
+            if isinstance(data, dict)
+            else "unexpected response shape"
+        )
+        _LOGGER.warning(
+            "Telegram %s was not acknowledged chat_ref=%s description=%s",
+            operation, chat_ref, description or "none",
+        )
+        raise TelegramDeliveryError(
+            f"Telegram {operation} was not acknowledged"
+        )
+    result = data.get("result")
+    message_id = result.get("message_id") if isinstance(result, dict) else None
+    _LOGGER.info(
+        "Telegram %s acknowledged chat_ref=%s message_id=%s",
+        operation, chat_ref, message_id if message_id is not None else "unknown",
+    )
 
 
 def _safe_json(response: httpx.Response) -> dict:

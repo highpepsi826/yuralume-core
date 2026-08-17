@@ -160,11 +160,6 @@ class LocalMessagingProactiveDeliveryAdapter(ExternalProactiveDeliveryPort):
             await self._conversations.save(conversation)
             updated_binding = updated_binding.with_conversation(conversation.id)
             await self._bindings.save(updated_binding)
-        appended = conversation.append(
-            Message(role=MessageRole.ASSISTANT, content=text),
-        )
-        await self._conversations.save(appended)
-
         adapter = self._adapters.get(account.platform.value)
         if adapter is None:
             raise RuntimeError(
@@ -181,3 +176,11 @@ class LocalMessagingProactiveDeliveryAdapter(ExternalProactiveDeliveryPort):
                 locale=locale,
             ),
         )
+        # The platform adapter has now acknowledged the full segmented send.
+        # Persisting before this point made a failed external delivery look like
+        # a real assistant turn in local history and caused later context to
+        # claim a message the player never received.
+        appended = conversation.append(
+            Message(role=MessageRole.ASSISTANT, content=text),
+        )
+        await self._conversations.save(appended)

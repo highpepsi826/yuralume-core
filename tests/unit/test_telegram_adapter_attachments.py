@@ -20,7 +20,10 @@ from kokoro_link.contracts.messaging import (
     OutboundMessage,
 )
 from kokoro_link.domain.value_objects.platform import Platform
-from kokoro_link.infrastructure.messaging.telegram.adapter import TelegramAdapter
+from kokoro_link.infrastructure.messaging.telegram.adapter import (
+    TelegramAdapter,
+    TelegramDeliveryError,
+)
 
 
 _FAKE_IMAGE_BYTES = b"\x89PNG\r\n\x1a\nFAKE"
@@ -285,10 +288,10 @@ async def test_local_image_fetcher_bypasses_public_http_get() -> None:
 
 
 @pytest.mark.asyncio
-async def test_image_fetch_404_skips_upload(
+async def test_image_fetch_404_raises_without_upload(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Dangling image URL → we log + skip, don't crash the whole send."""
+    """A dangling image URL must fail the delivery rather than be claimed."""
 
     captured: list[httpx.Request] = []
 
@@ -301,10 +304,11 @@ async def test_image_fetch_404_skips_upload(
     adapter = TelegramAdapter(transport=httpx.MockTransport(handler))
 
     with caplog.at_level("WARNING"):
-        await adapter.send(_outbound(
-            text="",
-            attachments=(_image("https://my-server.test/uploads/gone.png"),),
-        ))
+        with pytest.raises(TelegramDeliveryError, match="status 404"):
+            await adapter.send(_outbound(
+                text="",
+                attachments=(_image("https://my-server.test/uploads/gone.png"),),
+            ))
 
     # Only the failed GET was captured — no sendPhoto attempt.
     assert [(r.method, r.url.host) for r in captured] == [
@@ -316,7 +320,7 @@ async def test_image_fetch_404_skips_upload(
 
 
 @pytest.mark.asyncio
-async def test_oversized_image_skipped_without_upload(
+async def test_oversized_image_raises_without_upload(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Telegram sendPhoto caps at 10 MB — bigger blobs would error-out
@@ -328,10 +332,11 @@ async def test_oversized_image_skipped_without_upload(
     adapter = TelegramAdapter(transport=_ok_transport(captured, huge_bytes))
 
     with caplog.at_level("WARNING"):
-        await adapter.send(_outbound(
-            text="",
-            attachments=(_image("https://my-server.test/big.png"),),
-        ))
+        with pytest.raises(TelegramDeliveryError, match="exceeds 10 MB"):
+            await adapter.send(_outbound(
+                text="",
+                attachments=(_image("https://my-server.test/big.png"),),
+            ))
 
     # Only the fetch was made; no upload to TG
     assert len(captured) == 1

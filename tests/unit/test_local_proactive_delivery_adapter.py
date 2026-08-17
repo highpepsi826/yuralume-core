@@ -133,6 +133,32 @@ async def test_accept_segments_message_with_attachment_last() -> None:
 
 
 @pytest.mark.asyncio
+async def test_failed_external_delivery_is_not_written_to_local_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed platform hand-off must not become a fictional chat turn."""
+    harness = build_messaging_harness()
+    character, _account, binding = await _character_with_proactive_binding(harness)
+    adapter = _adapter(harness)
+
+    async def fail_send_many(_messages) -> None:  # noqa: ANN001
+        raise RuntimeError("Telegram did not acknowledge the send")
+
+    monkeypatch.setattr(harness.telegram_adapter, "send_many", fail_send_many)
+
+    with pytest.raises(RuntimeError, match="did not acknowledge"):
+        await adapter.accept(
+            _envelope(character_id=character.id, text="我把截圖傳給你了"),
+        )
+
+    refreshed = await harness.binding_repository.get(binding.id)
+    assert refreshed is not None and refreshed.conversation_id is not None
+    convo = await harness.conversation_repository.get(refreshed.conversation_id)
+    assert convo is not None
+    assert convo.messages == []
+
+
+@pytest.mark.asyncio
 async def test_check_eligibility_true_with_proactive_binding() -> None:
     harness = build_messaging_harness()
     character, _account, _binding = await _character_with_proactive_binding(harness)

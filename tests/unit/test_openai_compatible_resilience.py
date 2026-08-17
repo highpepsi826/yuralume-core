@@ -42,6 +42,7 @@ import pytest
 from kokoro_link.contracts.llm import ReasoningOverrides
 from kokoro_link.infrastructure.llm.openai_compatible import (
     OpenAICompatibleChatModel,
+    OpenAICompatibleResponseShapeError,
 )
 
 _LOGGER_NAME = "kokoro_link.infrastructure.llm.openai_compatible"
@@ -225,6 +226,52 @@ async def test_stream_fallback_with_null_content_yields_no_chunks() -> None:
 
     assert chunks == [], "stream ends cleanly with zero chunks"
     assert chunks_memoized == [], "memoized fallback path too"
+
+
+@pytest.mark.asyncio
+async def test_generate_retries_a_2xx_response_without_assistant_content() -> None:
+    """A gateway may acknowledge a request but omit ``message.content``.
+
+    The adapter gets one bounded retry before surfacing a typed failure to the
+    messaging layer, so a transient malformed response does not consume the
+    player's whole turn.
+    """
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(200, json={
+                "choices": [{"message": {"reasoning_content": "..."}}],
+            })
+        return _chat_ok("recovered reply")
+
+    chat = _build()
+    with _patch_transport(httpx.MockTransport(handler)):
+        assert await chat.generate("hi") == "recovered reply"
+
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_generate_raises_clear_error_after_one_bad_shape_retry() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"choices": [{"message": {}}]})
+
+    chat = _build()
+    with _patch_transport(httpx.MockTransport(handler)):
+        with pytest.raises(
+            OpenAICompatibleResponseShapeError,
+            match="after one retry",
+        ):
+            await chat.generate("hi")
+
+    assert calls == 2
 
 
 # ---------------------------------------------------------------------------

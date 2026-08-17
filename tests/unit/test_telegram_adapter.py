@@ -5,13 +5,18 @@ import pytest
 
 from kokoro_link.contracts.messaging import OutboundMessage
 from kokoro_link.domain.value_objects.platform import Platform
-from kokoro_link.infrastructure.messaging.telegram.adapter import TelegramAdapter
+from kokoro_link.infrastructure.messaging.telegram.adapter import (
+    TelegramAdapter,
+    TelegramDeliveryError,
+)
 
 
 def _ok_transport(captured: list[httpx.Request]) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         captured.append(request)
-        return httpx.Response(200, json={"ok": True, "result": {}})
+        return httpx.Response(
+            200, json={"ok": True, "result": {"message_id": 123}},
+        )
 
     return httpx.MockTransport(handler)
 
@@ -74,12 +79,13 @@ async def test_send_uses_per_call_credentials() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_skips_silently_on_missing_token(
+async def test_send_rejects_missing_token(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     adapter = TelegramAdapter()
     with caplog.at_level("WARNING"):
-        await adapter.send(_outbound(credentials={}))
+        with pytest.raises(TelegramDeliveryError, match="missing bot_token"):
+            await adapter.send(_outbound(credentials={}))
     assert any("missing bot_token" in r.message for r in caplog.records)
 
 
@@ -91,28 +97,42 @@ async def test_send_rejects_mismatched_platform() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_swallows_4xx(caplog: pytest.LogCaptureFixture) -> None:
+async def test_send_raises_on_4xx(caplog: pytest.LogCaptureFixture) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, json={"ok": False, "description": "blocked"})
 
     adapter = TelegramAdapter(transport=httpx.MockTransport(handler))
     with caplog.at_level("WARNING"):
-        await adapter.send(_outbound())
+        with pytest.raises(TelegramDeliveryError, match="status 403"):
+            await adapter.send(_outbound())
     assert any("Telegram sendMessage failed" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio
-async def test_send_swallows_transport_error(caplog: pytest.LogCaptureFixture) -> None:
+async def test_send_raises_on_transport_error(caplog: pytest.LogCaptureFixture) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom", request=request)
 
     adapter = TelegramAdapter(transport=httpx.MockTransport(handler))
     with caplog.at_level("ERROR"):
-        await adapter.send(_outbound())
+        with pytest.raises(TelegramDeliveryError, match="transport error"):
+            await adapter.send(_outbound())
     assert any(
         "Telegram sendMessage transport error" in r.message
         for r in caplog.records
     )
+
+
+@pytest.mark.asyncio
+async def test_send_rejects_a_2xx_unacknowledged_bot_api_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"ok": False, "description": "bot was blocked"},
+        )
+
+    adapter = TelegramAdapter(transport=httpx.MockTransport(handler))
+    with pytest.raises(TelegramDeliveryError, match="not acknowledged"):
+        await adapter.send(_outbound())
 
 
 @pytest.mark.asyncio

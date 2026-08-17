@@ -27,6 +27,7 @@ from kokoro_link.application.services.chat_turn_lease import ConversationBusyErr
 from kokoro_link.application.services.messaging_dispatcher import MessagingDispatcher
 from kokoro_link.domain.value_objects.platform import Platform
 from kokoro_link.infrastructure.messaging.debounce import InboundDebouncer
+from kokoro_link.infrastructure.localization import localized_fallback_text
 from kokoro_link.infrastructure.repositories.in_memory_inbound_receipts import (
     InMemoryInboundReceiptRepository,
 )
@@ -207,6 +208,9 @@ async def test_non_busy_failure_keeps_the_receipt() -> None:
     )
 
     assert chat.calls == 1
+    assert [message.text for message in harness.telegram_adapter.sent] == [
+        localized_fallback_text("channel.reply_generation_failed", "zh-TW"),
+    ]
     assert await receipts.try_claim(
         Platform.TELEGRAM.value, account.id, "tg-42", "tg-42:8",
     ) is False

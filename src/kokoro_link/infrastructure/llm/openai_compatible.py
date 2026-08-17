@@ -84,6 +84,15 @@ pydantic ``loc`` field) must ALSO be a key we actually sent (see
 than a guess."""
 
 
+class OpenAICompatibleResponseShapeError(RuntimeError):
+    """A 2xx completion response did not contain usable assistant text.
+
+    OpenAI-compatible gateways occasionally acknowledge a request with a
+    tool-call-only, reasoning-only, or malformed response. A successful HTTP
+    status is not enough for the chat contract: callers need actual text.
+    """
+
+
 class _LearnedQuirks:
     """Server-taught request adjustments for ONE resolved model id.
 
@@ -421,46 +430,66 @@ class OpenAICompatibleChatModel(ChatModelPort):
             prompt, image_urls=image_urls, model=model,
         )
         async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
-            response = await client.post(
-                f"{self._base_url}/chat/completions",
-                json=payload,
-                headers=self._build_headers(),
-            )
-            # Signal-driven adaptation loop: each round reacts to what
-            # the error body prescribes (non-chat model → default,
-            # max_tokens rename, system-role merge, unrecognized-param
-            # drop), remembers the lesson, and retries once per lesson.
-            for _ in range(_MAX_PRESCRIBED_RETRIES):
-                adapted = self._adapted_payload_for_rejection(
-                    status_code=response.status_code,
-                    body=response.text,
-                    payload=payload,
-                    prompt=prompt,
-                    stream=False,
-                    image_urls=image_urls,
-                    model=model,
-                )
-                if adapted is None:
-                    break
-                payload = adapted
+            async def post_completion(request_payload: dict) -> tuple[
+                httpx.Response, dict,
+            ]:
                 response = await client.post(
                     f"{self._base_url}/chat/completions",
-                    json=payload,
+                    json=request_payload,
                     headers=self._build_headers(),
                 )
+                # Signal-driven adaptation loop: each round reacts to what
+                # the error body prescribes (non-chat model → default,
+                # max_tokens rename, system-role merge, unrecognized-param
+                # drop), remembers the lesson, and retries once per lesson.
+                for _ in range(_MAX_PRESCRIBED_RETRIES):
+                    adapted = self._adapted_payload_for_rejection(
+                        status_code=response.status_code,
+                        body=response.text,
+                        payload=request_payload,
+                        prompt=prompt,
+                        stream=False,
+                        image_urls=image_urls,
+                        model=model,
+                    )
+                    if adapted is None:
+                        break
+                    request_payload = adapted
+                    response = await client.post(
+                        f"{self._base_url}/chat/completions",
+                        json=request_payload,
+                        headers=self._build_headers(),
+                    )
+                try:
+                    _raise_with_body(response)
+                except httpx.HTTPStatusError as exc:
+                    _raise_image_rejection_if_applicable(
+                        status_code=response.status_code,
+                        body=response.text,
+                        payload=request_payload,
+                        cause=exc,
+                    )
+                    raise
+                return response, request_payload
+
+            response, payload = await post_completion(payload)
             try:
-                _raise_with_body(response)
-            except httpx.HTTPStatusError as exc:
-                _raise_image_rejection_if_applicable(
-                    status_code=response.status_code,
-                    body=response.text,
-                    payload=payload,
-                    cause=exc,
+                content = _completion_text(response)
+            except OpenAICompatibleResponseShapeError:
+                _LOGGER.warning(
+                    "LLM %s returned a 2xx completion without usable text; "
+                    "retrying once",
+                    self.provider_id,
                 )
-                raise
-            data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        if self._strip_think_tags and isinstance(content, str):
+                response, payload = await post_completion(payload)
+                try:
+                    content = _completion_text(response)
+                except OpenAICompatibleResponseShapeError as retry_error:
+                    raise OpenAICompatibleResponseShapeError(
+                        "OpenAI-compatible completion response still lacked "
+                        "usable assistant text after one retry"
+                    ) from retry_error
+        if self._strip_think_tags:
             return strip_think_tags_text(content)
         return content
 
@@ -497,9 +526,12 @@ class OpenAICompatibleChatModel(ChatModelPort):
             # non-stream request and serve it as a single chunk.
             # ``content`` may be null upstream (refusal/tool-call-only):
             # never leak a non-str into the ``AsyncIterator[str]``.
-            fallback = await self.generate(
-                prompt, image_urls=image_urls, model=model,
-            )
+            try:
+                fallback = await self.generate(
+                    prompt, image_urls=image_urls, model=model,
+                )
+            except OpenAICompatibleResponseShapeError:
+                return
             if isinstance(fallback, str) and fallback:
                 yield fallback
             return
@@ -566,7 +598,12 @@ class OpenAICompatibleChatModel(ChatModelPort):
         # degrade to one non-stream completion, yielded as one chunk.
         # Same non-str guard as the memoized fast path above — an
         # upstream ``content: null`` ends the stream with zero chunks.
-        fallback = await self.generate(prompt, image_urls=image_urls, model=model)
+        try:
+            fallback = await self.generate(
+                prompt, image_urls=image_urls, model=model,
+            )
+        except OpenAICompatibleResponseShapeError:
+            return
         if isinstance(fallback, str) and fallback:
             yield fallback
 
@@ -1076,4 +1113,58 @@ def _raise_with_body(response: httpx.Response) -> None:
     raise httpx.HTTPStatusError(
         f"{response.status_code} from {response.request.url}: {body[:500]}",
         request=response.request, response=response,
+    )
+
+
+def _completion_text(response: httpx.Response) -> str:
+    """Extract usable text from a successful Chat Completions response.
+
+    Some compatible providers return a content-part array rather than the
+    usual string, so accept the text-bearing variants. Tool-call-only and
+    reasoning-only responses deliberately remain invalid here: this adapter
+    has no tool-call protocol on its ``generate`` contract, and treating them
+    as a completed character reply would silently drop the player's turn.
+    """
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise OpenAICompatibleResponseShapeError(
+            "OpenAI-compatible completion response was not valid JSON"
+        ) from exc
+    if not isinstance(data, dict):
+        raise OpenAICompatibleResponseShapeError(
+            "OpenAI-compatible completion response was not an object"
+        )
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise OpenAICompatibleResponseShapeError(
+            "OpenAI-compatible completion response had no choices"
+        )
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        raise OpenAICompatibleResponseShapeError(
+            "OpenAI-compatible completion choice was not an object"
+        )
+    message = first_choice.get("message")
+    if not isinstance(message, dict):
+        raise OpenAICompatibleResponseShapeError(
+            "OpenAI-compatible completion choice had no assistant message"
+        )
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str) and part.strip():
+                parts.append(part)
+            elif isinstance(part, dict):
+                text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text)
+        joined = "".join(parts)
+        if joined.strip():
+            return joined
+    raise OpenAICompatibleResponseShapeError(
+        "OpenAI-compatible completion response had no usable assistant content"
     )

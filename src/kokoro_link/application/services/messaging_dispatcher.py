@@ -71,7 +71,10 @@ from kokoro_link.domain.entities.conversation import Conversation
 from kokoro_link.domain.entities.messaging_account import MessagingAccount
 from kokoro_link.domain.value_objects.platform import Platform
 from kokoro_link.domain.value_objects.presence_frame import PresenceFrame
-from kokoro_link.infrastructure.localization import resolve_fallback_language
+from kokoro_link.infrastructure.localization import (
+    localized_fallback_text,
+    resolve_fallback_language,
+)
 from kokoro_link.infrastructure.messaging.debounce import InboundDebouncer
 from kokoro_link.infrastructure.messaging.inbound_placeholders import (
     localize_inbound_placeholder_text,
@@ -257,6 +260,12 @@ class MessagingDispatcher:
             # Every other failure keeps the dedup stamps: the turn may have
             # written partial state, and re-running it would double-charge.
             _LOGGER.exception("chat_service failed for binding %s", binding.id)
+            await self._send_generation_failure_notice(
+                adapter=adapter,
+                message=message,
+                account=account,
+                locale=operator_language,
+            )
             return
 
         if reply.assistant_message is None:
@@ -307,6 +316,43 @@ class MessagingDispatcher:
                 )
                 if self._busy_retry_delay_seconds:
                     await asyncio.sleep(self._busy_retry_delay_seconds)
+
+    async def _send_generation_failure_notice(
+        self,
+        *,
+        adapter: ChannelAdapterPort,
+        message: InboundMessage,
+        account: MessagingAccount,
+        locale: str,
+    ) -> None:
+        """Tell the player their message was received when generation failed.
+
+        The inbound receipt remains consumed because a failed chat turn may
+        already have written state or charged the provider. A deterministic
+        channel notice is therefore safer than replaying the original turn and
+        avoids the old experience where the player had to send another message
+        just to discover the first one failed.
+        """
+        try:
+            await send_segmented_outbound(
+                adapter,
+                OutboundMessage(
+                    platform=message.platform,
+                    chat_ref=message.chat_ref,
+                    text=localized_fallback_text(
+                        "channel.reply_generation_failed", locale,
+                    ),
+                    credentials=account.credentials,
+                    locale=locale,
+                    reply_context=message.reply_context,
+                ),
+            )
+        except Exception:
+            _LOGGER.exception(
+                "failed to send generation-failure notice platform=%s chat_ref=%s",
+                message.platform.value,
+                message.chat_ref,
+            )
 
     async def _claim_delivery(self, message: InboundMessage) -> _ClaimOutcome:
         """Take the durable at-most-once claim on this inbound delivery.

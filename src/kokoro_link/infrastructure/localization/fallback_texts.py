@@ -93,6 +93,17 @@ _TEXTS: dict[str, dict[str, str]] = {
         ),
         "ja-JP": "（用意はできたんだけど、こっちから送れなかった。直ったら渡すね。）",
     },
+    # --- inbound channel: the message reached the app, but the LLM could
+    # not produce a usable reply. This remains available while the provider
+    # is unavailable because it is deterministic, not a second LLM call. ---
+    "channel.reply_generation_failed": {
+        "zh-TW": "（我有收到你的訊息，但剛剛回覆卡住了。你可以晚點再叫我一次嗎？）",
+        "en-US": (
+            "(I received your message, but my reply got stuck just now. "
+            "Could you try me again a little later?)"
+        ),
+        "ja-JP": "（メッセージは受け取ったんだけど、今ちょっと返事が詰まっちゃった。少ししてからもう一度呼んでくれる？）",
+    },
     # --- LINE outbound: attachment URL failed LINE's requirements ---
     "channel.line.attachment_url_invalid": {
         "zh-TW": "（附件 URL 不符 LINE 要求）{label}",
