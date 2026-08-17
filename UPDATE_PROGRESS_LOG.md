@@ -20,6 +20,24 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-17 - Deploy proactive messaging and intent lifecycle redesign
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: source commit `0b3c6a2` on `local/customizations`; deployment
+  record committed locally and not pushed
+- Backup: `pre-proactive-intent-20260817-075116.dump` (custom format,
+  verified with `pg_restore -l` before migration)
+- Deployment: built `yuralume-local/app:custom` from `0b3c6a2`, ran migrations
+  `l4c8p9z10040` and `m5d2r8q10041`, and recreated only `migrate` and `app`.
+  PostgreSQL, storage, WhatsApp sidecar, and their volumes were unchanged.
+- Verification: all four Compose services are healthy; `/health` returned
+  `status: ok`; `/api/v1/system/version` reports image tag
+  `local-customizations` and commit `0b3c6a2`.
+- Follow-up: observe proactive-attempt reasons and chat/tick latency for one
+  day; keep `proactive_frequency` deferred until that observation is complete.
+
 ### 2026-08-17 - Proactive messaging and current-intent lifecycle redesign
 
 - Status: completed in source; deployment pending explicit approval

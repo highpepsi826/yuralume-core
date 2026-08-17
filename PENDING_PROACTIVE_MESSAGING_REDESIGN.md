@@ -6,10 +6,10 @@ database data.
 
 ## Implementation Status - 2026-08-17
 
-The following work is implemented and verified on `local/customizations` in
-source form. It awaits commit and an explicitly approved Docker deployment;
-no runtime database rows, character memories, conversations, or schedules have
-been changed by this work.
+The following work is implemented, verified, and deployed from
+`local/customizations`. The 2026-08-17 deployment used the additive migrations
+after a verified PostgreSQL backup; no character memories, conversations, or
+schedules were edited by the deployment.
 
 - **Implemented:** opt-in proactive-message policy, low-pressure relational
   messages, unanswered-message elapsed-time cues, narrowed sleep gate, and
