@@ -55,6 +55,12 @@ from tests.unit._messaging_harness import (
 _FAKE_IMAGE_URL = "/uploads/stub/fake.png"
 
 
+class _GenerateImageTool(FakeImageTool):
+    """Fake renderer registered under the production tool name."""
+
+    name = "generate_image"
+
+
 class _StubModel(ChatModelPort):
     def __init__(self, response: str) -> None:
         self._response = response
@@ -258,6 +264,7 @@ async def _build_dispatched(
     public_base_url: str = "",
     public_base_url_provider=None,  # noqa: ANN001 - concise test hook
     tool_crashes: bool = False,
+    image_tool_name: str = "fake_image",
 ):
     harness = build_messaging_harness()
     created = await harness.character_service.create_character(
@@ -295,10 +302,13 @@ async def _build_dispatched(
     )
 
     image_url = "/uploads/characters/x/tools/img.png"
-    fake = FakeImageTool(url=image_url)
+    image_tool_cls = (
+        _GenerateImageTool if image_tool_name == "generate_image" else FakeImageTool
+    )
+    fake = image_tool_cls(url=image_url)
     if tool_crashes:
         class _Boom:
-            name = "fake_image"
+            name = image_tool_name
             description = ""
             parameters_schema: dict[str, object] = {}
 
@@ -482,6 +492,119 @@ async def test_tool_crash_still_delivers_text_without_attachments() -> None:
     sent = harness.telegram_adapter.sent
     assert len(sent) == 1
     assert sent[0].text == "嗨，本來想附圖的"
+    assert sent[0].attachments == ()
+
+
+@pytest.mark.asyncio
+async def test_image_commitment_without_tool_call_synthesises_image_call() -> None:
+    """A promise must not depend on the decider remembering tool_calls."""
+    decision = ProactiveDecision(
+        should_send=True,
+        reason="test",
+        message="我會拍咖哩照片給你",
+    )
+    harness, dispatcher, character_id, _ = await _build_dispatched(
+        decision=decision,
+        allowed_tools=["generate_image"],
+        image_tool_name="generate_image",
+        public_base_url="https://example.test",
+    )
+
+    attempt = await dispatcher.evaluate(
+        character_id=character_id,
+        trigger=ProactiveTrigger.TICK,
+        now=datetime(2026, 4, 19, 9, 0, tzinfo=timezone.utc),
+    )
+
+    assert attempt.outcome == ProactiveOutcome.SENT
+    sent = harness.telegram_adapter.sent
+    assert len(sent) == 1
+    assert sent[0].text == "我會拍咖哩照片給你"
+    assert len(sent[0].attachments) == 1
+    assert sent[0].attachments[0].kind == "image"
+
+
+@pytest.mark.asyncio
+async def test_image_commitment_tool_failure_cannot_claim_delivery() -> None:
+    decision = ProactiveDecision(
+        should_send=True,
+        reason="test",
+        message="我會拍咖哩照片給你",
+    )
+    harness, dispatcher, character_id, _ = await _build_dispatched(
+        decision=decision,
+        allowed_tools=["generate_image"],
+        image_tool_name="generate_image",
+        public_base_url="https://example.test",
+        tool_crashes=True,
+    )
+
+    attempt = await dispatcher.evaluate(
+        character_id=character_id,
+        trigger=ProactiveTrigger.TICK,
+        now=datetime(2026, 4, 19, 9, 0, tzinfo=timezone.utc),
+    )
+
+    assert attempt.outcome == ProactiveOutcome.SENT
+    sent = harness.telegram_adapter.sent
+    assert len(sent) == 1
+    assert sent[0].attachments == ()
+    assert "不會假裝" in sent[0].text
+    assert "我會拍咖哩照片給你" not in sent[0].text
+
+
+@pytest.mark.asyncio
+async def test_image_commitment_without_available_image_tool_is_truthful() -> None:
+    decision = ProactiveDecision(
+        should_send=True,
+        reason="test",
+        message="我會拍咖哩照片給你",
+    )
+    harness, dispatcher, character_id, _ = await _build_dispatched(
+        decision=decision,
+        allowed_tools=["generate_image"],
+        # The registry only has fake_image, so generate_image is unavailable.
+        image_tool_name="fake_image",
+        public_base_url="https://example.test",
+    )
+
+    attempt = await dispatcher.evaluate(
+        character_id=character_id,
+        trigger=ProactiveTrigger.TICK,
+        now=datetime(2026, 4, 19, 9, 0, tzinfo=timezone.utc),
+    )
+
+    assert attempt.outcome == ProactiveOutcome.SENT
+    sent = harness.telegram_adapter.sent
+    assert len(sent) == 1
+    assert sent[0].attachments == ()
+    assert "沒有可用的執行通道" in sent[0].text
+
+
+@pytest.mark.asyncio
+async def test_photo_discussion_does_not_trigger_image_tool() -> None:
+    decision = ProactiveDecision(
+        should_send=True,
+        reason="test",
+        message="我想跟你討論照片",
+    )
+    harness, dispatcher, character_id, _ = await _build_dispatched(
+        decision=decision,
+        allowed_tools=["generate_image"],
+        image_tool_name="generate_image",
+        public_base_url="https://example.test",
+    )
+
+    attempt = await dispatcher.evaluate(
+        character_id=character_id,
+        trigger=ProactiveTrigger.TICK,
+        now=datetime(2026, 4, 19, 9, 0, tzinfo=timezone.utc),
+    )
+
+    assert attempt.outcome == ProactiveOutcome.SENT
+    sent = harness.telegram_adapter.sent
+    assert len(sent) == 1
+    assert sent[0].text == "我想跟你討論照片"
     assert sent[0].attachments == ()
 
 

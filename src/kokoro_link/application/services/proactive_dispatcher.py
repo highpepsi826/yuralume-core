@@ -119,6 +119,10 @@ from kokoro_link.application.services.location_context import (
 from kokoro_link.application.services.persona_curiosity_observability import (
     persona_curiosity_plan_summary,
 )
+from kokoro_link.application.services.image_intent import (
+    IMAGE_TOOL_NAME,
+    is_image_commitment,
+)
 from kokoro_link.application.services.tool_attachment_delivery import (
     to_outbound_attachments,
 )
@@ -162,7 +166,9 @@ from kokoro_link.domain.services.address_resolver import resolve_character_addre
 from kokoro_link.domain.value_objects.proactive_outcome import ProactiveOutcome
 from kokoro_link.domain.value_objects.proactive_trigger import ProactiveTrigger
 from kokoro_link.domain.value_objects.resolved_address import AddressProvenance
+from kokoro_link.domain.value_objects.tool_call import ToolCall
 from kokoro_link.domain.value_objects.timezone import timezone_for_id
+from kokoro_link.infrastructure.localization import localized_fallback_text
 from kokoro_link.infrastructure.prompt.initial_relationship import (
     render_initial_relationship_seed_lines,
 )
@@ -807,12 +813,58 @@ class ProactiveDispatcher:
                 now=when,
             )
 
+        # A proactive line that promises a photo is a delivery contract, not
+        # decorative prose. The decider is allowed to omit tool_calls, so
+        # synthesize the image call here when the real tool is available.
+        # When it is unavailable, replace the claim before it reaches either
+        # web or Telegram; an attachment-less promise must never be sent as
+        # if a picture existed.
+        image_commitment_requires_attachment = is_image_commitment(
+            decision.message,
+        )
+        image_tool_available = any(
+            descriptor.name == IMAGE_TOOL_NAME for descriptor in available_tools
+        )
+        if image_commitment_requires_attachment:
+            if not image_tool_available or self._tool_orchestrator is None:
+                _LOGGER.warning(
+                    "proactive image commitment cannot run: available=%s "
+                    "orchestrator=%s character=%s",
+                    image_tool_available,
+                    self._tool_orchestrator is not None,
+                    character.id,
+                )
+                decision = replace(
+                    decision,
+                    message=localized_fallback_text(
+                        "proactive.image_tool_unavailable",
+                        operator_primary_language,
+                    ),
+                    tool_calls=(),
+                )
+                image_commitment_requires_attachment = False
+            elif not any(
+                call.name == IMAGE_TOOL_NAME for call in decision.tool_calls
+            ):
+                _LOGGER.info(
+                    "proactive image commitment detected — synthesising "
+                    "generate_image call character=%s",
+                    character.id,
+                )
+                decision = replace(
+                    decision,
+                    tool_calls=(ToolCall(
+                        name=IMAGE_TOOL_NAME,
+                        arguments={"positive": decision.message.strip()},
+                    ),),
+                )
+
         # Run any tool calls the decider asked for *before* pushing
         # the outbound. Attachments from each successful call get
-        # merged into the outbound payload; failures are silently
-        # dropped (the text message still goes out on its own so the
-        # user isn't left with an empty push waiting on a broken
-        # ComfyUI). Audit rows are written by the orchestrator.
+        # merged into the outbound payload. Ordinary optional tool failures
+        # keep their text-only behaviour; an image commitment is checked
+        # below and receives an honest fallback instead of a false claim.
+        # Audit rows are written by the orchestrator.
         # Tool invocations are audited against the conversation they belong to.
         # Local path → the binding's conversation id; hosted path → the
         # character's ``source="line"`` conversation (the same thread the
@@ -831,6 +883,21 @@ class ProactiveDispatcher:
             decision=decision,
             conversation_id=tool_conversation_id,
         )
+        if image_commitment_requires_attachment and not any(
+            attachment.kind.casefold() == "image" for attachment in attachments
+        ):
+            _LOGGER.warning(
+                "proactive image commitment completed without a deliverable "
+                "attachment character=%s",
+                character.id,
+            )
+            decision = replace(
+                decision,
+                message=localized_fallback_text(
+                    "proactive.image_tool_generation_failed",
+                    operator_primary_language,
+                ),
+            )
 
         # Fan out: web (if opted in) + messaging binding (if any).
         # A failure on one target must not block the other — e.g. a

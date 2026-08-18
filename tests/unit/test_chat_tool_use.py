@@ -536,6 +536,51 @@ async def test_explicit_natural_language_image_request_is_forced() -> None:
 
 
 @pytest.mark.asyncio
+async def test_image_commitment_in_normal_reply_synthesises_tool_call() -> None:
+    """A spontaneous promise is still a promise, even without /pic."""
+    chat, chars, _model, image_tool = _build_forced_trigger_service(
+        replies=[
+            "我會拍咖哩照片給你",
+            "這張真的給你。",
+        ],
+    )
+    character_id = await _seed_trigger_character(
+        chars,
+        allowed_tools=["generate_image"],
+    )
+
+    response = await chat.send_message(SendChatMessageRequest(
+        character_id=character_id,
+        message="今天晚餐吃什麼？",
+    ))
+
+    assert image_tool.invoke_count == 1
+    assert len(response.assistant_message.attachments) == 1
+    assert response.assistant_message.content == "這張真的給你。"
+
+
+@pytest.mark.asyncio
+async def test_photo_discussion_in_normal_reply_does_not_trigger_tool() -> None:
+    chat, chars, model, image_tool = _build_forced_trigger_service(
+        replies=["我想跟你討論照片"],
+    )
+    character_id = await _seed_trigger_character(
+        chars,
+        allowed_tools=["generate_image"],
+    )
+
+    response = await chat.send_message(SendChatMessageRequest(
+        character_id=character_id,
+        message="你最近有什麼想聊的？",
+    ))
+
+    assert image_tool.invoke_count == 0
+    assert response.assistant_message.attachments == []
+    assert response.assistant_message.content == "我想跟你討論照片"
+    assert len(model.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_forced_image_failure_cannot_claim_delivery() -> None:
     class _FailingImageTool(_RealNameImageTool):
         async def invoke(self, ctx: ToolContext) -> ToolResult:

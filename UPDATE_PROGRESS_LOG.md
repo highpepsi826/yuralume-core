@@ -20,6 +20,23 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-18 - Enforce proactive image delivery claims
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed `7564cdf` on `local/customizations`; the shared
+  image-intent guard now forces `generate_image` for clear photo promises and
+  prevents attachment-less delivery claims on chat and proactive surfaces.
+- Backup: `not required`; no schema migration or data change
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated the local
+  `app` and dependency `migrate` services with the runtime Compose files;
+  PostgreSQL, storage, WhatsApp sidecar, uploads, and volumes were preserved.
+- Verification: focused image/chat/proactive tests passed; Docker build
+  succeeded; all runtime services are healthy and
+  `http://127.0.0.1:8012/health` returned `status: ok`.
+- Follow-up: monitor the next proactive image promise and its tool audit row.
+
 ### 2026-08-17 - Reliable image requests from chat and Telegram
 
 - Status: completed

@@ -102,6 +102,28 @@ _TEXTS: dict[str, dict[str, str]] = {
             "送れたふりはしない。）"
         ),
     },
+    "proactive.image_tool_unavailable": {
+        "zh-TW": "（我本來要拍照片給你，但目前圖片工具沒有可用的執行通道，這次沒有產生或傳送圖片。）",
+        "en-US": (
+            "(I was going to take a picture for you, but the image tool is "
+            "not available right now, so no picture was generated or sent.)"
+        ),
+        "ja-JP": (
+            "（写真を撮って送るつもりだったけど、今は画像ツールが使えないので、"
+            "生成も送信もできなかった。）"
+        ),
+    },
+    "proactive.image_tool_generation_failed": {
+        "zh-TW": "（我本來要拍照片給你，但這次沒有成功產生或傳送圖片；我不會假裝已經傳好了。）",
+        "en-US": (
+            "(I was going to take a picture for you, but it was not generated "
+            "or sent successfully this time. I won't pretend that it was.)"
+        ),
+        "ja-JP": (
+            "（写真を撮って送るつもりだったけど、今回は生成または送信に失敗した。"
+            "送れたふりはしない。）"
+        ),
+    },
     # --- promise fulfilment: the tool produced a file, but this deployment
     #     cannot hand it to a messaging platform (no public base URL), so the
     #     attachment was dropped before delivery. Deliberately NOT

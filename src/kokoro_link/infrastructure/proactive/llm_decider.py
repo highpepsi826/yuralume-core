@@ -469,7 +469,7 @@ def _build_prompt(context: ProactiveContext) -> str:
         sections.append("\n".join(story_lines))
 
     if context.available_tools:
-        tool_lines: list[str] = ["可用工具（選用，不一定要用）："]
+        tool_lines: list[str] = ["可用工具（一般情況選用；若你承諾或聲稱要傳照片，必須使用圖片工具）："]
         for tool in context.available_tools:
             tool_lines.append(f"- {tool.name}: {tool.description}")
             try:
@@ -484,6 +484,8 @@ def _build_prompt(context: ProactiveContext) -> str:
             "把調用填進 JSON 的 tool_calls 陣列；每筆格式 "
             "{\"tool\": \"工具名稱\", \"args\": {...}}。"
             "**最多 1 筆工具調用**，一則主動訊息不要同時配多個動作；沒需要就留空陣列。"
+            "但只要訊息中承諾／聲稱會拍照、傳照片或圖片，這不是可選裝飾，"
+            "必須把 generate_image 放進 tool_calls。"
         )
         sections.append("\n".join(tool_lines))
 

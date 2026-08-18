@@ -104,6 +104,11 @@ from kokoro_link.application.services.persona_curiosity_observability import (
 from kokoro_link.application.services.schedule_memorializer import ScheduleMemorializer
 from kokoro_link.application.services.schedule_service import ScheduleService
 from kokoro_link.application.services.stage_nudge import StageNudgeTurn
+from kokoro_link.application.services.image_intent import (
+    IMAGE_TOOL_NAME,
+    is_explicit_image_request,
+    is_image_commitment,
+)
 from kokoro_link.application.services.tool_call_parser import (
     looks_like_tool_call_attempt, parse_tool_call,
 )
@@ -4258,10 +4263,11 @@ class ChatService:
             ):
                 novelty_retry_count = 1
                 text, trace = await generate_no_tool_once(novelty_verdict.feedback)
+            image_claim_without_tools = is_image_commitment(text)
             forced_without_tools = bool(force_image)
-            if forced_without_tools:
+            if forced_without_tools or image_claim_without_tools:
                 _LOGGER.warning(
-                    "forced image request could not enter tool cycle: "
+                    "image request/commitment could not enter tool cycle: "
                     "registry=%s orchestrator=%s character=%s",
                     self._tool_registry is not None,
                     self._tool_orchestrator is not None,
@@ -4274,7 +4280,7 @@ class ChatService:
             return ChatGenerationResult(
                 text=text,
                 attachments=[],
-                forced_fired=forced_without_tools,
+                forced_fired=forced_without_tools or image_claim_without_tools,
                 trace=trace,
                 persona_curiosity_plan=persona_curiosity_plan,
                 material_digest=material_digest,
@@ -4303,6 +4309,7 @@ class ChatService:
         # so equivalent arg dicts collapse to the same key.
         seen_calls: set[tuple[str, str]] = set()
         image_tool_executed = False
+        image_commitment_seen = False
         force_final_reply = False
 
         # Give visual tools a window on the last few turns so they can
@@ -4355,6 +4362,10 @@ class ChatService:
         else:
             forced_fired = force_image
         forced_pending = forced_fired
+        image_tool_available = any(
+            descriptor.name == _FORCED_IMAGE_TOOL_NAME
+            for descriptor in tool_descriptors
+        )
         for hop in range(_MAX_TOOL_HOPS):
             # Offer tools on every hop except the last — the final
             # hop always hides the tools block to force a user-facing
@@ -4473,6 +4484,9 @@ class ChatService:
             trace = replace(trace, prompt_pack_hash=prompt_pack_hash)
             traces.append(trace)
             last_text = text
+            image_claim = is_image_commitment(text)
+            if image_claim:
+                image_commitment_seen = True
             if not tools_for_hop:
                 if image_tool_executed and looks_like_tool_call_attempt(text):
                     _LOGGER.warning(
@@ -4485,6 +4499,21 @@ class ChatService:
                     )
                 break
             call = parse_tool_call(text)
+            # A proactive-style promise can also appear in a normal chat
+            # reply. Once the model says it will send a photo, do not let a
+            # plain-text answer bypass the image tool (or replace an
+            # unrelated tool call with a false delivery claim).
+            if image_claim and image_tool_available and not image_tool_executed:
+                if call is None or call.name != _FORCED_IMAGE_TOOL_NAME:
+                    call = ToolCall(
+                        name=_FORCED_IMAGE_TOOL_NAME,
+                        arguments={"positive": text.strip()},
+                    )
+                    forced_fired = True
+                    _LOGGER.info(
+                        "chat tool-use: image commitment detected — "
+                        "synthesising generate_image call",
+                    )
             if call is None and forced_pending:
                 # Forced trigger but LLM ignored the directive. Fall
                 # back to a synthesised call so the operator's `/pic`
@@ -4821,15 +4850,20 @@ class ChatService:
                 novelty_verdict.feedback,
             )
             traces.append(retry_trace)
-        if forced_fired and not collected:
+        if (forced_fired or image_commitment_seen) and not collected:
             _LOGGER.warning(
-                "forced image request completed without an attachment: "
-                "tool_executed=%s character=%s",
+                "image request/commitment completed without an attachment: "
+                "tool_executed=%s tool_available=%s character=%s",
                 image_tool_executed,
+                image_tool_available,
                 character.id,
             )
             last_text = localized_fallback_text(
-                "chat.image_tool_generation_failed",
+                (
+                    "chat.image_tool_generation_failed"
+                    if image_tool_executed or image_tool_available
+                    else "chat.image_tool_unavailable"
+                ),
                 operator_primary_language,
             )
         return ChatGenerationResult(
@@ -7289,24 +7323,9 @@ def _render_scene_chip_lines(
     return tuple(lines)
 
 
-_FORCED_IMAGE_TOOL_NAME = "generate_image"
+_FORCED_IMAGE_TOOL_NAME = IMAGE_TOOL_NAME
 _FORCED_IMAGE_TRIGGER_RE = re.compile(
     r"(?<!\S)/pic(?:@[A-Za-z0-9_]+)?(?!\S)",
-    re.IGNORECASE,
-)
-_EXPLICIT_IMAGE_REQUEST_RE = re.compile(
-    r"(?:請|请|幫我|帮我|我要|我想|想要|想看|要看|給我|给我|"
-    r"傳我|传我|發我|发我|拍|截|生成|生)"
-    r"[^。！？!?\n]{0,16}"
-    r"(?:照片|相片|圖片|图片|截圖|截图|自拍|圖|图|圖像|图像|"
-    r"樣子|样子|長相|长相|image|photo|picture|screenshot)",
-    re.IGNORECASE,
-)
-_EXPLICIT_IMAGE_REQUEST_NEGATION_RE = re.compile(
-    r"(?:不要|別|别|不用|不必|不想|沒要|没有要|don't|do not|not)"
-    r"[^。！？!?\n]{0,10}"
-    r"(?:拍|照片|相片|圖片|图片|截圖|截图|自拍|圖|图|"
-    r"image|photo|picture|screenshot)",
     re.IGNORECASE,
 )
 
@@ -7800,7 +7819,7 @@ def _resolve_image_trigger(
         stripped = re.sub(r"[ \t]+", " ", stripped).strip()
         cleaned = stripped if stripped else user_message
         return True, cleaned
-    if _is_explicit_image_request(text):
+    if is_explicit_image_request(text):
         # Natural-language requests remain intact in history; only the
         # system command marker is implementation detail.
         return True, user_message
@@ -7815,11 +7834,7 @@ def _is_explicit_image_request(text: str) -> bool:
     negative phrase wins so requests such as "我不想看圖片" do not spend an
     image-generation call.
     """
-    if not text.strip():
-        return False
-    if _EXPLICIT_IMAGE_REQUEST_NEGATION_RE.search(text):
-        return False
-    return _EXPLICIT_IMAGE_REQUEST_RE.search(text) is not None
+    return is_explicit_image_request(text)
 
 
 def _resolve_chat_provider_and_model(
