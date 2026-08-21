@@ -20,6 +20,25 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-22 - Optional non-streaming OpenAI-compatible requests
+
+- Status: partial
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed `678b487` on `local/customizations`.
+- Backup: `not required`; no schema migration or user-data change
+- Deployment: source checkout now exposes the advanced `停用上游串流` provider
+  setting for OpenAI-compatible LLM connections. When enabled, the adapter
+  omits `stream: true` upstream and still serves Yuralume's existing one-chunk
+  streaming contract. Runtime deployment is pending because the current
+  workstation session has no Docker CLI/Desktop executable available.
+- Verification: 98 focused backend tests, all 1,149 frontend tests, i18n
+  checks, Vue type-check, and production frontend/PWA build passed. Existing
+  runtime `/health` remains `status: ok`; the running app has not yet been
+  recreated with this commit.
+- Follow-up: rerun the local Compose `app` build/up commands when Docker is
+  available, then verify Compose health and the provider setting in the UI.
+
 ### 2026-08-21 - Structured schedule involvement and bounded deferrals
 
 - Status: completed
