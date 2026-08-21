@@ -368,6 +368,107 @@ async def test_service_records_useful_motive():
 
 
 @pytest.mark.asyncio
+async def test_service_coalesces_repeated_normalized_purpose() -> None:
+    svc, repo = _service()
+    first = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=_decision(), now=_NOW,
+    )
+    updated_decision = ProactiveIntentionDecision(
+        should_consume_slot=False,
+        reason="仍然不適合",
+        inner_motive="想補充剛才讀到的新段落",
+        conversation_purpose="  想分享閱讀感受  ",
+        expected_reply="隨意聊聊",
+        risk="可能打擾",
+        best_timing="tomorrow",
+    )
+    second = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="post_turn",
+        decision=updated_decision,
+        now=_NOW + timedelta(minutes=10),
+    )
+
+    assert first is not None and second is not None
+    assert second.id == first.id
+    assert second.inner_motive == "想補充剛才讀到的新段落"
+    assert len(repo.snapshot()) == 1
+
+
+@pytest.mark.asyncio
+async def test_service_coalesces_repeated_motive_when_purpose_is_blank() -> None:
+    svc, repo = _service()
+    first_decision = ProactiveIntentionDecision(
+        should_consume_slot=False,
+        reason="稍後再說",
+        inner_motive="  CHECK   IN ON USER ",
+        conversation_purpose="",
+    )
+    second_decision = ProactiveIntentionDecision(
+        should_consume_slot=False,
+        reason="現在仍忙",
+        inner_motive="check in on user",
+        conversation_purpose="",
+    )
+    first = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=first_decision, now=_NOW,
+    )
+    second = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=second_decision, now=_NOW + timedelta(minutes=5),
+    )
+
+    assert first is not None and second is not None
+    assert second.id == first.id
+    assert len(repo.snapshot()) == 1
+
+
+@pytest.mark.asyncio
+async def test_semantic_replacement_preserves_creation_and_plain_expiry() -> None:
+    svc, repo = _service()
+    first = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=_decision(), now=_NOW,
+    )
+    second = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=_decision(inner_motive="換一種說法"),
+        now=_NOW + timedelta(hours=23),
+    )
+
+    assert first is not None and second is not None
+    assert second.created_at == first.created_at == _NOW
+    assert second.expires_at == first.expires_at == _NOW + timedelta(hours=24)
+    assert len(repo.snapshot()) == 1
+
+
+@pytest.mark.asyncio
+async def test_semantic_replacement_extends_only_for_future_revisit() -> None:
+    svc, repo = _service()
+    first = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=_decision(), now=_NOW,
+    )
+    alarm = _NOW + timedelta(hours=30)
+    second = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=_decision(inner_motive="仍想分享"),
+        revisit_at=alarm,
+        now=_NOW + timedelta(hours=2),
+    )
+
+    assert first is not None and second is not None
+    assert second.id == first.id
+    assert second.created_at == _NOW
+    assert second.revisit_at == alarm
+    assert second.expires_at == alarm + timedelta(
+        minutes=REVISIT_GRACE_MINUTES,
+    )
+    assert len(repo.snapshot()) == 1
+
+
+@pytest.mark.asyncio
 async def test_service_skips_empty_motive():
     svc, repo = _service()
     stored = await svc.record_if_useful(

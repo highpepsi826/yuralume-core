@@ -8,6 +8,7 @@ from kokoro_link.contracts.deferred_intent import DeferredIntentRepositoryPort
 from kokoro_link.domain.entities.deferred_intent import (
     STATUS_ACTIVE,
     DeferredIntent,
+    semantic_identity,
 )
 
 
@@ -16,6 +17,25 @@ class InMemoryDeferredIntentRepository(DeferredIntentRepositoryPort):
         self._rows: list[DeferredIntent] = []
 
     async def add(self, intent: DeferredIntent) -> DeferredIntent:
+        self._rows.append(intent)
+        return intent
+
+    async def upsert_active_semantically_identical(
+        self,
+        intent: DeferredIntent,
+        *,
+        now: datetime,
+    ) -> DeferredIntent:
+        key = semantic_identity(intent)
+        for idx, row in enumerate(self._rows):
+            if (
+                row.status == STATUS_ACTIVE
+                and row.is_active_at(now)
+                and semantic_identity(row) == key
+            ):
+                updated = row.replaced_by(intent, now=now)
+                self._rows[idx] = updated
+                return updated
         self._rows.append(intent)
         return intent
 

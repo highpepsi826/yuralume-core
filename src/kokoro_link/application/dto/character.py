@@ -473,6 +473,33 @@ class InitialRelationshipPayload(BaseModel):
             updated_at=now,
         )
 
+    @classmethod
+    def from_seed(
+        cls,
+        seed: CharacterOperatorRelationshipSeed,
+    ) -> "InitialRelationshipPayload":
+        """Return the editable, user-confirmed fields stored on a seed.
+
+        ``safe_user_profile`` is intentionally absent here. Those values are
+        copied into the learned operator persona during creation and have a
+        separate lifecycle; reopening relationship settings must not expose or
+        overwrite that persona projection by accident.
+        """
+        return cls(
+            relationship_label=seed.relationship_label,
+            known_context=seed.known_context,
+            living_arrangement=seed.living_arrangement,
+            user_address_name=seed.user_address_name,
+            character_address_name=seed.character_address_name,
+            tone_distance=seed.tone_distance,
+            familiarity_boundary=seed.familiarity_boundary,
+            schedule_involvement_policy=seed.schedule_involvement_policy,
+            proactive_permission=seed.proactive_permission,
+            proactive_cadence_hint=seed.proactive_cadence_hint,
+            user_profile_notes=seed.user_profile_notes,
+            confirmed_by_user=seed.confirmed_by_user,
+        )
+
 
 class CreateCharacterRequest(BaseModel):
     name: str

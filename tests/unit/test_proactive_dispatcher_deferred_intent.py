@@ -40,6 +40,7 @@ from kokoro_link.domain.entities.deferred_intent import (
     DeferredIntent,
 )
 from kokoro_link.domain.entities.operator_profile import DEFAULT_OPERATOR_ID
+from kokoro_link.domain.entities.proactive_attempt import ProactiveAttempt
 from kokoro_link.domain.value_objects.character_state import CharacterState
 from kokoro_link.domain.value_objects.proactive_outcome import ProactiveOutcome
 from kokoro_link.domain.value_objects.proactive_trigger import ProactiveTrigger
@@ -400,7 +401,94 @@ async def test_due_alarm_carries_the_tick_through_the_cooldown() -> None:
         "說好七點半一起上線核對遊戲任務",
     ]
     # And the alarm was spent on the way through.
-    assert [row.revisit_at for row in repo.snapshot()] == [None, None]
+    assert [row.revisit_at for row in repo.snapshot()] == [None]
+
+
+@pytest.mark.asyncio
+async def test_due_alarm_cannot_bypass_recent_actual_send_cooldown() -> None:
+    """A revisit alarm may re-open a skipped judgement, but it cannot
+    produce a second visible push inside the character's send cooldown.
+    The alarm remains armed because this strict wall runs before spend.
+    """
+    svc, repo = _service()
+    attempts = InMemoryProactiveAttemptRepository()
+    char_repo = InMemoryCharacterRepository()
+    character = await _build_character(char_repo)
+    alarm = _NOW - timedelta(minutes=1)
+    parked = await repo.add(DeferredIntent.new(
+        character_id=character.id,
+        operator_id=DEFAULT_OPERATOR_ID,
+        trigger="tick",
+        inner_motive="說好現在一起看任務",
+        conversation_purpose="赴約",
+        revisit_at=alarm,
+        now=_NOW - timedelta(hours=1),
+    ))
+    await attempts.add(ProactiveAttempt.record(
+        character_id=character.id,
+        trigger=ProactiveTrigger.TICK,
+        outcome=ProactiveOutcome.SENT,
+        reason="already sent",
+        message="剛才的訊息",
+        now=_NOW - timedelta(minutes=5),
+    ))
+    dispatcher, judge, _ = _dispatcher(
+        intention_decision=_skip_at(""),
+        deferred_service=svc,
+        gate=_daytime_gate(),
+        character_repo=char_repo,
+        attempt_repo=attempts,
+    )
+
+    attempt = await dispatcher.evaluate(
+        character_id=character.id,
+        trigger=ProactiveTrigger.TICK,
+        now=_NOW,
+    )
+
+    assert attempt.outcome == ProactiveOutcome.GATE_BLOCKED
+    assert "actual proactive send cooldown" in attempt.reason
+    assert judge.received_intents == ()
+    assert repo.snapshot()[0].id == parked.id
+    assert repo.snapshot()[0].revisit_at == alarm
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [ProactiveTrigger.PENDING_FOLLOW_UP, ProactiveTrigger.SCHEDULED_PROMISE],
+)
+@pytest.mark.asyncio
+async def test_promised_message_trigger_keeps_actual_send_cooldown_bypass(
+    trigger: ProactiveTrigger,
+) -> None:
+    svc, _ = _service()
+    attempts = InMemoryProactiveAttemptRepository()
+    char_repo = InMemoryCharacterRepository()
+    character = await _build_character(char_repo)
+    await attempts.add(ProactiveAttempt.record(
+        character_id=character.id,
+        trigger=ProactiveTrigger.TICK,
+        outcome=ProactiveOutcome.SENT,
+        reason="already sent",
+        message="剛才的訊息",
+        now=_NOW - timedelta(minutes=1),
+    ))
+    dispatcher, judge, _ = _dispatcher(
+        intention_decision=_skip_at(""),
+        deferred_service=svc,
+        gate=_daytime_gate(),
+        character_repo=char_repo,
+        attempt_repo=attempts,
+    )
+
+    attempt = await dispatcher.evaluate(
+        character_id=character.id,
+        trigger=trigger,
+        now=_NOW,
+    )
+
+    assert attempt.outcome == ProactiveOutcome.INTENTION_SKIPPED
+    assert judge.received_intents == ()
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,19 @@ class DeferredIntentRepositoryPort(Protocol):
     async def add(self, intent: DeferredIntent) -> DeferredIntent:
         """Persist a freshly recorded deferred motive."""
 
+    async def upsert_active_semantically_identical(
+        self,
+        intent: DeferredIntent,
+        *,
+        now: datetime,
+    ) -> DeferredIntent:
+        """Insert or refresh one active semantic motive.
+
+        Implementations match by character/operator and normalized
+        conversation purpose (falling back to normalized inner motive), while
+        preserving the existing row's creation and ordinary expiry timestamps.
+        """
+
     async def list_active_for(
         self,
         character_id: str,

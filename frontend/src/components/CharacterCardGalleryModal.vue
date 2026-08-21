@@ -24,6 +24,7 @@ const props = withDefaults(
     translateEnabled?: boolean
     translateLoading?: boolean
     translateError?: string | null
+    showTranslate?: boolean
     /** Cloud 官方卡暫時讀不到（browse 模式才有意義；本地卡不受影響）。 */
     officialCardsUnavailable?: boolean
   }>(),
@@ -35,6 +36,7 @@ const props = withDefaults(
     translateEnabled: false,
     translateLoading: false,
     translateError: null,
+    showTranslate: true,
     officialCardsUnavailable: false,
   },
 )
@@ -80,7 +82,7 @@ const actionLabel = computed(() => (
     : t('playerSidebar.characterCards.preview.confirmImport')
 ))
 const canShowTranslate = computed(() => (
-  !props.loading && !props.error && props.cards.length > 0
+  props.showTranslate && !props.loading && !props.error && props.cards.length > 0
   && !shouldHideTranslateToggle(activeCard.value)
 ))
 const showOfficialCardsUnavailable = computed(() => (

@@ -84,6 +84,9 @@ from kokoro_link.application.services.proactive_event_bus import (
     ProactiveEvent,
     ProactiveEventBus,
 )
+from kokoro_link.application.services.proactive_evaluation_lease import (
+    ProactiveEvaluationLease,
+)
 from kokoro_link.application.services.proactive_delivery.eligible_binding import (
     find_eligible_proactive_binding,
 )
@@ -299,6 +302,7 @@ class ProactiveDispatcher:
         deferred_intent_service: "DeferredIntentService | None" = None,
         address_preference_repository: "OperatorAddressPreferenceRepositoryPort | None" = None,
         clock: ClockPort | None = None,
+        evaluation_lease: ProactiveEvaluationLease | None = None,
         prompt_pack_hash_provider: Callable[[], str] | None = None,
         notification_service: "NotificationService | None" = None,
         register_profiler: RegisterProfilePort | None = None,
@@ -370,6 +374,7 @@ class ProactiveDispatcher:
         self._deferred_intents = deferred_intent_service
         self._address_preferences = address_preference_repository
         self._clock = clock
+        self._evaluation_lease = evaluation_lease
         self._notification_service = notification_service
         self._register_profiler = register_profiler
         self._register_profile_enabled = bool(register_profile_enabled)
@@ -447,6 +452,64 @@ class ProactiveDispatcher:
         now: datetime | None = None,
         logical_slot: str | None = None,
     ) -> ProactiveAttempt:
+        """Run one evaluation while holding the per-character lease.
+
+        The scheduler and manual/API paths can overlap, including across
+        workers.  The lease is deliberately acquired before any character
+        lookup or model work so a losing invocation is a cheap, auditable
+        ``GATE_BLOCKED`` attempt.  ``None`` keeps the historical behaviour of
+        test harnesses and self-host containers that do not wire a backend.
+        """
+        when = self._resolve_now(now)
+        if self._evaluation_lease is None:
+            return await self._evaluate_unlocked(
+                character_id=character_id,
+                trigger=trigger,
+                now=when,
+                logical_slot=logical_slot,
+            )
+
+        session = self._evaluation_lease.session(character_id)
+        try:
+            await session.__aenter__()
+        except Exception:
+            _LOGGER.exception(
+                "proactive evaluation lease failed character=%s",
+                character_id,
+            )
+            return await self._log(
+                character_id=character_id,
+                trigger=trigger,
+                outcome=ProactiveOutcome.ERRORED,
+                reason="evaluation lease failed",
+                now=when,
+            )
+        try:
+            if not session.acquired:
+                return await self._log(
+                    character_id=character_id,
+                    trigger=trigger,
+                    outcome=ProactiveOutcome.GATE_BLOCKED,
+                    reason="evaluation already in flight",
+                    now=when,
+                )
+            return await self._evaluate_unlocked(
+                character_id=character_id,
+                trigger=trigger,
+                now=when,
+                logical_slot=logical_slot,
+            )
+        finally:
+            await session.__aexit__(None, None, None)
+
+    async def _evaluate_unlocked(
+        self,
+        *,
+        character_id: str,
+        trigger: ProactiveTrigger,
+        now: datetime | None = None,
+        logical_slot: str | None = None,
+    ) -> ProactiveAttempt:
         when = self._resolve_now(now)
         character = await self._characters.get(character_id)
         if character is None:
@@ -498,9 +561,12 @@ class ProactiveDispatcher:
             )
 
         relationship_seed = await self._load_relationship_seed(character)
+        has_user_started_interaction = (
+            await self._has_user_started_interaction(character)
+        )
         if (
             _requires_user_started_interaction(trigger)
-            and not await self._has_user_started_interaction(character)
+            and not has_user_started_interaction
             and not _seed_allows_pre_message_proactive(relationship_seed)
         ):
             return await self._log(
@@ -532,6 +598,7 @@ class ProactiveDispatcher:
         local_now = when.astimezone(operator_tz)
         initial_relationship_lines = render_initial_relationship_seed_lines(
             relationship_seed,
+            include_proactive_permission=not has_user_started_interaction,
         )
         sent_today = await self._attempts.count_sent_today(
             character_id, now=local_now,
@@ -571,6 +638,37 @@ class ProactiveDispatcher:
                 reason=verdict.reason,
                 now=when,
             )
+
+        # A due deferred-intent alarm may waive the cheap gate's cooldown so
+        # an agreed appointment gets another look.  It must not bypass the
+        # stricter "an actual message just went out" wall: otherwise a stale
+        # alarm can cause two visible pushes inside the configured cooldown.
+        # Promise releases are owed messages and intentionally retain their
+        # existing bypass semantics.
+        if _requires_user_started_interaction(trigger):
+            latest_sent = await self._latest_actual_sent_attempt(character_id)
+            if latest_sent is not None:
+                elapsed = ensure_utc(when) - ensure_utc(latest_sent.decided_at)
+                cooldown = timedelta(
+                    minutes=max(0, int(character.proactive_cooldown_minutes)),
+                )
+                if elapsed < cooldown:
+                    remaining_seconds = max(
+                        0.0, (cooldown - elapsed).total_seconds(),
+                    )
+                    remaining_minutes = max(1, int(
+                        (remaining_seconds + 59.999) // 60,
+                    ))
+                    return await self._log(
+                        character_id=character_id,
+                        trigger=trigger,
+                        outcome=ProactiveOutcome.GATE_BLOCKED,
+                        reason=(
+                            "actual proactive send cooldown active "
+                            f"({remaining_minutes}min remaining)"
+                        ),
+                        now=when,
+                    )
 
         # The alarm is spent the instant it buys a pass — win or lose
         # downstream. Leaving it set would exempt every subsequent tick
@@ -2268,6 +2366,30 @@ The invitation this dispatcher
             _LOGGER.exception("proactive: recent-sent query failed")
             return ()
         return tuple(sent)
+
+    async def _latest_actual_sent_attempt(
+        self, character_id: str,
+    ) -> ProactiveAttempt | None:
+        """Return the latest real ``SENT`` row for the strict cooldown.
+
+        The query is intentionally source-filtered.  A character can have
+        thousands of cheap gate audit rows between two messages, so asking
+        ``list_for_character`` and filtering locally would make this safety
+        check depend on the audit-log page size.  A repository failure fails
+        open here; the ordinary gate still provides its existing protection,
+        while a secondary audit query must not take the whole tick down.
+        """
+        try:
+            rows = await self._attempts.list_recent_sent(
+                character_id, limit=1,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "proactive: strict sent-cooldown query failed character=%s",
+                character_id,
+            )
+            return None
+        return rows[0] if rows else None
 
     async def _is_playing_a_scene(self, character_id: str) -> bool:
         """Is this character inside a live 起幕 scene right now?

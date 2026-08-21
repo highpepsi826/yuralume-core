@@ -11,6 +11,7 @@ def render_initial_relationship_seed_lines(
     seed: CharacterOperatorRelationshipSeed | None,
     *,
     include_address: bool = True,
+    include_proactive_permission: bool = True,
 ) -> list[str]:
     """Render the relationship-seed context block.
 
@@ -20,7 +21,11 @@ def render_initial_relationship_seed_lines(
     learned persona, and global profile don't render three competing
     名字). Auxiliary prompts and the player-facing persona-snapshot API
     keep the default ``True`` so their behaviour and contract are
-    unchanged.
+    unchanged. ``include_proactive_permission`` controls the cold-start
+    authorization lines. Once the user has already started interacting,
+    proactive permission is governed by the character's live proactive
+    setting instead; carrying the original cold-start denial forward would
+    make an old setup silently veto later proactive evaluation.
     """
     if seed is None or seed.is_empty:
         return []
@@ -38,11 +43,12 @@ def render_initial_relationship_seed_lines(
     _append(lines, "語氣距離", seed.tone_distance)
     _append(lines, "熟悉度邊界", seed.familiarity_boundary)
     _append(lines, "行程中的使用者參與程度", _schedule_policy_text(seed))
-    if seed.proactive_permission:
-        _append(lines, "主動訊息授權", "使用者允許創角後主動找她／他，但必須遵守頻率與邊界。")
-        _append(lines, "主動訊息頻率或時機", seed.proactive_cadence_hint)
-    else:
-        lines.append("- 主動訊息授權：沒有明確授權；不要把起始關係解讀成可直接打擾。")
+    if include_proactive_permission:
+        if seed.proactive_permission:
+            _append(lines, "主動訊息授權", "使用者允許創角後主動找她／他，但必須遵守頻率與邊界。")
+            _append(lines, "主動訊息頻率或時機", seed.proactive_cadence_hint)
+        else:
+            lines.append("- 主動訊息授權：沒有明確授權；不要把起始關係解讀成可直接打擾。")
     _append(lines, "使用者補充", seed.user_profile_notes)
     return lines
 

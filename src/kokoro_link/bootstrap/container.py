@@ -3286,6 +3286,12 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
     studio_execution_lease = _build_studio_execution_lease(
         app_settings, db_session_factory,
     )
+    from kokoro_link.application.services.proactive_evaluation_lease import (
+        ProactiveEvaluationLease,
+    )
+    proactive_evaluation_lease = ProactiveEvaluationLease.from_studio_lease(
+        studio_execution_lease,
+    )
     # Built here rather than next to ``StoryEventService`` below because
     # the arc service is now its second consumer (AE0) and is constructed
     # first — the daily event roll picks up the same instance further
@@ -4860,6 +4866,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             else None
         ),
         clock=clock,
+        evaluation_lease=proactive_evaluation_lease,
         prompt_pack_hash_provider=lambda: get_default_loader().prompt_pack_hash(
             prompt_pack_hash_snapshot(
                 app_settings.humanization,

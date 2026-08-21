@@ -18,14 +18,17 @@ import {
 import { buildCharacterCardIntakeDraft } from '@/utils/characterCardInitialRelationship'
 import {
   buildInitialRelationshipPayload,
-  emptyInitialRelationshipForm,
+  initialRelationshipFormFromPayload,
 } from '@/composables/useInitialRelationshipForm'
 
 const props = defineProps<{
   visible: boolean
   cardName: string
   card: CharacterCardPreview | null
+  mode?: 'create' | 'edit'
+  initialRelationship?: InitialRelationshipPayload | null
   loading?: boolean
+  error?: string | null
   /** Neutral scenario rewrite from a converted SillyTavern card. Pre-fills
    *  known_context but stays fully editable — the importer confirms it
    *  (never auto-applied to a relationship). */
@@ -38,7 +41,7 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
-const form = ref(emptyInitialRelationshipForm())
+const form = ref(initialRelationshipFormFromPayload(null))
 const intakeLoading = ref(false)
 const intakeRound = ref(0)
 const intakeQuestions = ref<CharacterCreationIntakeQuestion[]>([])
@@ -50,6 +53,16 @@ const intakeError = ref<string | null>(null)
 
 const payload = computed(() => buildInitialRelationshipPayload(form.value))
 const canSubmitSeed = computed(() => payload.value !== null)
+const isEditMode = computed(() => props.mode === 'edit')
+const eyebrowLabel = computed(() => t(isEditMode.value
+  ? 'characterEdit.initialRelationship.eyebrow'
+  : 'playerSidebar.characterCards.relationship.eyebrow'))
+const titleLabel = computed(() => t(isEditMode.value
+  ? 'characterEdit.initialRelationship.editTitle'
+  : 'playerSidebar.characterCards.relationship.title', { name: props.cardName }))
+const hintLabel = computed(() => t(isEditMode.value
+  ? 'characterEdit.initialRelationship.editHint'
+  : 'playerSidebar.characterCards.relationship.hint'))
 const intakeActionLabel = computed(() => {
   if (intakeLoading.value) return t('playerSidebar.characterCards.relationship.analyzing')
   return intakeChecked.value
@@ -65,10 +78,12 @@ const showIntakeFeedback = computed(() => Boolean(
 
 watch(() => props.visible, (visible) => {
   if (visible) {
-    const fresh = emptyInitialRelationshipForm()
+    const fresh = initialRelationshipFormFromPayload(
+      isEditMode.value ? props.initialRelationship : null,
+    )
     // Pre-fill known_context from a converted SillyTavern scenario (D5).
     // The importer still edits/confirms it before it seeds anything.
-    if (props.suggestedKnownContext) {
+    if (!isEditMode.value && props.suggestedKnownContext) {
       fresh.known_context = props.suggestedKnownContext
     }
     form.value = fresh
@@ -177,12 +192,13 @@ function resetIntakeState() {
         <header class="relationship-wizard__header">
           <div>
             <p class="relationship-wizard__eyebrow">
-              {{ t('playerSidebar.characterCards.relationship.eyebrow') }}
+              {{ eyebrowLabel }}
             </p>
-            <h3>{{ t('playerSidebar.characterCards.relationship.title', { name: cardName }) }}</h3>
+            <h3>{{ titleLabel }}</h3>
           </div>
           <div class="relationship-wizard__header-actions">
             <UiButton
+              v-if="!isEditMode"
               size="sm"
               variant="ghost"
               :loading="intakeLoading"
@@ -204,7 +220,11 @@ function resetIntakeState() {
         </header>
 
         <p class="field-hint">
-          {{ t('playerSidebar.characterCards.relationship.hint') }}
+          {{ hintLabel }}
+        </p>
+
+        <p v-if="error" class="relationship-wizard__error" role="alert">
+          {{ error }}
         </p>
 
         <div v-if="showIntakeFeedback" class="relationship-wizard__intake">
@@ -338,7 +358,7 @@ function resetIntakeState() {
           :placeholder="t('characterCreate.initialRelationship.proactiveCadencePlaceholder')"
         />
 
-        <div class="relationship-wizard__grid">
+        <div v-if="!isEditMode" class="relationship-wizard__grid">
           <label>
             <span class="field-label">{{ t('characterCreate.initialRelationship.profileInterests') }}</span>
             <input
@@ -357,6 +377,7 @@ function resetIntakeState() {
           </label>
         </div>
         <input
+          v-if="!isEditMode"
           v-model="form.profile_life_goals"
           class="field-input"
           :placeholder="t('characterCreate.initialRelationship.profileGoalsPlaceholder')"
@@ -369,8 +390,14 @@ function resetIntakeState() {
         />
 
         <footer class="relationship-wizard__actions">
-          <UiButton variant="ghost" :disabled="loading || intakeLoading" @click="skip">
-            {{ t('playerSidebar.characterCards.relationship.skipAction') }}
+          <UiButton
+            variant="ghost"
+            :disabled="loading || intakeLoading"
+            @click="isEditMode ? close() : skip()"
+          >
+            {{ isEditMode
+              ? t('common.actions.cancel')
+              : t('playerSidebar.characterCards.relationship.skipAction') }}
           </UiButton>
           <UiButton
             variant="primary"
@@ -378,7 +405,9 @@ function resetIntakeState() {
             :disabled="intakeLoading || !canSubmitSeed"
             @click="confirm"
           >
-            {{ t('playerSidebar.characterCards.relationship.confirmAction') }}
+            {{ isEditMode
+              ? t('characterEdit.initialRelationship.saveAction')
+              : t('playerSidebar.characterCards.relationship.confirmAction') }}
           </UiButton>
         </footer>
       </section>
@@ -481,6 +510,17 @@ function resetIntakeState() {
 
 .intake-warning {
   color: #fde68a;
+}
+
+.relationship-wizard__error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 6px;
+  background: rgba(127, 29, 29, 0.3);
+  color: #fecaca;
+  font-size: 0.86rem;
+  line-height: 1.5;
 }
 
 .intake-question p {

@@ -20,6 +20,28 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-21 - Editable starting relationships and proactive send hardening
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: finalized on `local/customizations`; this entry ships with the
+  implementation commit and personal-fork push.
+- Backup: `not required`; no schema migration or user-data change
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated `migrate` and
+  `app` with both runtime Compose files; PostgreSQL, storage, WhatsApp, and
+  volumes were unchanged. Manual card uploads and marketplace installs now
+  open the starting-relationship wizard before any character is created, and
+  existing relationships remain editable from player and admin settings.
+- Verification: 79 focused backend tests, the PostgreSQL repository
+  integration test, all 1,149 frontend tests, Vue type-check, i18n checks,
+  Python compilation, production frontend/PWA and Docker builds passed.
+  Browser checks covered upload preview, marketplace install, player/admin
+  relationship editing, layout, and console errors without importing or
+  saving. All Compose services are healthy and
+  `http://127.0.0.1:8012/health` returned `status: ok`.
+- Follow-up: `none`
+
 ### 2026-08-18 - Enforce proactive image delivery claims
 
 - Status: completed

@@ -42,6 +42,7 @@ import { buildManagedAwareUpdateRequest } from '@/utils/characterEditRequest'
 import CharacterIdentityFields from './CharacterIdentityFields.vue'
 import CharacterRelationshipsPanel from './CharacterRelationshipsPanel.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
+import InitialRelationshipSettingsPanel from './InitialRelationshipSettingsPanel.vue'
 
 const { t } = useI18n()
 const { pt } = usePlayerCopy()
@@ -427,6 +428,17 @@ function handleClearAll() {
       </div>
       <div v-if="resetFeedback" class="reset-feedback">{{ resetFeedback }}</div>
     </div>
+
+    <CollapsibleSection
+      :title="t('characterEdit.sections.initialRelationship')"
+      :hint="t('characterEdit.initialRelationship.sectionHint')"
+      :default-open="false"
+    >
+      <InitialRelationshipSettingsPanel
+        :key="`${character.id}:initial-relationship`"
+        :character="character"
+      />
+    </CollapsibleSection>
 
     <p v-if="shouldShowAdminLinks" class="admin-link-hint">
       {{ t('characterEdit.links.memories.prefix') }}

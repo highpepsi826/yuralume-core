@@ -5,6 +5,7 @@ and real heuristic gate. We stub the decider per-test so we can steer
 between SENT / SKIPPED paths without involving an LLM.
 """
 
+import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -12,6 +13,9 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from kokoro_link.application.services.proactive_dispatcher import ProactiveDispatcher
+from kokoro_link.application.services.proactive_evaluation_lease import (
+    ProactiveEvaluationLease,
+)
 from kokoro_link.contracts.proactive import (
     ProactiveContext,
     ProactiveDecision,
@@ -49,6 +53,9 @@ from kokoro_link.infrastructure.repositories.in_memory_initial_relationship impo
 )
 from kokoro_link.infrastructure.repositories.in_memory_turn_records import (
     InMemoryTurnRecordRepository,
+)
+from kokoro_link.infrastructure.repositories.in_memory_background_jobs import (
+    InMemoryBackgroundCoordinatorLease,
 )
 from tests.unit._messaging_harness import (
     build_messaging_harness,
@@ -104,6 +111,7 @@ def _make_dispatcher(
     emotion_event_repository=None,
     prompt_pack_hash_provider=None,
     subscription_access_guard=None,
+    evaluation_lease: ProactiveEvaluationLease | None = None,
 ) -> tuple[ProactiveDispatcher, InMemoryProactiveAttemptRepository]:
     attempt_repo = attempts or InMemoryProactiveAttemptRepository()
     dispatcher = ProactiveDispatcher(
@@ -127,6 +135,7 @@ def _make_dispatcher(
         relationship_seed_repository=relationship_seed_repository,
         prompt_pack_hash_provider=prompt_pack_hash_provider,
         subscription_access_guard=subscription_access_guard,
+        evaluation_lease=evaluation_lease,
     )
     return dispatcher, attempt_repo
 
@@ -347,6 +356,92 @@ async def test_legacy_user_message_unblocks_when_last_active_missing() -> None:
 
     assert attempt.outcome == ProactiveOutcome.SENT
     assert len(decider.calls) == 1
+
+
+@pytest.mark.parametrize("proactive_permission", [True, False])
+@pytest.mark.asyncio
+async def test_started_user_does_not_receive_cold_start_permission_prompt(
+    proactive_permission: bool,
+) -> None:
+    harness = build_messaging_harness()
+    character = await _enable_character(
+        harness, accepts_web_proactive=True,
+    )
+    relationship_repo = InMemoryCharacterOperatorRelationshipSeedRepository()
+    await relationship_repo.save(
+        CharacterOperatorRelationshipSeed(
+            character_id=character.id,
+            operator_id=DEFAULT_OPERATOR_ID,
+            relationship_label="創作搭檔",
+            proactive_permission=proactive_permission,
+            proactive_cadence_hint="一天最多一次",
+        ),
+    )
+    decider = _FixedDecider(ProactiveDecision(False, "not now", None))
+    dispatcher, _ = _make_dispatcher(
+        harness,
+        decider=decider,
+        relationship_seed_repository=relationship_repo,
+    )
+
+    attempt = await dispatcher.evaluate(
+        character_id=character.id, trigger=ProactiveTrigger.TICK,
+    )
+
+    lines = "\n".join(decider.calls[0].initial_relationship_lines)
+    assert attempt.outcome == ProactiveOutcome.DECIDER_SKIPPED
+    assert "創作搭檔" in lines
+    assert "主動訊息授權" not in lines
+    assert "一天最多一次" not in lines
+
+
+class _BlockingDecider(ProactiveDeciderPort):
+    def __init__(self) -> None:
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.calls = 0
+
+    async def decide(self, context: ProactiveContext) -> ProactiveDecision:
+        self.calls += 1
+        self.entered.set()
+        await self.release.wait()
+        return ProactiveDecision(False, "not now", None)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_evaluation_is_single_flight_per_character() -> None:
+    harness = build_messaging_harness()
+    character = await _enable_character(
+        harness, accepts_web_proactive=True,
+    )
+    backend = InMemoryBackgroundCoordinatorLease()
+    evaluation_lease = ProactiveEvaluationLease(
+        backend,
+        heartbeat_interval_seconds=1000,
+    )
+    decider = _BlockingDecider()
+    dispatcher, _ = _make_dispatcher(
+        harness,
+        decider=decider,
+        evaluation_lease=evaluation_lease,
+    )
+
+    first_task = asyncio.create_task(dispatcher.evaluate(
+        character_id=character.id,
+        trigger=ProactiveTrigger.TICK,
+    ))
+    await decider.entered.wait()
+    second = await dispatcher.evaluate(
+        character_id=character.id,
+        trigger=ProactiveTrigger.from_string("manual"),
+    )
+    decider.release.set()
+    first = await first_task
+
+    assert first.outcome == ProactiveOutcome.DECIDER_SKIPPED
+    assert second.outcome == ProactiveOutcome.GATE_BLOCKED
+    assert second.reason == "evaluation already in flight"
+    assert decider.calls == 1
 
 
 @pytest.mark.asyncio

@@ -24,9 +24,17 @@ import CharacterBackupRestorePanel from '@/components/CharacterBackupRestorePane
 import CharacterCardEditor from '@/components/admin/CharacterCardEditor.vue'
 import CharacterCardMarketplace from '@/components/admin/CharacterCardMarketplace.vue'
 import CharacterCreateModal from '@/components/CharacterCreateModal.vue'
+import CharacterCardGalleryModal from '@/components/CharacterCardGalleryModal.vue'
+import InitialRelationshipWizardModal from '@/components/InitialRelationshipWizardModal.vue'
 import AdminCharacterPicker from '@/components/admin/AdminCharacterPicker.vue'
 import { UiCard, UiBadge, UiButton } from '@/components/ui'
-import { downloadCharacterCard, importCharacterCard } from '@/utils/api/characters'
+import type { InitialRelationshipPayload } from '@/types/character'
+import {
+  downloadCharacterCard,
+  importCharacterCard,
+  previewCharacterCard,
+  type CharacterCardPreview,
+} from '@/utils/api/characters'
 
 const { t } = useI18n()
 
@@ -35,6 +43,11 @@ const createModalOpen = ref(false)
 const exportingId = ref<string | null>(null)
 const importFileRef = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
+const previewing = ref(false)
+const previewVisible = ref(false)
+const previewCard = ref<CharacterCardPreview | null>(null)
+const pendingImportFile = ref<File | null>(null)
+const relationshipWizardVisible = ref(false)
 const backupPanelCharacter = ref<Character | null>(null)
 
 async function handleExportCard(character: Character) {
@@ -65,9 +78,55 @@ async function handleImportFile(event: Event) {
   input.value = ''
   if (!file) return
 
+  previewing.value = true
+  try {
+    pendingImportFile.value = file
+    previewCard.value = await previewCharacterCard(file)
+    previewVisible.value = true
+  } catch (error) {
+    previewVisible.value = false
+    previewCard.value = null
+    pendingImportFile.value = null
+    notification.error({
+      message: t('admin.page.characters.importCardError'),
+      description: error instanceof Error ? error.message : String(error),
+    })
+  } finally {
+    previewing.value = false
+  }
+}
+
+function closePreview() {
+  if (importing.value) return
+  previewVisible.value = false
+  previewCard.value = null
+  pendingImportFile.value = null
+}
+
+function confirmPreview(card: CharacterCardPreview) {
+  if (!pendingImportFile.value) return
+  previewVisible.value = false
+  previewCard.value = card
+  relationshipWizardVisible.value = true
+}
+
+function closeRelationshipWizard() {
+  if (importing.value) return
+  relationshipWizardVisible.value = false
+  previewCard.value = null
+  pendingImportFile.value = null
+}
+
+async function confirmRelationshipWizard(
+  initialRelationship: InitialRelationshipPayload | null,
+) {
+  const file = pendingImportFile.value
+  if (!file || importing.value) return
   importing.value = true
   try {
-    const { character, landed_arc_template_ids } = await importCharacterCard(file)
+    const { character, landed_arc_template_ids } = await importCharacterCard(file, {
+      initialRelationship,
+    })
     await pickerRef.value?.refresh()
     notification.success({
       message: t('admin.page.characters.importCardSuccess', { name: character.name }),
@@ -77,6 +136,9 @@ async function handleImportFile(event: Event) {
           })
         : undefined,
     })
+    relationshipWizardVisible.value = false
+    previewCard.value = null
+    pendingImportFile.value = null
   } catch (error) {
     notification.error({
       message: t('admin.page.characters.importCardError'),
@@ -155,7 +217,7 @@ async function handleBackupImported(_char: Character) {
         <UiButton variant="primary" @click="openCreateModal">
           {{ t('admin.page.characters.createAction') }}
         </UiButton>
-        <UiButton variant="secondary" :loading="importing" @click="triggerImport">
+        <UiButton variant="secondary" :loading="previewing" @click="triggerImport">
           {{ t('admin.page.characters.importCardAction') }}
         </UiButton>
       </div>
@@ -176,6 +238,26 @@ async function handleBackupImported(_char: Character) {
     </UiCard>
 
     <CharacterCardMarketplace @installed="handleCardInstalled" />
+
+    <CharacterCardGalleryModal
+      :visible="previewVisible"
+      mode="preview"
+      :cards="previewCard ? [previewCard] : []"
+      :action-loading="previewing || importing"
+      :show-translate="false"
+      @close="closePreview"
+      @confirm="confirmPreview"
+    />
+
+    <InitialRelationshipWizardModal
+      :visible="relationshipWizardVisible"
+      :card-name="previewCard?.name || previewCard?.title || ''"
+      :card="previewCard"
+      :suggested-known-context="previewCard?.suggested_known_context ?? ''"
+      :loading="importing"
+      @close="closeRelationshipWizard"
+      @confirm="confirmRelationshipWizard"
+    />
 
     <AdminCharacterPicker
       ref="pickerRef"

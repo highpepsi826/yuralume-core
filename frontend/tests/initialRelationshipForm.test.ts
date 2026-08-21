@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildInitialRelationshipPayload,
   emptyInitialRelationshipForm,
+  initialRelationshipFormFromPayload,
   splitList,
 } from '@/composables/useInitialRelationshipForm'
 
@@ -51,5 +52,27 @@ describe('initial relationship form helpers', () => {
       life_goals: ['整理作品集', '練習日文'],
     })
     expect(splitList('A, B，C\nD')).toEqual(['A', 'B', 'C', 'D'])
+  })
+
+  it('hydrates the edit form from a stored relationship payload', () => {
+    expect(initialRelationshipFormFromPayload({
+      relationship_label: '伴侶',
+      schedule_involvement_policy: 'shared_allowed',
+      proactive_permission: true,
+      proactive_cadence_hint: '下班後偶爾主動分享',
+      safe_user_profile: {
+        interests: ['咖啡', '音樂'],
+        routine: '晚上較有空',
+        life_goals: ['完成作品集'],
+      },
+    })).toMatchObject({
+      relationship_label: '伴侶',
+      schedule_involvement_policy: 'shared_allowed',
+      proactive_permission: true,
+      proactive_cadence_hint: '下班後偶爾主動分享',
+      profile_interests: '咖啡, 音樂',
+      profile_routine: '晚上較有空',
+      profile_life_goals: '完成作品集',
+    })
   })
 })

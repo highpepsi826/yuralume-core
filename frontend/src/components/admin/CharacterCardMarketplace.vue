@@ -10,7 +10,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { notification } from 'ant-design-vue'
-import type { Character } from '@/types/character'
+import type { Character, InitialRelationshipPayload } from '@/types/character'
+import InitialRelationshipWizardModal from '@/components/InitialRelationshipWizardModal.vue'
 import {
   listCharacterCards,
   installCharacterCard,
@@ -34,6 +35,8 @@ const packs = ref<CharacterCardPackSummary[]>([])
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 const installingId = ref<string | null>(null)
+const relationshipWizardVisible = ref(false)
+const pendingPack = ref<CharacterCardPackSummary | null>(null)
 // "翻成我的語言" — bundled packs ship zh-TW; an en/ja admin can opt into
 // LLM-translating the A-layer profile + bundled arc templates on install
 // (same flag the player gallery already sends). Off by default.
@@ -61,11 +64,27 @@ async function install(pack: CharacterCardPackSummary) {
   // list path, and the backend refuses too. Three layers because the middle
   // one is the only one that can explain itself.
   if (!canInstallCard(pack)) return
+  pendingPack.value = pack
+  relationshipWizardVisible.value = true
+}
+
+function closeRelationshipWizard() {
+  if (installingId.value !== null) return
+  relationshipWizardVisible.value = false
+  pendingPack.value = null
+}
+
+async function confirmRelationshipWizard(initialRelationship: InitialRelationshipPayload | null) {
+  const pack = pendingPack.value
+  if (!pack || installingId.value !== null) return
   installingId.value = pack.pack_id
   try {
     const { character, landed_arc_template_ids } = await installCharacterCard(
       pack.pack_id,
-      { translate: translateOnInstall.value },
+      {
+        translate: translateOnInstall.value,
+        initialRelationship,
+      },
     )
     notification.success({
       message: t('admin.page.characters.marketplace.installSuccess', { name: character.name }),
@@ -74,6 +93,8 @@ async function install(pack: CharacterCardPackSummary) {
         : undefined,
     })
     emit('installed', character)
+    relationshipWizardVisible.value = false
+    pendingPack.value = null
   } catch (err) {
     notification.error({
       message: t('admin.page.characters.marketplace.installError'),
@@ -171,6 +192,16 @@ onMounted(load)
       </article>
     </div>
   </UiCard>
+
+  <InitialRelationshipWizardModal
+    :visible="relationshipWizardVisible"
+    :card-name="pendingPack?.name || pendingPack?.title || ''"
+    :card="pendingPack"
+    :suggested-known-context="pendingPack?.suggested_known_context ?? ''"
+    :loading="installingId !== null"
+    @close="closeRelationshipWizard"
+    @confirm="confirmRelationshipWizard"
+  />
 </template>
 
 <style scoped>

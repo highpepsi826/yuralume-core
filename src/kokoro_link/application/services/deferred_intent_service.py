@@ -96,10 +96,20 @@ class DeferredIntentService:
             now=now,
         )
         try:
-            return await self._repository.add(intent)
+            upsert = getattr(
+                self._repository,
+                "upsert_active_semantically_identical",
+                None,
+            )
+            if upsert is None:
+                # Keep older plugin/test repositories usable while they are
+                # upgraded; the built-in stores implement the coalescing
+                # operation above.
+                return await self._repository.add(intent)
+            return await upsert(intent, now=now or intent.created_at)
         except Exception:
             _LOGGER.exception(
-                "deferred_intent add failed (char=%s op=%s trigger=%s)",
+                "deferred_intent upsert failed (char=%s op=%s trigger=%s)",
                 character_id, operator_id, trigger,
             )
             return None

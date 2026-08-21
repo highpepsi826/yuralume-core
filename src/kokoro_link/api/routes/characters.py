@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
@@ -687,6 +688,61 @@ async def get_character(
     if character is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Character not found")
     return character
+
+
+def _require_initial_relationship_repository(container: ServiceContainer):
+    repository = getattr(container, "relationship_seed_repository", None)
+    if repository is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Initial relationship settings are not configured",
+        )
+    return repository
+
+
+@router.get(
+    "/characters/{character_id}/initial-relationship",
+    response_model=InitialRelationshipPayload | None,
+)
+async def get_initial_relationship(
+    character_id: str,
+    container: ServiceContainer = Depends(get_container),
+    current_user_id: str = Depends(get_current_user_id),
+    _owned_character_id: str = Depends(ensure_owned_character_id),
+) -> InitialRelationshipPayload | None:
+    """Return the caller's editable relationship seed for one character."""
+    repository = _require_initial_relationship_repository(container)
+    seed = await repository.get(character_id, current_user_id)
+    if seed is None or seed.is_empty:
+        return None
+    return InitialRelationshipPayload.from_seed(seed)
+
+
+@router.put(
+    "/characters/{character_id}/initial-relationship",
+    response_model=InitialRelationshipPayload,
+)
+async def update_initial_relationship(
+    character_id: str,
+    payload: InitialRelationshipPayload,
+    container: ServiceContainer = Depends(get_container),
+    current_user_id: str = Depends(get_current_user_id),
+    _owned_character_id: str = Depends(ensure_owned_character_id),
+) -> InitialRelationshipPayload:
+    """Create or replace the caller-confirmed relationship seed."""
+    repository = _require_initial_relationship_repository(container)
+    seed = payload.to_seed(
+        character_id=character_id,
+        operator_id=current_user_id,
+        now=datetime.now(timezone.utc),
+    )
+    if seed.is_empty:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one initial relationship setting is required",
+        )
+    await repository.save(seed)
+    return InitialRelationshipPayload.from_seed(seed)
 
 
 @router.patch("/characters/{character_id}", response_model=CharacterResponse)

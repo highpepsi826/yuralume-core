@@ -74,6 +74,26 @@ appointment and the tick that notices it (scheduler interval, a restart,
 a night-hours block that defers the look until morning)."""
 
 
+def normalize_semantic_text(value: str) -> str:
+    """Fold whitespace and case for deferred-intent identity matching."""
+    return " ".join((value or "").casefold().split())
+
+
+def semantic_identity(intent: "DeferredIntent") -> tuple[str, str, str]:
+    """Return the stable identity used to coalesce an active motive.
+
+    A non-empty conversation purpose is the strongest signal.  Models often
+    vary the prose of ``inner_motive`` while keeping the purpose stable; when
+    no purpose was supplied, the normalized motive is the useful fallback.
+    """
+    purpose = normalize_semantic_text(intent.conversation_purpose)
+    return (
+        intent.character_id,
+        intent.operator_id,
+        purpose or normalize_semantic_text(intent.inner_motive),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class DeferredIntent:
     """One deferred proactive motive."""
@@ -198,6 +218,45 @@ class DeferredIntent:
 
     def marked_expired(self) -> "DeferredIntent":
         return _replace(self, status=STATUS_EXPIRED)
+
+    def replaced_by(
+        self,
+        incoming: "DeferredIntent",
+        *,
+        now: datetime,
+    ) -> "DeferredIntent":
+        """Refresh details without refreshing an active row's half-life.
+
+        Repeated judge skips represent the same pending motive, so its
+        original creation and ordinary expiry remain stable.  A newly named
+        future appointment may extend the expiry only through that appointment
+        plus the bounded grace window.  Existing alarms are retained when a
+        later judge response does not name a replacement time.
+        """
+        ref = _as_utc(now)
+        revisit_at = (
+            incoming.revisit_at
+            if incoming.revisit_at is not None
+            else self.revisit_at
+        )
+        expires_at = self.expires_at
+        if incoming.revisit_at is not None and incoming.revisit_at > ref:
+            expires_at = max(
+                expires_at,
+                incoming.revisit_at + timedelta(minutes=REVISIT_GRACE_MINUTES),
+            )
+        return _replace(
+            self,
+            trigger=incoming.trigger,
+            inner_motive=incoming.inner_motive,
+            conversation_purpose=incoming.conversation_purpose,
+            expected_reply=incoming.expected_reply,
+            risk=incoming.risk,
+            best_timing=incoming.best_timing,
+            reason=incoming.reason,
+            expires_at=expires_at,
+            revisit_at=revisit_at,
+        )
 
 
 def _replace(intent: DeferredIntent, **overrides) -> DeferredIntent:

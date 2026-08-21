@@ -14,6 +14,7 @@ from kokoro_link.domain.entities.deferred_intent import (
     STATUS_CONSUMED,
     STATUS_EXPIRED,
     DeferredIntent,
+    semantic_identity,
 )
 from kokoro_link.infrastructure.persistence.models import DeferredIntentRow
 
@@ -70,6 +71,55 @@ class SADeferredIntentRepository(DeferredIntentRepositoryPort):
 
     async def add(self, intent: DeferredIntent) -> DeferredIntent:
         async with self._session_factory() as session:
+            session.add(_domain_to_row(intent))
+            await session.commit()
+        return intent
+
+    async def upsert_active_semantically_identical(
+        self,
+        intent: DeferredIntent,
+        *,
+        now: datetime,
+    ) -> DeferredIntent:
+        """Coalesce one active motive for a character/operator pair.
+
+        The row lock serializes replacements when several evaluations share a
+        database.  Semantic matching is intentionally done in Python after a
+        narrow pair/active query so the rule stays identical across SQLite and
+        PostgreSQL (including existing rows whose text has inconsistent
+        whitespace or casing).
+        """
+        ref = _ensure_utc(now)
+        key = semantic_identity(intent)
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(DeferredIntentRow)
+                .where(
+                    DeferredIntentRow.character_id == intent.character_id,
+                    DeferredIntentRow.operator_id == intent.operator_id,
+                    DeferredIntentRow.status == STATUS_ACTIVE,
+                    DeferredIntentRow.expires_at > ref,
+                )
+                .order_by(DeferredIntentRow.created_at.asc())
+                .with_for_update(),
+            )
+            for row in result.scalars().all():
+                current = _row_to_domain(row)
+                if semantic_identity(current) != key:
+                    continue
+                updated = current.replaced_by(intent, now=ref)
+                row.trigger = updated.trigger
+                row.inner_motive = updated.inner_motive
+                row.conversation_purpose = updated.conversation_purpose
+                row.expected_reply = updated.expected_reply
+                row.risk = updated.risk
+                row.best_timing = updated.best_timing
+                row.reason = updated.reason
+                row.expires_at = updated.expires_at
+                row.revisit_at = updated.revisit_at
+                await session.commit()
+                return updated
+
             session.add(_domain_to_row(intent))
             await session.commit()
         return intent

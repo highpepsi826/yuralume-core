@@ -111,6 +111,26 @@ export async function updateCharacter(id: string, req: UpdateCharacterRequest): 
   return data
 }
 
+export async function getInitialRelationship(
+  characterId: string,
+): Promise<InitialRelationshipPayload | null> {
+  const { data } = await axios.get<InitialRelationshipPayload | null>(
+    `${BASE}/${characterId}/initial-relationship`,
+  )
+  return data
+}
+
+export async function updateInitialRelationship(
+  characterId: string,
+  relationship: InitialRelationshipPayload,
+): Promise<InitialRelationshipPayload> {
+  const { data } = await axios.put<InitialRelationshipPayload>(
+    `${BASE}/${characterId}/initial-relationship`,
+    relationship,
+  )
+  return data
+}
+
 export async function updateCharacterProactiveRhythm(
   id: string,
   rhythm: ProactiveRhythm,

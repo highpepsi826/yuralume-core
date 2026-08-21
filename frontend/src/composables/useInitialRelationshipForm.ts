@@ -39,6 +39,29 @@ export function emptyInitialRelationshipForm(): InitialRelationshipForm {
   }
 }
 
+export function initialRelationshipFormFromPayload(
+  payload: InitialRelationshipPayload | null | undefined,
+): InitialRelationshipForm {
+  if (!payload) return emptyInitialRelationshipForm()
+  const profile = payload.safe_user_profile
+  return {
+    relationship_label: payload.relationship_label ?? '',
+    known_context: payload.known_context ?? '',
+    living_arrangement: payload.living_arrangement ?? '',
+    user_address_name: payload.user_address_name ?? '',
+    character_address_name: payload.character_address_name ?? '',
+    tone_distance: payload.tone_distance ?? '',
+    familiarity_boundary: payload.familiarity_boundary ?? '',
+    schedule_involvement_policy: payload.schedule_involvement_policy ?? 'none',
+    proactive_permission: payload.proactive_permission ?? false,
+    proactive_cadence_hint: payload.proactive_cadence_hint ?? '',
+    user_profile_notes: payload.user_profile_notes ?? '',
+    profile_interests: profile?.interests?.join(', ') ?? '',
+    profile_routine: profile?.routine ?? '',
+    profile_life_goals: profile?.life_goals?.join(', ') ?? '',
+  }
+}
+
 export function splitList(value: string): string[] {
   return value
     .split(/[,，\n]/)
