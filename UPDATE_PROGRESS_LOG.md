@@ -5,6 +5,28 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-22 - Exhaustive provider payload test lab deployed
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed `ad4259a` on `local/customizations`.
+- Backup: `not required`; this change adds read-only diagnostics and no schema
+  or user-data migration.
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated the existing
+  `migrate` and `app` services with the runtime Compose base plus local
+  override. Provider Settings now exposes `Payload 測試區` for draft and saved
+  OpenAI-compatible LLM connections. Complete mode sends the runtime-shaped
+  request and controlled variants, progressively removing stream, token,
+  reasoning, extra-parameter, and message fields while reporting only field
+  names, status, and sanitized error details.
+- Verification: focused backend tests (100), frontend provider API tests (8),
+  i18n checks, Vue type-check, and production build passed. All four Compose
+  services are healthy; `http://127.0.0.1:8012/health` returned
+  `{"status":"ok"}` and OpenAPI lists both payload-diagnostic routes.
+- Follow-up: run `Payload 測試區` against the failing provider source and use
+  the first successful variant to identify the incompatible request field.
+
 ## Entry Template
 
 ### YYYY-MM-DD - Short update title
