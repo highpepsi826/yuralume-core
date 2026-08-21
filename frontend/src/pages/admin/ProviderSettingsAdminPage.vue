@@ -71,6 +71,8 @@ const testingCapability = ref<string | null>(null)
 const deepTestingCapability = ref<string | null>(null)
 const diagnosingPayloadCapability = ref<string | null>(null)
 const diagnosingPayloadId = ref<string | null>(null)
+const diagnosingPayloadLabCapability = ref<string | null>(null)
+const diagnosingPayloadLabId = ref<string | null>(null)
 const editingId = ref<string | null>(null)
 
 // Per-capability live-probe results from the draft test-draft route.
@@ -565,9 +567,14 @@ function probeActionLabel(action: string): string {
 }
 
 function payloadDiagnosticName(name: string): string {
-  const key = `admin.providerSettings.payloadDiagnosticNames.${name}`
+  const numberedExtra = name.match(/^without_extra_request_param_(\d+)$/)
+  const lookupName = numberedExtra
+    ? 'without_extra_request_param'
+    : name
+  const key = `admin.providerSettings.payloadDiagnosticNames.${lookupName}`
   const label = t(key)
-  return label === key ? name : label
+  if (label === key) return name
+  return numberedExtra ? `${label} #${numberedExtra[1]}` : label
 }
 
 function payloadDiagnosticFields(fields: string[]): string {
@@ -617,13 +624,20 @@ function testCapabilityCard(capability: string): Promise<void> {
   return runCapabilityProbe(capability, false)
 }
 
-async function diagnosePayloadCard(capability: string): Promise<void> {
+async function diagnosePayloadCard(
+  capability: string,
+  exhaustive = false,
+): Promise<void> {
   if (capability !== 'llm') return
-  diagnosingPayloadCapability.value = capability
+  const busyRef = exhaustive
+    ? diagnosingPayloadLabCapability
+    : diagnosingPayloadCapability
+  busyRef.value = capability
   try {
     const result = await diagnoseDraftProviderPayload(
       payloadFor(capability),
       editingId.value,
+      exhaustive,
     )
     payloadDiagnostics[capability] = result
     notification[result.ok ? 'success' : 'warning']({
@@ -632,6 +646,9 @@ async function diagnosePayloadCard(capability: string): Promise<void> {
         : t('admin.providerSettings.payloadDiagnosticFoundIssue'),
       description: t('admin.providerSettings.payloadDiagnosticRequests', {
         count: result.checks.filter(check => check.name !== 'model_list').length,
+        mode: exhaustive
+          ? t('admin.providerSettings.payloadDiagnosticExhaustiveMode')
+          : t('admin.providerSettings.payloadDiagnosticQuickMode'),
       }),
       duration: 5,
     })
@@ -642,7 +659,7 @@ async function diagnosePayloadCard(capability: string): Promise<void> {
       duration: 4,
     })
   } finally {
-    diagnosingPayloadCapability.value = null
+    busyRef.value = null
   }
 }
 
@@ -707,10 +724,30 @@ async function test(row: ProviderConnection): Promise<void> {
   }
 }
 
-async function diagnoseSavedPayload(row: ProviderConnection): Promise<void> {
-  diagnosingPayloadId.value = row.id
+async function diagnoseSavedPayload(
+  row: ProviderConnection,
+  exhaustive = false,
+): Promise<void> {
+  const busyRef = exhaustive ? diagnosingPayloadLabId : diagnosingPayloadId
+  busyRef.value = row.id
   try {
-    payloadDiagnostics[`saved:${row.id}`] = await diagnoseProviderPayload(row.id)
+    payloadDiagnostics[`saved:${row.id}`] = await diagnoseProviderPayload(
+      row.id,
+      exhaustive,
+    )
+    const result = payloadDiagnostics[`saved:${row.id}`]
+    notification[result.ok ? 'success' : 'warning']({
+      message: result.ok
+        ? t('admin.providerSettings.payloadDiagnosticPassed')
+        : t('admin.providerSettings.payloadDiagnosticFoundIssue'),
+      description: t('admin.providerSettings.payloadDiagnosticRequests', {
+        count: result.checks.filter(check => check.name !== 'model_list').length,
+        mode: exhaustive
+          ? t('admin.providerSettings.payloadDiagnosticExhaustiveMode')
+          : t('admin.providerSettings.payloadDiagnosticQuickMode'),
+      }),
+      duration: 5,
+    })
   } catch (err) {
     notification.error({
       message: t('admin.providerSettings.errors.testFailed'),
@@ -718,7 +755,7 @@ async function diagnoseSavedPayload(row: ProviderConnection): Promise<void> {
       duration: 4,
     })
   } finally {
-    diagnosingPayloadId.value = null
+    busyRef.value = null
   }
 }
 
@@ -1039,6 +1076,16 @@ onMounted(loadAll)
                             {{ t('admin.providerSettings.actions.payloadDiagnostic') }}
                           </UiButton>
                           <UiButton
+                            v-if="capability === 'llm'"
+                            size="sm"
+                            variant="ghost"
+                            :loading="diagnosingPayloadLabCapability === capability"
+                            type="button"
+                            @click="diagnosePayloadCard(capability, true)"
+                          >
+                            {{ t('admin.providerSettings.actions.payloadTestLab') }}
+                          </UiButton>
+                          <UiButton
                             v-if="capability === 'image'"
                             size="sm"
                             variant="ghost"
@@ -1194,10 +1241,15 @@ onMounted(loadAll)
                       <p class="provider-settings__probes-title">
                         {{ t('admin.providerSettings.payloadDiagnosticTitle') }}
                       </p>
+                      <p class="provider-settings__payload-diagnostic-note">
+                        {{ payloadDiagnostics[capability].exhaustive
+                          ? t('admin.providerSettings.payloadDiagnosticExhaustiveHint')
+                          : t('admin.providerSettings.payloadDiagnosticQuickHint') }}
+                      </p>
                       <ul class="provider-settings__probe-list">
                         <li
-                          v-for="check in payloadDiagnostics[capability].checks"
-                          :key="`payload-${capability}-${check.name}`"
+                          v-for="(check, index) in payloadDiagnostics[capability].checks"
+                          :key="`payload-${capability}-${check.name}-${index}`"
                           class="provider-settings__probe"
                         >
                           <UiBadge :variant="check.ok ? 'success' : 'danger'">
@@ -1328,6 +1380,14 @@ onMounted(loadAll)
               >
                 {{ t('admin.providerSettings.actions.payloadDiagnostic') }}
               </UiButton>
+              <UiButton
+                v-if="row.capabilities.includes('llm')"
+                size="sm"
+                :loading="diagnosingPayloadLabId === row.id"
+                @click="diagnoseSavedPayload(row, true)"
+              >
+                {{ t('admin.providerSettings.actions.payloadTestLab') }}
+              </UiButton>
               <UiButton size="sm" variant="danger" @click="remove(row)">
                 {{ t('admin.providerSettings.actions.delete') }}
               </UiButton>
@@ -1340,10 +1400,15 @@ onMounted(loadAll)
             <p class="provider-settings__probes-title">
               {{ t('admin.providerSettings.payloadDiagnosticTitle') }}
             </p>
+            <p class="provider-settings__payload-diagnostic-note">
+              {{ payloadDiagnostics[`saved:${row.id}`].exhaustive
+                ? t('admin.providerSettings.payloadDiagnosticExhaustiveHint')
+                : t('admin.providerSettings.payloadDiagnosticQuickHint') }}
+            </p>
             <ul class="provider-settings__probe-list">
               <li
-                v-for="check in payloadDiagnostics[`saved:${row.id}`].checks"
-                :key="`saved-payload-${row.id}-${check.name}`"
+                v-for="(check, index) in payloadDiagnostics[`saved:${row.id}`].checks"
+                :key="`saved-payload-${row.id}-${check.name}-${index}`"
                 class="provider-settings__probe"
               >
                 <UiBadge :variant="check.ok ? 'success' : 'danger'">
@@ -1603,6 +1668,12 @@ onMounted(loadAll)
   color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+.provider-settings__payload-diagnostic-note {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  line-height: 1.5;
 }
 .provider-settings__probe-list {
   list-style: none;

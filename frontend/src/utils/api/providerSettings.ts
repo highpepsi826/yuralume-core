@@ -107,6 +107,7 @@ export interface PayloadDiagnosticCheck {
 export interface ProviderPayloadDiagnosticResult {
   ok: boolean
   model: string
+  exhaustive?: boolean
   checks: PayloadDiagnosticCheck[]
 }
 
@@ -174,20 +175,31 @@ export async function testDraftProviderConnection(
 export async function diagnoseDraftProviderPayload(
   payload: ProviderConnectionPayload,
   connectionId?: string | null,
+  exhaustive = false,
 ): Promise<ProviderPayloadDiagnosticResult> {
+  const body: ProviderConnectionPayload & {
+    connection_id?: string | null
+    exhaustive?: boolean
+  } = {
+    ...payload,
+    connection_id: connectionId ?? null,
+  }
+  if (exhaustive) body.exhaustive = true
   const { data } = await axios.post<ProviderPayloadDiagnosticResult>(
     '/api/v1/admin/providers/payload-diagnostic-draft',
-    { ...payload, connection_id: connectionId ?? null },
+    body,
   )
   return data
 }
 
 export async function diagnoseProviderPayload(
   id: string,
+  exhaustive = false,
 ): Promise<ProviderPayloadDiagnosticResult> {
-  const { data } = await axios.post<ProviderPayloadDiagnosticResult>(
-    `/api/v1/admin/providers/${encodeURIComponent(id)}/payload-diagnostic`,
-  )
+  const url = `/api/v1/admin/providers/${encodeURIComponent(id)}/payload-diagnostic`
+  const { data } = exhaustive
+    ? await axios.post<ProviderPayloadDiagnosticResult>(url, { exhaustive: true })
+    : await axios.post<ProviderPayloadDiagnosticResult>(url)
   return data
 }
 

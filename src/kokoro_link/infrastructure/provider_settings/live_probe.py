@@ -168,6 +168,7 @@ async def diagnose_llm_payload(
     config: dict[str, Any],
     secret: dict[str, Any],
     transport: httpx.AsyncBaseTransport | None = None,
+    exhaustive: bool = False,
 ) -> list[PayloadDiagnosticCheck]:
     """Run the admin-only progressive payload diagnostic for an LLM row.
 
@@ -199,7 +200,11 @@ async def diagnose_llm_payload(
                 detail=f"provider {entry.id!r} has no payload diagnostic",
             ),
         ]
-    return await hook(transport=transport, timeout_seconds=DEFAULT_TIMEOUT_SECONDS)
+    return await hook(
+        transport=transport,
+        timeout_seconds=DEFAULT_TIMEOUT_SECONDS,
+        exhaustive=exhaustive,
+    )
 
 
 # ---------------------------------------------------------------------------

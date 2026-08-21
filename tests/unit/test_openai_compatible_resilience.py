@@ -187,6 +187,54 @@ async def test_payload_diagnostic_reports_generic_upstream_400_without_adapting(
     assert len(bodies) == len(chat_checks)
 
 
+@pytest.mark.asyncio
+async def test_exhaustive_payload_diagnostic_tests_runtime_stream_and_continues() -> None:
+    """The test lab sends the real stream shape and keeps testing after OK.
+
+    A non-stream probe can be healthy while the runtime's streaming request
+    is rejected.  The exhaustive mode must expose that distinction and also
+    test the independently removable extra request parameters instead of
+    stopping at the first successful candidate.
+    """
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "gpt-5-mini"}]})
+        bodies.append(json.loads(request.content.decode("utf-8")))
+        return _chat_ok()
+
+    model = _build(
+        max_tokens=64,
+        disable_reasoning=True,
+        reasoning_effort="high",
+        extra_request_params={"foo": "bar"},
+    )
+    checks = await model.diagnose_payload(
+        transport=httpx.MockTransport(handler),
+        exhaustive=True,
+    )
+
+    chat_checks = checks[1:]
+    names = [check.name for check in chat_checks]
+    assert names[0] == "runtime_configured"
+    # When the configured runtime shape already has stream=true, the forced
+    # variant is byte-identical and is deliberately deduplicated.
+    assert names[1] == "runtime_non_stream"
+    assert "explicit_stream_false" in names
+    assert "without_extra_request_param_1" in names
+    assert len(bodies) == len(chat_checks), "success must not stop exhaustive mode"
+
+    runtime_body = bodies[0]
+    assert runtime_body["stream"] is True
+    extra_check = next(
+        check for check in chat_checks
+        if check.name == "without_extra_request_param_1"
+    )
+    assert extra_check.removed_fields == ("foo",)
+    assert "foo" not in extra_check.payload_keys
+
+
 # ---------------------------------------------------------------------------
 # 1. stream-verification fallback (org must be verified to stream)
 # ---------------------------------------------------------------------------

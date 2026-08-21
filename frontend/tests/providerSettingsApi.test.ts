@@ -171,4 +171,31 @@ describe('provider settings test API — deep flag & probes', () => {
       '/api/v1/admin/providers/conn%2F2/payload-diagnostic',
     )
   })
+
+  it('posts exhaustive mode for a draft payload test lab run', async () => {
+    const payload = draftPayload()
+    const result = { ok: false, model: 'gpt-5.6-sol', exhaustive: true, checks: [] }
+    mockedAxios.post.mockResolvedValueOnce({ data: result })
+
+    await expect(
+      diagnoseDraftProviderPayload(payload, 'conn-1', true),
+    ).resolves.toEqual(result)
+
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      '/api/v1/admin/providers/payload-diagnostic-draft',
+      { ...payload, connection_id: 'conn-1', exhaustive: true },
+    )
+  })
+
+  it('posts exhaustive mode for a saved payload test lab run', async () => {
+    const result = { ok: false, model: 'gpt-5.6-sol', exhaustive: true, checks: [] }
+    mockedAxios.post.mockResolvedValueOnce({ data: result })
+
+    await expect(diagnoseProviderPayload('conn/2', true)).resolves.toEqual(result)
+
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      '/api/v1/admin/providers/conn%2F2/payload-diagnostic',
+      { exhaustive: true },
+    )
+  })
 })

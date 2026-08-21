@@ -82,10 +82,11 @@ class ProviderConnectionTestOutcome:
 
 @dataclass(frozen=True, slots=True)
 class ProviderPayloadDiagnosticResult:
-    """Admin-only result for progressive OpenAI-compatible payload tests."""
+    """Admin-only result for OpenAI-compatible payload compatibility tests."""
 
     ok: bool
     model: str
+    exhaustive: bool = False
     checks: tuple[PayloadDiagnosticCheck, ...] = ()
 
 
@@ -539,6 +540,7 @@ class ProviderConnectionService:
         config: dict[str, Any] | None = None,
         secret: dict[str, Any] | None = None,
         connection_id: str | None = None,
+        exhaustive: bool = False,
     ) -> ProviderPayloadDiagnosticResult:
         """Run the progressive payload test without changing any row.
 
@@ -571,11 +573,14 @@ class ProviderConnectionService:
             config=config or {},
             secret=secret or stored_secret,
             has_existing_secret=has_existing_secret,
+            exhaustive=exhaustive,
         )
 
     async def diagnose_saved_payload(
         self,
         connection_id: str,
+        *,
+        exhaustive: bool = False,
     ) -> ProviderPayloadDiagnosticResult:
         """Run the progressive payload test against a saved connection."""
 
@@ -596,6 +601,7 @@ class ProviderConnectionService:
             config=dict(row.config),
             secret=secret,
             has_existing_secret=bool(row.encrypted_secret),
+            exhaustive=exhaustive,
         )
 
     async def _diagnose_payload_values(
@@ -607,6 +613,7 @@ class ProviderConnectionService:
         config: dict[str, Any],
         secret: dict[str, Any],
         has_existing_secret: bool,
+        exhaustive: bool,
     ) -> ProviderPayloadDiagnosticResult:
         """Validate and dispatch one no-write payload diagnostic."""
 
@@ -644,6 +651,7 @@ class ProviderConnectionService:
                     entry=entry,
                     config=cleaned_config,
                     secret=cleaned_secret,
+                    exhaustive=exhaustive,
                 ),
             )
         except Exception as exc:
@@ -661,6 +669,7 @@ class ProviderConnectionService:
         return ProviderPayloadDiagnosticResult(
             ok=any(check.ok for check in checks if check.name != "model_list"),
             model=model,
+            exhaustive=exhaustive,
             checks=checks,
         )
 

@@ -434,15 +434,20 @@ class OpenAICompatibleChatModel(ChatModelPort):
         *,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout_seconds: float = 15.0,
+        exhaustive: bool = False,
     ) -> list[PayloadDiagnosticCheck]:
-        """Try progressively smaller non-stream request shapes.
+        """Try progressively smaller request shapes.
 
         This is deliberately separate from ``probe_chat``. The normal probe
         follows server-prescribed adaptation and remembers the result, which
         is correct for runtime traffic but hides the original failing shape.
         The admin diagnostic sends each candidate exactly once, records only
         field names and a short redacted response detail, and stops after the
-        first HTTP success to keep the investigation bounded.
+        first HTTP success to keep the quick investigation bounded. The
+        exhaustive mode is an operator test lab: it also sends the exact
+        configured streaming shape, one-field removal variants, and a
+        minimal JSON-instruction prompt, and continues after successes so a
+        generic upstream 400 can be narrowed down without guessing.
         """
 
         model = self._resolve_model(None)
@@ -474,6 +479,139 @@ class OpenAICompatibleChatModel(ChatModelPort):
             candidates: list[tuple[str, dict, tuple[str, ...]]] = [
                 ("runtime_non_stream", baseline, ()),
             ]
+
+            if exhaustive:
+                # The old quick diagnostic intentionally starts with a cheap
+                # non-stream request. The lab additionally exercises the
+                # exact runtime stream shape first: this is the request that
+                # commonly fails while the non-stream probe appears healthy.
+                runtime = self._build_payload(
+                    PROBE_CHAT_PROMPT,
+                    stream=not self._disable_streaming,
+                    model=None,
+                    max_tokens_override=1,
+                )
+                candidates.insert(
+                    0,
+                    (
+                        "runtime_configured",
+                        runtime,
+                        (),
+                    ),
+                )
+
+                forced_stream = copy.deepcopy(baseline)
+                forced_stream["stream"] = True
+                candidates.insert(
+                    1,
+                    ("forced_stream_true", forced_stream, ("stream",)),
+                )
+
+                completion_tokens = copy.deepcopy(baseline)
+                _drop_payload_keys(
+                    completion_tokens,
+                    ("max_tokens", "max_completion_tokens"),
+                )
+                completion_tokens["max_completion_tokens"] = 1
+                candidates.append(
+                    (
+                        "with_max_completion_tokens",
+                        completion_tokens,
+                        ("max_tokens",),
+                    ),
+                )
+
+                without_effort = copy.deepcopy(baseline)
+                _drop_payload_keys(without_effort, ("reasoning_effort",))
+                candidates.append(
+                    (
+                        "without_reasoning_effort",
+                        without_effort,
+                        ("reasoning_effort",),
+                    ),
+                )
+
+                without_template = copy.deepcopy(baseline)
+                _drop_payload_keys(
+                    without_template,
+                    ("chat_template_kwargs",),
+                )
+                candidates.append(
+                    (
+                        "without_chat_template_kwargs",
+                        without_template,
+                        ("chat_template_kwargs",),
+                    ),
+                )
+
+                # Remove each configured advanced key independently. A
+                # cumulative "remove all extras" result cannot tell an
+                # operator which one was rejected when several are present.
+                for index, key in enumerate(
+                    (
+                        key
+                        for key in (self._extra_request_params or {})
+                        if isinstance(key, str)
+                    ),
+                    start=1,
+                ):
+                    one_extra_removed = copy.deepcopy(baseline)
+                    _drop_payload_keys(one_extra_removed, (key,))
+                    candidates.append(
+                        (
+                            f"without_extra_request_param_{index}",
+                            one_extra_removed,
+                            (key,),
+                        ),
+                    )
+
+                # Structural variants are intentionally last and bounded.
+                # They distinguish a gateway that rejects a system role or
+                # model id from one that rejects optional knobs.
+                user_only = copy.deepcopy(baseline)
+                _remove_system_message(user_only)
+                candidates.append(
+                    (
+                        "user_message_only",
+                        user_only,
+                        ("messages[system]",),
+                    ),
+                )
+
+                json_minimal = {
+                    "model": model,
+                    "messages": [{
+                        "role": "user",
+                        "content": (
+                            "Return only this JSON object: "
+                            '{"status":"ok"}'
+                        ),
+                    }],
+                    "max_tokens": 1,
+                }
+                candidates.append(
+                    (
+                        "minimal_json_instruction",
+                        json_minimal,
+                        (
+                            "max_tokens",
+                            "max_completion_tokens",
+                            "reasoning_effort",
+                            "chat_template_kwargs",
+                            "messages[system]",
+                        ),
+                    ),
+                )
+
+                no_model = copy.deepcopy(json_minimal)
+                _drop_payload_keys(no_model, ("model",))
+                candidates.append(("without_model", no_model, ("model",)))
+
+                no_messages = copy.deepcopy(json_minimal)
+                _drop_payload_keys(no_messages, ("messages",))
+                candidates.append(
+                    ("without_messages", no_messages, ("messages",)),
+                )
 
             explicit_false = dict(baseline)
             explicit_false["stream"] = False
@@ -556,6 +694,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
 
             seen: set[str] = set()
             for name, payload, removed_fields in candidates:
+                _cap_diagnostic_tokens(payload)
                 fingerprint = json.dumps(
                     payload,
                     ensure_ascii=False,
@@ -572,7 +711,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
                     removed_fields=removed_fields,
                 )
                 checks.append(check)
-                if check.ok:
+                if check.ok and not exhaustive:
                     break
 
         return checks
@@ -1237,6 +1376,21 @@ def _drop_payload_keys(payload: dict, keys: Sequence[str]) -> None:
 
     for key in keys:
         payload.pop(key, None)
+
+
+def _cap_diagnostic_tokens(payload: dict) -> None:
+    """Keep every diagnostic completion bounded to one output token.
+
+    ``extra_request_params`` is merged after the adapter's internal probe
+    override, so an operator-supplied ``max_tokens`` could otherwise defeat
+    the probe's cost/latency cap. Candidates that deliberately remove both
+    token-limit fields remain uncapped by design; their ``ping`` prompt is
+    still the smallest possible compatibility request.
+    """
+
+    for key in ("max_tokens", "max_completion_tokens"):
+        if key in payload:
+            payload[key] = 1
 
 
 def _remove_system_message(payload: dict) -> None:

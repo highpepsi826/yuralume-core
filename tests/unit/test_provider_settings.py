@@ -2183,11 +2183,13 @@ def test_saved_payload_diagnostic_reuses_secret_and_does_not_update_row(
 
     response = client.post(
         f"/api/v1/admin/providers/{connection_id}/payload-diagnostic",
+        json={"exhaustive": True},
     )
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert seen and seen[0]["secret"] == {"api_key": "sk-saved-diagnostic"}
+    assert seen[0]["exhaustive"] is True
     after = client.get(f"/api/v1/admin/providers/{connection_id}").json()
     assert after == before
     assert "sk-saved-diagnostic" not in response.text

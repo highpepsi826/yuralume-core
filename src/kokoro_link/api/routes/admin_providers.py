@@ -155,9 +155,16 @@ class ProviderDraftTestRequest(ProviderConnectionCreateRequest):
 
 
 class ProviderPayloadDiagnosticRequest(ProviderConnectionCreateRequest):
-    """Draft body for the progressive OpenAI-compatible payload test."""
+    """Draft body for the OpenAI-compatible payload compatibility test."""
 
     connection_id: str | None = None
+    exhaustive: bool = False
+
+
+class ProviderPayloadDiagnosticRunRequest(BaseModel):
+    """Optional saved-row diagnostic mode; omitted stays quick and cheap."""
+
+    exhaustive: bool = False
 
 
 class ProviderConnectionTestRequest(BaseModel):
@@ -186,6 +193,7 @@ class PayloadDiagnosticCheckResponse(BaseModel):
 class ProviderPayloadDiagnosticResponse(BaseModel):
     ok: bool
     model: str
+    exhaustive: bool = False
     checks: list[PayloadDiagnosticCheckResponse] = Field(default_factory=list)
 
 
@@ -355,6 +363,7 @@ async def diagnose_draft_payload(
             config=payload.config,
             secret=payload.secret,
             connection_id=payload.connection_id,
+            exhaustive=payload.exhaustive,
         )
     except ProviderConnectionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -441,6 +450,7 @@ async def test_connection(
 )
 async def diagnose_saved_payload(
     connection_id: str,
+    payload: ProviderPayloadDiagnosticRunRequest | None = None,
     admin: OperatorProfile = Depends(require_admin),
     container: ServiceContainer = Depends(get_container),
     _unlocked: None = Depends(_require_provider_settings_unlocked),
@@ -449,7 +459,10 @@ async def diagnose_saved_payload(
 
     del admin
     try:
-        result = await _service(container).diagnose_saved_payload(connection_id)
+        result = await _service(container).diagnose_saved_payload(
+            connection_id,
+            exhaustive=bool(payload.exhaustive) if payload is not None else False,
+        )
     except ProviderConnectionError as exc:
         status_code = 404 if str(exc) == "provider connection not found" else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
@@ -535,6 +548,7 @@ def _payload_diagnostic_result(
     return ProviderPayloadDiagnosticResponse(
         ok=row.ok,
         model=row.model,
+        exhaustive=row.exhaustive,
         checks=[_payload_check(check) for check in row.checks],
     )
 
