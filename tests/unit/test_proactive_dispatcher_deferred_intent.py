@@ -244,6 +244,73 @@ async def test_intention_skip_without_motive_does_not_record() -> None:
 
 
 @pytest.mark.asyncio
+async def test_empty_motive_judgement_consumes_resurfaced_intent() -> None:
+    repo = InMemoryDeferredIntentRepository()
+    svc = DeferredIntentService(
+        repository=repo, settings=HumanizationSettings(),
+    )
+    char_repo = InMemoryCharacterRepository()
+    character = await _build_character(char_repo)
+    parked = await repo.add(DeferredIntent.new(
+        character_id=character.id,
+        operator_id=DEFAULT_OPERATOR_ID,
+        trigger="tick",
+        inner_motive="想問候玩家近況",
+        now=_NOW - timedelta(hours=1),
+    ))
+    dispatcher, judge, _ = _dispatcher(
+        intention_decision=ProactiveIntentionDecision(
+            should_consume_slot=False,
+            reason="重新判斷後決定放棄",
+            inner_motive="",
+        ),
+        deferred_service=svc,
+        character_repo=char_repo,
+    )
+
+    attempt = await dispatcher.evaluate(
+        character_id=character.id,
+        trigger=ProactiveTrigger.TICK,
+        now=_NOW,
+    )
+
+    assert attempt.outcome == ProactiveOutcome.INTENTION_SKIPPED
+    assert [intent.id for intent in judge.received_intents] == [parked.id]
+    assert repo.snapshot()[0].status == STATUS_CONSUMED
+
+
+@pytest.mark.asyncio
+async def test_unavailable_judge_preserves_resurfaced_intent() -> None:
+    repo = InMemoryDeferredIntentRepository()
+    svc = DeferredIntentService(
+        repository=repo, settings=HumanizationSettings(),
+    )
+    char_repo = InMemoryCharacterRepository()
+    character = await _build_character(char_repo)
+    parked = await repo.add(DeferredIntent.new(
+        character_id=character.id,
+        operator_id=DEFAULT_OPERATOR_ID,
+        trigger="tick",
+        inner_motive="想問候玩家近況",
+        now=_NOW - timedelta(hours=1),
+    ))
+    dispatcher, judge, _ = _dispatcher(
+        intention_decision=_judge_unavailable(),
+        deferred_service=svc,
+        character_repo=char_repo,
+    )
+
+    await dispatcher.evaluate(
+        character_id=character.id,
+        trigger=ProactiveTrigger.TICK,
+        now=_NOW,
+    )
+
+    assert [intent.id for intent in judge.received_intents] == [parked.id]
+    assert repo.snapshot()[0].status == STATUS_ACTIVE
+
+
+@pytest.mark.asyncio
 async def test_next_tick_surfaces_active_intents_and_marks_consumed_on_send() -> None:
     """End-to-end loop: first tick parks a motive; second tick the judge
     sees it in the context and approves; SENT outcome flips the row to

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import date, datetime, timezone
 
 import pytest
@@ -13,7 +14,10 @@ from kokoro_link.contracts.proactive import ProactiveContext
 from kokoro_link.domain.entities.character import Character
 from kokoro_link.domain.entities.schedule import (
     OPERATOR_CONFIRMED_LAPSED_ROLE,
+    OPERATOR_CONFIRMED_SHARED_ROLE,
     OPERATOR_INVITE_EXPIRED_ROLE,
+    OPERATOR_INVITE_PENDING_ROLE,
+    OPERATOR_WISH_ROLE,
     DailySchedule,
     ScheduleActivity,
 )
@@ -373,6 +377,9 @@ async def test_parses_revisit_at_iso_and_prompt_asks_for_it() -> None:
     # The instruction must stay a semantic judgement, not a trigger list:
     # vague timing is explicitly told to leave the field blank.
     assert "留空字串，不要硬湊一個時間" in prompt
+    assert "現在送出，或放棄" in prompt
+    assert "同一個模糊的 later／evening 理由再次續命" in prompt
+    assert "inner_motive、conversation_purpose、expected_reply" in prompt
 
 
 @pytest.mark.asyncio
@@ -632,6 +639,57 @@ def _tomorrow(activities: list[ScheduleActivity]):
     return DailySchedule.create(
         character_id="char-x", date_=_TOMORROW, activities=activities,
     )
+
+
+@pytest.mark.parametrize(
+    ("role", "expected_meaning"),
+    [
+        (OPERATOR_WISH_ROLE, "尚未在對話中提出"),
+        (OPERATOR_INVITE_PENDING_ROLE, "玩家尚未答應"),
+        (OPERATOR_CONFIRMED_SHARED_ROLE, "只證明約定"),
+        (OPERATOR_INVITE_EXPIRED_ROLE, "舊邀請已逾期"),
+        (OPERATOR_CONFIRMED_LAPSED_ROLE, "活動日期已過"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_activity_prompt_preserves_structured_operator_involvement(
+    role: str,
+    expected_meaning: str,
+) -> None:
+    model = _StubModel(
+        '{"should_consume_slot": false, "inner_motive": "", '
+        '"conversation_purpose": "", "expected_reply": "", '
+        '"risk": "", "best_timing": "later", "reason": ""}',
+    )
+    judge = LLMProactiveIntentionJudge(model=model)
+    context = replace(
+        _context(),
+        upcoming_activities=[
+            _activity("傍晚去逛書店", hour=18, role=role),
+        ],
+    )
+
+    await judge.judge(context)
+    prompt = model.captured_prompt or ""
+
+    assert f"玩家參與狀態={role}" in prompt
+    assert expected_meaning in prompt
+
+
+@pytest.mark.asyncio
+async def test_operator_wish_is_a_contact_motive_not_a_silence_command() -> None:
+    model = _StubModel(
+        '{"should_consume_slot": false, "inner_motive": "", '
+        '"conversation_purpose": "", "expected_reply": "", '
+        '"risk": "", "best_timing": "later", "reason": ""}',
+    )
+    judge = LLMProactiveIntentionJudge(model=model)
+
+    await judge.judge(_context())
+    prompt = model.captured_prompt or ""
+
+    assert "這是可以評估是否現在聯絡的動機" in prompt
+    assert "不是「必須保持沉默」的指令" in prompt
 
 
 @pytest.mark.asyncio

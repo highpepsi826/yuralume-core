@@ -25,6 +25,7 @@ from kokoro_link.contracts.proactive_intention import (
     ProactiveIntentionDecision,
 )
 from kokoro_link.domain.entities.deferred_intent import (
+    MAX_REPLACEMENT_LIFETIME_MINUTES,
     REVISIT_GRACE_MINUTES,
     STATUS_ACTIVE,
     STATUS_CONSUMED,
@@ -466,6 +467,61 @@ async def test_semantic_replacement_extends_only_for_future_revisit() -> None:
         minutes=REVISIT_GRACE_MINUTES,
     )
     assert len(repo.snapshot()) == 1
+
+
+@pytest.mark.asyncio
+async def test_repeated_concrete_replacement_cannot_cross_lifetime_cap() -> None:
+    svc, repo = _service()
+    first = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=_decision(), now=_NOW,
+    )
+    capped_alarm = _NOW + timedelta(
+        minutes=(
+            MAX_REPLACEMENT_LIFETIME_MINUTES - REVISIT_GRACE_MINUTES
+        ),
+    )
+    capped = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=_decision(inner_motive="第一次改期"),
+        revisit_at=capped_alarm,
+        now=_NOW + timedelta(hours=2),
+    )
+    rejected = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=_decision(inner_motive="再次改期"),
+        revisit_at=_NOW + timedelta(days=8),
+        now=_NOW + timedelta(hours=3),
+    )
+
+    assert first is not None and capped is not None and rejected is not None
+    assert rejected.id == first.id
+    assert rejected.created_at == _NOW
+    assert rejected.expires_at == _NOW + timedelta(
+        minutes=MAX_REPLACEMENT_LIFETIME_MINUTES,
+    )
+    assert rejected.revisit_at == capped_alarm
+    assert len(repo.snapshot()) == 1
+
+
+@pytest.mark.asyncio
+async def test_replacement_preserves_initial_appointment_beyond_cap() -> None:
+    svc, _ = _service()
+    initial_alarm = _NOW + timedelta(days=10)
+    first = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=_decision(), revisit_at=initial_alarm, now=_NOW,
+    )
+    replacement = await svc.record_if_useful(
+        character_id=_CHAR, operator_id=_OP, trigger="tick",
+        decision=_decision(inner_motive="同一念頭再次改期"),
+        revisit_at=_NOW + timedelta(days=12),
+        now=_NOW + timedelta(hours=1),
+    )
+
+    assert first is not None and replacement is not None
+    assert replacement.expires_at == first.expires_at
+    assert replacement.revisit_at == initial_alarm
 
 
 @pytest.mark.asyncio

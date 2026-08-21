@@ -20,6 +20,34 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-21 - Structured schedule involvement and bounded deferrals
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: finalized on `local/customizations`; this entry ships with the
+  implementation commit and personal-fork push.
+- Backup: `not required`; no schema migration. The authorized settings change
+  used the existing owned-character API and did not alter chats, schedules,
+  deferred-intent rows, or other characters.
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated `migrate` and
+  `app` with both runtime Compose files. The proactive intention judge now
+  receives structured player schedule-involvement states, and repeated
+  deferred motives have a bounded send-or-abandon lifecycle. The hard
+  configured cooldown after an actual proactive send remains unchanged.
+- Verification: 199 focused and adjacent backend tests passed with one
+  integration skip, including the regression that a due deferred alarm cannot
+  bypass a recent actual-send cooldown. Python compilation and the production
+  Docker build passed. The repository-wide suite remains coupled to inherited
+  storage environment values (representative collection failure: HTTP storage
+  provider without a test base URL), while the affected suites pass in
+  isolation. Browser verification confirmed the existing-character editor
+  shows the selected schedule-involvement policy and cold-start permission,
+  the normal proactive toggle remains enabled, and no console errors appeared.
+  All four Compose services are healthy; storage remains on
+  `127.0.0.1:19012`; `/health` returned `status: ok`.
+- Follow-up: `none`
+
 ### 2026-08-21 - Editable starting relationships and proactive send hardening
 
 - Status: completed

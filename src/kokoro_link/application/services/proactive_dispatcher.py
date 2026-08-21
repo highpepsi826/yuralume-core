@@ -856,16 +856,28 @@ class ProactiveDispatcher:
                 # is the character's own call.
                 if intention.judge_unavailable:
                     await self._restore_due_revisits(due_intents)
-                # HUMANIZATION_ROADMAP §3.4 — park the motive so the
-                # next tick can re-evaluate timing instead of forgetting
-                # an authentic urge after one bad moment.
-                await self._record_deferred_intent(
-                    character_id=character_id,
-                    trigger=trigger,
-                    decision=intention,
-                    local_tz=operator_tz,
-                    now=when,
-                )
+                elif (
+                    context.deferred_intents
+                    and not intention.inner_motive.strip()
+                ):
+                    # A real judgement that returns no motive deliberately
+                    # abandons the resurfaced thoughts.  Keeping them active
+                    # would make the same "not now" reason reappear until TTL.
+                    await self._consume_deferred_intents(
+                        context.deferred_intents,
+                        now=when,
+                    )
+                else:
+                    # HUMANIZATION_ROADMAP §3.4 — park the motive so the
+                    # next tick can re-evaluate timing instead of forgetting
+                    # an authentic urge after one bad moment.
+                    await self._record_deferred_intent(
+                        character_id=character_id,
+                        trigger=trigger,
+                        decision=intention,
+                        local_tz=operator_tz,
+                        now=when,
+                    )
                 await self._release_event_seed(character_id, seed_item_id)
                 return await self._log(
                     character_id=character_id,

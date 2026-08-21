@@ -73,6 +73,15 @@ grace window on top of the alarm itself covers the gap between the
 appointment and the tick that notices it (scheduler interval, a restart,
 a night-hours block that defers the look until morning)."""
 
+MAX_REPLACEMENT_LIFETIME_MINUTES: Final = 7 * 24 * 60
+"""Absolute lifetime ceiling for replacement-driven postponements.
+
+The first stored judgement may carry a real appointment beyond this window;
+``new`` preserves that explicit commitment.  Once a row exists, however,
+repeated replacements cannot keep moving the same motive forward forever.
+Seven days covers the planner's useful schedule horizon while ensuring every
+ordinary deferred thought eventually reaches a send-or-abandon decision."""
+
 
 def normalize_semantic_text(value: str) -> str:
     """Fold whitespace and case for deferred-intent identity matching."""
@@ -234,17 +243,21 @@ class DeferredIntent:
         later judge response does not name a replacement time.
         """
         ref = _as_utc(now)
-        revisit_at = (
-            incoming.revisit_at
-            if incoming.revisit_at is not None
-            else self.revisit_at
-        )
+        revisit_at = self.revisit_at
         expires_at = self.expires_at
         if incoming.revisit_at is not None and incoming.revisit_at > ref:
-            expires_at = max(
-                expires_at,
-                incoming.revisit_at + timedelta(minutes=REVISIT_GRACE_MINUTES),
+            candidate_expiry = incoming.revisit_at + timedelta(
+                minutes=REVISIT_GRACE_MINUTES,
             )
+            replacement_ceiling = max(
+                self.expires_at,
+                self.created_at + timedelta(
+                    minutes=MAX_REPLACEMENT_LIFETIME_MINUTES,
+                ),
+            )
+            if candidate_expiry <= replacement_ceiling:
+                revisit_at = incoming.revisit_at
+                expires_at = max(expires_at, candidate_expiry)
         return _replace(
             self,
             trigger=incoming.trigger,

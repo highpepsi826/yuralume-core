@@ -25,6 +25,12 @@ from kokoro_link.contracts.proactive_intention import (
 )
 from kokoro_link.domain.entities.character import Character
 from kokoro_link.domain.entities.schedule import (
+    OPERATOR_ANY_INVOLVEMENT_ROLES,
+    OPERATOR_CONFIRMED_LAPSED_ROLE,
+    OPERATOR_CONFIRMED_SHARED_ROLE,
+    OPERATOR_INVITE_EXPIRED_ROLE,
+    OPERATOR_INVITE_PENDING_ROLE,
+    OPERATOR_WISH_ROLE,
     ScheduleActivity,
     without_expired_operator_commitments,
 )
@@ -602,7 +608,7 @@ def _schedule_lines(context: ProactiveContext) -> list[str]:
             # push a live one out of the three shown.
             schedule = without_expired_operator_commitments(raw_schedule)
             snippets = [
-                f"{to_timezone(act.start_at, context.local_tz).strftime('%H:%M')} {act.description}"
+                _describe_activity(act, prefix="", local_tz=context.local_tz)
                 for act in schedule.activities[:3]
             ]
             if snippets:
@@ -639,7 +645,46 @@ def _describe_activity(
     head = f"{prefix}：" if prefix else ""
     desc = activity.description.strip() or activity.category
     loc = f" @ {activity.location}" if activity.location else ""
-    return f"{head}{start}-{end} {desc}（{activity.category}，busy={activity.busy_score:.2f}{loc}）"
+    involvement = _describe_operator_involvement(activity)
+    return (
+        f"{head}{start}-{end} {desc}"
+        f"（{activity.category}，busy={activity.busy_score:.2f}{loc}{involvement}）"
+    )
+
+
+_OPERATOR_INVOLVEMENT_DESCRIPTIONS = {
+    OPERATOR_WISH_ROLE: (
+        "角色想邀請或把玩家列入考量，但尚未在對話中提出；"
+        "這是可評估的聯絡動機，不代表玩家已答應"
+    ),
+    OPERATOR_INVITE_PENDING_ROLE: (
+        "角色已在對話中提出邀請，但玩家尚未答應；"
+        "避免重複邀請，不可當成已約好"
+    ),
+    OPERATOR_CONFIRMED_SHARED_ROLE: (
+        "玩家已明確答應共同參與；"
+        "這只證明約定，不單獨證明玩家實際出席或已共同完成"
+    ),
+    OPERATOR_INVITE_EXPIRED_ROLE: (
+        "舊邀請已逾期且玩家從未答應；不是目前有效邀請或共同活動"
+    ),
+    OPERATOR_CONFIRMED_LAPSED_ROLE: (
+        "玩家曾答應，但活動日期已過且未確認實際參與；"
+        "不是目前約定，也不可聲稱已共同完成"
+    ),
+}
+
+
+def _describe_operator_involvement(activity: ScheduleActivity) -> str:
+    """Render the operator's structured role without inventing attendance."""
+    for ref in activity.participant_refs:
+        if (
+            ref.actor_kind == "operator"
+            and ref.role in OPERATOR_ANY_INVOLVEMENT_ROLES
+        ):
+            meaning = _OPERATOR_INVOLVEMENT_DESCRIPTIONS.get(ref.role, "")
+            return f"，玩家參與狀態={ref.role}：{meaning}"
+    return ""
 
 
 def _format_elapsed_minutes(minutes: float) -> str:
