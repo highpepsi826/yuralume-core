@@ -357,6 +357,7 @@ def build_chat_model(
             # parts (404 "No endpoints found that support image input").
             supports_vision=_config_bool(row, "supports_vision", False),
             max_tokens=_config_optional_int(row, "max_tokens"),
+            disable_streaming=_config_bool(row, "disable_streaming", False),
             disable_reasoning=_config_bool(row, "disable_reasoning", False),
             reasoning_effort=_config_optional_str(row, "reasoning_effort"),
             extra_request_params=_config_optional_json_object(

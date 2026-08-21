@@ -102,6 +102,28 @@ def test_openai_compatible_catalog_entries_expose_reasoning_fields() -> None:
         assert shared_reasoning <= keys, provider_id
 
 
+def test_openai_compatible_catalog_entries_expose_streaming_toggle() -> None:
+    from kokoro_link.infrastructure.provider_settings.catalog import (
+        catalog_by_id,
+    )
+
+    catalog = catalog_by_id()
+    # Every catalog provider whose LLM builder creates
+    # OpenAICompatibleChatModel gets the same connection-level toggle.
+    for provider_id in (
+        "openai",
+        "google_gemini",
+        "openrouter",
+        "nanogpt",
+        "deepseek",
+        "mistral",
+        "custom_openai_compatible",
+        "local_openai_compatible",
+    ):
+        keys = {f.key for f in catalog[provider_id].config_fields}
+        assert "disable_streaming" in keys, provider_id
+
+
 def test_disable_reasoning_scoped_to_local_openai_compatible() -> None:
     """disable_reasoning emits the vLLM chat_template_kwargs shape, which
     422s on Mistral and is a silent no-op on the other cloud backends — so

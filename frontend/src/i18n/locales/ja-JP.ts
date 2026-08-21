@@ -4504,6 +4504,10 @@ export const messages: MessageSchema = {
         timeout_seconds: { label: 'タイムアウト秒数', placeholder: '180' },
         supports_vision: { label: 'vision に対応' },
         max_tokens: { label: 'Max tokens', placeholder: '4096' },
+        disable_streaming: {
+          label: '上流ストリーミングを無効化',
+          hint: '上流には通常の JSON completion を送り、Yuralume では完全な返信を 1 つの chunk として受け取ります。',
+        },
         anthropic_version: { label: 'Anthropic バージョン', placeholder: '2023-06-01' },
         max_results: { label: '最大結果数', placeholder: '5' },
         search_depth: { label: '検索の深さ（basic / advanced）', placeholder: 'advanced' },

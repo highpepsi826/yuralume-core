@@ -127,6 +127,21 @@ def _verification_handler(bodies: list[dict]) -> Any:
 
 
 @pytest.mark.asyncio
+async def test_disable_streaming_sends_one_non_stream_completion() -> None:
+    """The opt-out keeps the adapter's async-stream contract but never
+    sends ``stream: true`` upstream."""
+    bodies: list[dict] = []
+    chat = _build(disable_streaming=True)
+    with _patch_transport(httpx.MockTransport(_verification_handler(bodies))):
+        chunks = [c async for c in chat.generate_stream("hi")]
+
+    assert chunks == ["full completion"]
+    assert len(bodies) == 1
+    assert "stream" not in bodies[0]
+    assert chat._quirks_for("gpt-5-mini").non_stream_fallback is False
+
+
+@pytest.mark.asyncio
 async def test_stream_verification_falls_back_to_single_chunk() -> None:
     bodies: list[dict] = []
     chat = _build()

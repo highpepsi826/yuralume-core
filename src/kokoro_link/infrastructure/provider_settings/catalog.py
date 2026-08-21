@@ -167,6 +167,16 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
         placeholder="4096",
         advanced=True,
     )
+    disable_streaming = ProviderFieldSpec(
+        key="disable_streaming",
+        label="Disable upstream streaming",
+        kind="checkbox",
+        advanced=True,
+        hint=(
+            "Send a normal JSON completion upstream and deliver it to "
+            "Yuralume as one complete chunk."
+        ),
+    )
     anthropic_version = ProviderFieldSpec(
         key="anthropic_version",
         label="Anthropic version",
@@ -392,6 +402,7 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
                 timeout_seconds,
                 supports_vision,
                 max_tokens,
+                disable_streaming,
                 response_format,
                 reasoning_effort,
                 extra_request_params,
@@ -435,6 +446,7 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
                 timeout_seconds,
                 supports_vision,
                 max_tokens,
+                disable_streaming,
                 connection_slug,
             ),
             model_catalog_mode="manual",
@@ -553,6 +565,7 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
                 response_format,
                 supports_vision,
                 max_tokens,
+                disable_streaming,
                 reasoning_effort,
                 extra_request_params,
                 strip_think_tags,
@@ -581,6 +594,7 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
                 supports_vision,
                 max_tokens,
                 timeout_seconds,
+                disable_streaming,
                 reasoning_effort,
                 extra_request_params,
                 strip_think_tags,
@@ -605,6 +619,7 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
                 default_model,
                 supports_vision,
                 max_tokens,
+                disable_streaming,
                 reasoning_effort,
                 extra_request_params,
                 strip_think_tags,
@@ -629,6 +644,7 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
                 default_model,
                 supports_vision,
                 max_tokens,
+                disable_streaming,
                 reasoning_effort,
                 extra_request_params,
                 strip_think_tags,
@@ -655,6 +671,7 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
                 video_poll_interval_seconds,
                 supports_vision,
                 max_tokens,
+                disable_streaming,
                 disable_reasoning,
                 reasoning_effort,
                 extra_request_params,
@@ -677,6 +694,7 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
                 request_dimensions,
                 supports_vision,
                 max_tokens,
+                disable_streaming,
                 disable_reasoning,
                 reasoning_effort,
                 extra_request_params,

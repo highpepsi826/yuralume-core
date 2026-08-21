@@ -4433,6 +4433,10 @@ export const messages = {
         timeout_seconds: { label: '逾時秒數', placeholder: '180' },
         supports_vision: { label: '支援 vision' },
         max_tokens: { label: 'Max tokens', placeholder: '4096' },
+        disable_streaming: {
+          label: '停用上游串流',
+          hint: '改用普通 JSON completion 呼叫上游，Yuralume 會在完整回覆完成後一次收到內容。',
+        },
         anthropic_version: { label: 'Anthropic 版本', placeholder: '2023-06-01' },
         max_results: { label: '最多結果數', placeholder: '5' },
         search_depth: { label: '搜尋深度（basic / advanced）', placeholder: 'advanced' },

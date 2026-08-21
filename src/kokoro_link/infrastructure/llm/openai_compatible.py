@@ -130,6 +130,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
         model: str,
         supports_vision: bool = False,
         max_tokens: int | None = None,
+        disable_streaming: bool = False,
         disable_reasoning: bool = False,
         reasoning_effort: str | None = None,
         extra_request_params: dict | None = None,
@@ -142,6 +143,10 @@ class OpenAICompatibleChatModel(ChatModelPort):
         self._api_key = api_key
         self._model = model
         self._max_tokens = max_tokens
+        # Some upstreams allow ordinary completions but reject ``stream:
+        # true``. Keep this opt-in so existing connections retain
+        # incremental output.
+        self._disable_streaming = disable_streaming
         # Newer OpenAI models (gpt-5+/o-series lineage) reject `max_tokens`
         # and prescribe `max_completion_tokens` in the error body. Learned
         # per instance on the first such rejection (signal-driven — no
@@ -520,6 +525,19 @@ class OpenAICompatibleChatModel(ChatModelPort):
         image_urls: Sequence[str] = (),
         model: str | None = None,
     ) -> AsyncIterator[str]:
+        if self._disable_streaming:
+            # Keep Yuralume's streaming contract intact while sending a
+            # normal JSON completion upstream. The caller receives one
+            # complete text chunk after the provider finishes generation.
+            try:
+                fallback = await self.generate(
+                    prompt, image_urls=image_urls, model=model,
+                )
+            except OpenAICompatibleResponseShapeError:
+                return
+            if isinstance(fallback, str) and fallback:
+                yield fallback
+            return
         if self._quirks_for(self._resolve_model(model)).non_stream_fallback:
             # Learned earlier that this model refuses to stream for us
             # (org-verification restriction) — go straight to the

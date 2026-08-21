@@ -4434,6 +4434,10 @@ export const messages: MessageSchema = {
         timeout_seconds: { label: 'Timeout seconds', placeholder: '180' },
         supports_vision: { label: 'Supports vision' },
         max_tokens: { label: 'Max tokens', placeholder: '4096' },
+        disable_streaming: {
+          label: 'Disable upstream streaming',
+          hint: 'Use a normal JSON completion upstream; Yuralume receives the reply as one complete chunk.',
+        },
         anthropic_version: { label: 'Anthropic version', placeholder: '2023-06-01' },
         max_results: { label: 'Max results', placeholder: '5' },
         search_depth: { label: 'Search depth (basic / advanced)', placeholder: 'advanced' },

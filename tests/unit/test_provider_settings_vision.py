@@ -132,6 +132,34 @@ def test_openai_compatible_explicit_false_vision(monkeypatch) -> None:
     assert model.supports_vision is False
 
 
+def test_openai_compatible_explicit_disable_streaming(monkeypatch) -> None:
+    _configure_env(monkeypatch)
+    app = create_app()
+    client = TestClient(app)
+
+    created = client.post(
+        "/api/v1/admin/providers",
+        json={
+            "provider": "custom_openai_compatible",
+            "label": "Custom non-stream",
+            "enabled": True,
+            "capabilities": ["llm"],
+            "config": {
+                "base_url": "https://llm.example.test/v1",
+                "default_model": "custom-chat",
+                "disable_streaming": True,
+            },
+            "secret": {"api_key": "sk-secret"},
+        },
+    )
+    assert created.status_code == 201
+
+    model = app.state.container.model_registry.resolve(
+        "custom_openai_compatible",
+    )
+    assert model._disable_streaming is True
+
+
 def test_anthropic_absent_vision_key_defaults_true(monkeypatch) -> None:
     _configure_env(monkeypatch)
     app = create_app()
