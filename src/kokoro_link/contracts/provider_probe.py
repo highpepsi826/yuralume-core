@@ -59,6 +59,25 @@ class ProbeCheck:
     latency_ms: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class PayloadDiagnosticCheck:
+    """One intentionally-shaped request in the admin payload diagnostic.
+
+    This is separate from ``ProbeCheck`` because the diagnostic needs to
+    expose the request shape (field names only) and the exact fields removed
+    between attempts. It never carries a prompt, response body beyond the
+    sanitized short detail, or any credential value.
+    """
+
+    name: str
+    ok: bool
+    status_code: int | None
+    detail: str
+    removed_fields: tuple[str, ...] = ()
+    payload_keys: tuple[str, ...] = ()
+    latency_ms: int = 0
+
+
 async def run_probe_check(
     action: str,
     check: Callable[[], Awaitable[tuple[bool, str]]],

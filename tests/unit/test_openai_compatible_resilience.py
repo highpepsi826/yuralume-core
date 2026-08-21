@@ -97,6 +97,96 @@ def _sse_ok(text: str = "ok") -> httpx.Response:
     )
 
 
+@pytest.mark.asyncio
+async def test_payload_diagnostic_progressively_removes_fields_and_stops_on_success() -> None:
+    """The admin diagnostic exposes the first compatible request shape.
+
+    The handler rejects every candidate that still carries one of the
+    optional knobs, so the test proves both cumulative removal and the
+    no-more-requests-after-success guarantee.
+    """
+
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "gpt-5-mini"}]})
+        body = json.loads(request.content.decode("utf-8"))
+        bodies.append(body)
+        if any(
+            key in body
+            for key in ("max_tokens", "reasoning_effort", "chat_template_kwargs", "foo")
+        ) or body.get("stream") is False:
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": "Upstream request failed",
+                        "type": "invalid_request_error",
+                    },
+                },
+            )
+        return _chat_ok()
+
+    model = _build(
+        max_tokens=64,
+        disable_reasoning=True,
+        reasoning_effort="high",
+        extra_request_params={"foo": "bar"},
+    )
+    checks = await model.diagnose_payload(
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert checks[0].name == "model_list"
+    chat_checks = checks[1:]
+    assert [check.name for check in chat_checks] == [
+        "runtime_non_stream",
+        "explicit_stream_false",
+        "without_max_tokens",
+        "without_reasoning",
+        "without_extra_request_params",
+    ]
+    assert chat_checks[-1].ok is True
+    assert chat_checks[-1].removed_fields == ("foo",)
+    assert "foo" not in chat_checks[-1].payload_keys
+    # No request was sent after the first successful candidate.
+    assert len(bodies) == len(chat_checks)
+    assert "stream" not in bodies[0]
+    assert bodies[0]["max_tokens"] == 1
+    assert bodies[1]["stream"] is False
+
+
+@pytest.mark.asyncio
+async def test_payload_diagnostic_reports_generic_upstream_400_without_adapting() -> None:
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": []})
+        bodies.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": "Upstream request failed",
+                    "type": "invalid_request_error",
+                },
+            },
+        )
+
+    model = _build()
+    checks = await model.diagnose_payload(
+        transport=httpx.MockTransport(handler),
+    )
+
+    chat_checks = checks[1:]
+    assert chat_checks
+    assert all(check.ok is False for check in chat_checks)
+    assert all(check.status_code == 400 for check in chat_checks)
+    assert len(bodies) == len(chat_checks)
+
+
 # ---------------------------------------------------------------------------
 # 1. stream-verification fallback (org must be verified to stream)
 # ---------------------------------------------------------------------------

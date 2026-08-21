@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
 
 import httpx
@@ -2038,3 +2039,246 @@ def test_sync_without_db_rows_leaves_env_wired_registrations_alone(
     asyncio.run(sync_provider_connections(container))
 
     assert container.image_profile_registry.profile_ids == ["env-wired"]
+
+
+# ---------------------------------------------------------------------------
+# Admin payload diagnostic routes
+# ---------------------------------------------------------------------------
+
+
+def test_payload_diagnostic_draft_progressively_removes_fields_without_writes(
+    monkeypatch,
+) -> None:
+    """The route exposes the adapter-owned progressive test and is read-only."""
+    _configure_env(monkeypatch)
+
+    import kokoro_link.application.services.provider_connection_service as pcs
+    from kokoro_link.infrastructure.provider_settings.live_probe import (
+        diagnose_llm_payload as real_diagnose_llm_payload,
+    )
+
+    bodies: list[dict] = []
+    transport = httpx.MockTransport(
+        lambda request: _payload_diagnostic_handler(request, bodies),
+    )
+
+    async def diagnose_with_transport(**kwargs):
+        return await real_diagnose_llm_payload(
+            transport=transport,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(pcs, "diagnose_llm_payload", diagnose_with_transport)
+    client = TestClient(create_app())
+    before = client.get("/api/v1/admin/providers").json()
+
+    response = client.post(
+        "/api/v1/admin/providers/payload-diagnostic-draft",
+        json={
+            "provider": "openai",
+            "enabled": True,
+            "capabilities": ["llm"],
+            "config": {
+                "base_url": "https://api.example.invalid/v1",
+                "default_model": "gpt-5-mini",
+                "max_tokens": 64,
+                "reasoning_effort": "high",
+                "extra_request_params": '{"foo":"bar"}',
+            },
+            "secret": {"api_key": "sk-route-secret"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["model"] == "gpt-5-mini"
+    assert [check["name"] for check in body["checks"]] == [
+        "model_list",
+        "runtime_non_stream",
+        "explicit_stream_false",
+        "without_max_tokens",
+        "without_reasoning",
+        "without_extra_request_params",
+    ]
+    assert body["checks"][-1]["ok"] is True
+    assert body["checks"][-1]["removed_fields"] == ["foo"]
+    # The upstream error deliberately echoes the key; neither the adapter nor
+    # the service boundary may let it reach the admin response.
+    assert "sk-route-secret" not in response.text
+    assert "[redacted]" in response.text
+    assert len(bodies) == len(body["checks"]) - 1  # model_list is a GET
+    assert client.get("/api/v1/admin/providers").json() == before
+
+
+def _payload_diagnostic_handler(
+    request: httpx.Request,
+    bodies: list[dict],
+) -> httpx.Response:
+    if request.url.path.endswith("/models"):
+        return httpx.Response(200, json={"data": [{"id": "gpt-5-mini"}]})
+    if not request.url.path.endswith("/chat/completions"):
+        raise AssertionError(request.url.path)
+    payload = json.loads(request.content.decode("utf-8"))
+    bodies.append(payload)
+    if (
+        payload.get("stream") is False
+        or any(
+            key in payload
+            for key in ("max_tokens", "reasoning_effort", "foo")
+        )
+    ):
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": "Upstream request failed for sk-route-secret",
+                    "type": "invalid_request_error",
+                },
+            },
+        )
+    return httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": "ok"}}]},
+    )
+
+
+def test_saved_payload_diagnostic_reuses_secret_and_does_not_update_row(
+    monkeypatch,
+) -> None:
+    _configure_env(monkeypatch)
+
+    import kokoro_link.application.services.provider_connection_service as pcs
+    from kokoro_link.contracts.provider_probe import PayloadDiagnosticCheck
+
+    seen: list[dict] = []
+
+    async def fake_diagnostic(**kwargs):
+        seen.append(kwargs)
+        return [
+            PayloadDiagnosticCheck(
+                name="runtime_non_stream",
+                ok=True,
+                status_code=200,
+                detail="HTTP success",
+            ),
+        ]
+
+    monkeypatch.setattr(pcs, "diagnose_llm_payload", fake_diagnostic)
+    client = TestClient(create_app())
+    created = client.post(
+        "/api/v1/admin/providers",
+        json={
+            "provider": "openai",
+            "label": "Saved diagnostic row",
+            "enabled": True,
+            "capabilities": ["llm"],
+            "config": {"default_model": "gpt-5-mini"},
+            "secret": {"api_key": "sk-saved-diagnostic"},
+        },
+    )
+    assert created.status_code == 201
+    connection_id = created.json()["id"]
+    before = client.get(f"/api/v1/admin/providers/{connection_id}").json()
+
+    response = client.post(
+        f"/api/v1/admin/providers/{connection_id}/payload-diagnostic",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert seen and seen[0]["secret"] == {"api_key": "sk-saved-diagnostic"}
+    after = client.get(f"/api/v1/admin/providers/{connection_id}").json()
+    assert after == before
+    assert "sk-saved-diagnostic" not in response.text
+
+
+def test_payload_diagnostic_sanitizes_provider_detail_and_rejects_invalid_draft(
+    monkeypatch,
+) -> None:
+    _configure_env(monkeypatch)
+
+    import kokoro_link.application.services.provider_connection_service as pcs
+    from kokoro_link.contracts.provider_probe import PayloadDiagnosticCheck
+
+    calls = 0
+
+    async def leaking_diagnostic(**kwargs):
+        nonlocal calls
+        calls += 1
+        return [
+            PayloadDiagnosticCheck(
+                name="runtime_non_stream",
+                ok=False,
+                status_code=400,
+                detail=f"provider echoed {kwargs['secret']['api_key']}",
+            ),
+        ]
+
+    monkeypatch.setattr(pcs, "diagnose_llm_payload", leaking_diagnostic)
+    client = TestClient(create_app())
+
+    redacted = client.post(
+        "/api/v1/admin/providers/payload-diagnostic-draft",
+        json={
+            "provider": "openai",
+            "enabled": True,
+            "capabilities": ["llm"],
+            "config": {"default_model": "gpt-5-mini"},
+            "secret": {"api_key": "arbitrary-secret-value"},
+        },
+    )
+    assert redacted.status_code == 200
+    assert "arbitrary-secret-value" not in redacted.text
+    assert "[redacted]" in redacted.text
+    assert calls == 1
+
+    invalid = client.post(
+        "/api/v1/admin/providers/payload-diagnostic-draft",
+        json={
+            "provider": "openai",
+            "enabled": True,
+            "capabilities": ["llm"],
+            "config": {"default_model": "gpt-5-mini"},
+            "secret": {},
+        },
+    )
+    assert invalid.status_code == 200
+    invalid_body = invalid.json()
+    assert invalid_body["ok"] is False
+    assert [check["name"] for check in invalid_body["checks"]] == [
+        "config_check",
+    ]
+    assert invalid_body["checks"][0]["status_code"] is None
+    assert calls == 1  # validation failed before any provider hook/network
+
+
+def test_payload_diagnostic_draft_connection_mismatch_is_rejected(monkeypatch) -> None:
+    _configure_env(monkeypatch)
+    client = TestClient(create_app())
+    created = client.post(
+        "/api/v1/admin/providers",
+        json={
+            "provider": "openai",
+            "label": "Mismatch source",
+            "enabled": True,
+            "capabilities": ["llm"],
+            "config": {"default_model": "gpt-5-mini"},
+            "secret": {"api_key": "sk-mismatch"},
+        },
+    )
+    assert created.status_code == 201
+
+    response = client.post(
+        "/api/v1/admin/providers/payload-diagnostic-draft",
+        json={
+            "provider": "openrouter",
+            "enabled": True,
+            "capabilities": ["llm"],
+            "config": {"default_model": "openai/gpt-5-mini"},
+            "secret": {},
+            "connection_id": created.json()["id"],
+        },
+    )
+    assert response.status_code == 400
+    assert "does not match" in response.json()["detail"]

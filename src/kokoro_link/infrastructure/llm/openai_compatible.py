@@ -14,6 +14,7 @@ from kokoro_link.contracts.llm import (
 )
 from kokoro_link.contracts.provider_probe import (
     PROBE_CHAT_PROMPT,
+    PayloadDiagnosticCheck,
     ProbeCheck,
     probe_http_client,
     probe_http_error_detail,
@@ -23,6 +24,10 @@ from kokoro_link.infrastructure.http_error_logging import log_http_error_respons
 from kokoro_link.infrastructure.llm.think_tag_filter import (
     strip_think_tags_stream,
     strip_think_tags_text,
+)
+from kokoro_link.infrastructure.security.error_sanitizer import (
+    redact_values,
+    sanitize_error,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -423,6 +428,236 @@ class OpenAICompatibleChatModel(ChatModelPort):
             await run_probe_check("listed_models", list_models_check),
             await run_probe_check("chat_completion", chat_check),
         ]
+
+    async def diagnose_payload(
+        self,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        timeout_seconds: float = 15.0,
+    ) -> list[PayloadDiagnosticCheck]:
+        """Try progressively smaller non-stream request shapes.
+
+        This is deliberately separate from ``probe_chat``. The normal probe
+        follows server-prescribed adaptation and remembers the result, which
+        is correct for runtime traffic but hides the original failing shape.
+        The admin diagnostic sends each candidate exactly once, records only
+        field names and a short redacted response detail, and stops after the
+        first HTTP success to keep the investigation bounded.
+        """
+
+        model = self._resolve_model(None)
+        checks: list[PayloadDiagnosticCheck] = []
+
+        async with probe_http_client(timeout_seconds, transport) as client:
+            checks.append(
+                await self._diagnose_models_request(
+                    client,
+                    model=model,
+                ),
+            )
+
+            baseline = self._build_payload(
+                PROBE_CHAT_PROMPT,
+                stream=False,
+                model=None,
+                # Keep every diagnostic request cheap while preserving the
+                # presence/name of the configured token-limit field. The
+                # ``without_max_tokens`` candidate removes it altogether.
+                max_tokens_override=1,
+            )
+            # ``stream`` is intentionally omitted for the runtime's ordinary
+            # non-stream path. An advanced extra_request_params entry may
+            # have reintroduced it; force the diagnostic baseline to represent
+            # the setting the operator selected and test explicit false below.
+            baseline.pop("stream", None)
+
+            candidates: list[tuple[str, dict, tuple[str, ...]]] = [
+                ("runtime_non_stream", baseline, ()),
+            ]
+
+            explicit_false = dict(baseline)
+            explicit_false["stream"] = False
+            candidates.append(("explicit_stream_false", explicit_false, ()))
+
+            without_max = dict(baseline)
+            _drop_payload_keys(
+                without_max,
+                ("max_tokens", "max_completion_tokens"),
+            )
+            candidates.append(
+                (
+                    "without_max_tokens",
+                    without_max,
+                    ("max_tokens", "max_completion_tokens"),
+                ),
+            )
+
+            without_reasoning = dict(without_max)
+            _drop_payload_keys(
+                without_reasoning,
+                ("reasoning_effort", "chat_template_kwargs"),
+            )
+            candidates.append(
+                (
+                    "without_reasoning",
+                    without_reasoning,
+                    ("reasoning_effort", "chat_template_kwargs"),
+                ),
+            )
+
+            without_extra = dict(without_reasoning)
+            extra_keys = tuple(
+                key for key in (self._extra_request_params or {})
+                if isinstance(key, str)
+            )
+            _drop_payload_keys(without_extra, extra_keys)
+            candidates.append(
+                ("without_extra_request_params", without_extra, extra_keys),
+            )
+
+            without_system = dict(without_extra)
+            _remove_system_message(without_system)
+            candidates.append(
+                (
+                    "without_system_message",
+                    without_system,
+                    ("messages[system]",),
+                ),
+            )
+
+            merged_system = dict(without_extra)
+            _merge_system_message(merged_system)
+            candidates.append(
+                (
+                    "system_merged_into_user",
+                    merged_system,
+                    ("messages[system]",),
+                ),
+            )
+
+            minimal = {
+                "model": model,
+                "messages": [{"role": "user", "content": PROBE_CHAT_PROMPT}],
+            }
+            candidates.append(
+                (
+                    "minimal_model_messages",
+                    minimal,
+                    (
+                        "max_tokens",
+                        "max_completion_tokens",
+                        "reasoning_effort",
+                        "chat_template_kwargs",
+                        "extra_request_params",
+                        "messages[system]",
+                    ),
+                ),
+            )
+
+            seen: set[str] = set()
+            for name, payload, removed_fields in candidates:
+                fingerprint = json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                check = await self._diagnose_chat_request(
+                    client,
+                    name=name,
+                    payload=payload,
+                    removed_fields=removed_fields,
+                )
+                checks.append(check)
+                if check.ok:
+                    break
+
+        return checks
+
+    async def _diagnose_models_request(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        model: str,
+    ) -> PayloadDiagnosticCheck:
+        start = time.perf_counter()
+        try:
+            response = await client.get(
+                f"{self._base_url}/models",
+                headers=self._build_headers(),
+            )
+            if response.status_code >= 400:
+                detail = probe_http_error_detail(response)
+            else:
+                try:
+                    ids = _parse_model_ids(response.json())
+                except ValueError:
+                    ids = []
+                    detail = "models endpoint returned non-JSON response"
+                else:
+                    listed = "configured model listed" if model in ids else "configured model not listed"
+                    detail = f"{len(ids)} models; {listed}"
+            ok = response.status_code < 400
+            status_code: int | None = response.status_code
+        except httpx.TimeoutException:
+            ok, status_code, detail = False, None, "request timed out"
+        except httpx.HTTPError as exc:
+            ok, status_code, detail = False, None, f"connection failed: {exc}"
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        return PayloadDiagnosticCheck(
+            name="model_list",
+            ok=ok,
+            status_code=status_code,
+            detail=self._diagnostic_detail(detail),
+            payload_keys=(),
+            latency_ms=latency_ms,
+        )
+
+    async def _diagnose_chat_request(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        name: str,
+        payload: dict,
+        removed_fields: tuple[str, ...],
+    ) -> PayloadDiagnosticCheck:
+        start = time.perf_counter()
+        try:
+            response = await client.post(
+                f"{self._base_url}/chat/completions",
+                json=payload,
+                headers=self._build_headers(),
+            )
+            ok = response.status_code < 400
+            detail = (
+                "HTTP success"
+                if ok
+                else probe_http_error_detail(response)
+            )
+            status_code: int | None = response.status_code
+        except httpx.TimeoutException:
+            ok, status_code, detail = False, None, "request timed out"
+        except httpx.HTTPError as exc:
+            ok, status_code, detail = False, None, f"connection failed: {exc}"
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        return PayloadDiagnosticCheck(
+            name=name,
+            ok=ok,
+            status_code=status_code,
+            detail=self._diagnostic_detail(detail),
+            removed_fields=tuple(removed_fields),
+            payload_keys=tuple(str(key) for key in payload),
+            latency_ms=latency_ms,
+        )
+
+    def _diagnostic_detail(self, detail: str) -> str:
+        cleaned = sanitize_error(str(detail))
+        if self._api_key:
+            cleaned = redact_values(cleaned, (self._api_key,))
+        return cleaned[:500]
 
     async def generate(
         self,
@@ -995,6 +1230,53 @@ def _pydantic_extra_forbidden_locs(body: str) -> list[str]:
         if isinstance(loc, list) and loc and isinstance(loc[-1], str):
             names.append(loc[-1])
     return names
+
+
+def _drop_payload_keys(payload: dict, keys: Sequence[str]) -> None:
+    """Remove named top-level fields from a diagnostic candidate."""
+
+    for key in keys:
+        payload.pop(key, None)
+
+
+def _remove_system_message(payload: dict) -> None:
+    """Remove the system turn without mutating another candidate."""
+
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return
+    payload["messages"] = [
+        message
+        for message in messages
+        if not isinstance(message, dict) or message.get("role") != "system"
+    ]
+
+
+def _merge_system_message(payload: dict) -> None:
+    """Carry the system instruction into the first user turn."""
+
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return
+    system_content = ""
+    remaining: list[dict] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") == "system" and not system_content:
+            value = message.get("content")
+            system_content = str(value) if value else ""
+            continue
+        remaining.append(message)
+    if not system_content or not remaining:
+        payload["messages"] = remaining
+        return
+    first = dict(remaining[0])
+    content = first.get("content")
+    if isinstance(content, str):
+        first["content"] = f"{system_content}\n\n{content}"
+    remaining[0] = first
+    payload["messages"] = remaining
 
 
 def _named_unrecognized_params(

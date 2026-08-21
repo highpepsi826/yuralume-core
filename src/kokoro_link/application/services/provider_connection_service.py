@@ -19,8 +19,10 @@ from kokoro_link.infrastructure.provider_settings.catalog import (
 )
 from kokoro_link.infrastructure.provider_settings.live_probe import (
     ProbeReport,
+    diagnose_llm_payload,
     probe_connection,
 )
+from kokoro_link.contracts.provider_probe import PayloadDiagnosticCheck
 from kokoro_link.infrastructure.provider_settings.runtime_ids import (
     CONNECTION_SLUG_FIELD_KEY,
     IDENTITY_SCOPED_CAPABILITIES,
@@ -29,6 +31,7 @@ from kokoro_link.infrastructure.provider_settings.runtime_ids import (
     runtime_provider_id,
 )
 from kokoro_link.infrastructure.security.error_sanitizer import (
+    redact_values as _redact_values,
     sanitize_error as _sanitize_error,
 )
 from kokoro_link.infrastructure.security.provider_secret_cipher import (
@@ -75,6 +78,48 @@ class ProviderConnectionTestOutcome:
 
     connection: ProviderConnectionView
     probes: tuple[ProbeReport, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderPayloadDiagnosticResult:
+    """Admin-only result for progressive OpenAI-compatible payload tests."""
+
+    ok: bool
+    model: str
+    checks: tuple[PayloadDiagnosticCheck, ...] = ()
+
+
+def _redact_payload_checks(
+    checks: tuple[PayloadDiagnosticCheck, ...],
+    secret: dict[str, Any],
+) -> tuple[PayloadDiagnosticCheck, ...]:
+    """Keep adapter-controlled diagnostic details safe at the API boundary.
+
+    OpenAI-compatible adapters already scrub their own response snippets, but
+    this service may also be given a provider-specific adapter. The diagnostic
+    endpoint must never rely on every adapter remembering the same redaction
+    rule, so sanitize and exact-redact the detail one final time here.
+    """
+    known_secrets = tuple(
+        value for value in secret.values() if isinstance(value, str)
+    )
+    redacted: list[PayloadDiagnosticCheck] = []
+    for check in checks:
+        detail = _sanitize_error(str(check.detail))
+        if known_secrets:
+            detail = _redact_values(detail, known_secrets)
+        redacted.append(
+            PayloadDiagnosticCheck(
+                name=check.name,
+                ok=check.ok,
+                status_code=check.status_code,
+                detail=detail[:500],
+                removed_fields=check.removed_fields,
+                payload_keys=check.payload_keys,
+                latency_ms=check.latency_ms,
+            ),
+        )
+    return tuple(redacted)
 
 
 def _config_check_failure(error: str) -> tuple[ProbeReport, ...]:
@@ -483,6 +528,140 @@ class ProviderConnectionService:
             last_validated_at=None if error else datetime.now(timezone.utc),
             last_validation_error=error,
             probes=probes,
+        )
+
+    async def diagnose_draft_payload(
+        self,
+        *,
+        provider: str,
+        enabled: bool,
+        capabilities: list[str],
+        config: dict[str, Any] | None = None,
+        secret: dict[str, Any] | None = None,
+        connection_id: str | None = None,
+    ) -> ProviderPayloadDiagnosticResult:
+        """Run the progressive payload test without changing any row.
+
+        ``connection_id`` is optional and is used only as a secret source
+        when an edit form leaves the stored API key blank. The draft config
+        still wins, so an operator can change the endpoint/model and test it
+        before saving.
+        """
+
+        stored_secret: dict[str, Any] = {}
+        has_existing_secret = False
+        if connection_id:
+            current = await self._get_required(connection_id)
+            if current.provider != provider:
+                raise ProviderConnectionError(
+                    "connection provider does not match the diagnostic draft",
+                )
+            has_existing_secret = bool(current.encrypted_secret)
+            if has_existing_secret:
+                try:
+                    stored_secret = self._cipher.decrypt(current.encrypted_secret)
+                except ProviderSecretCipherError as exc:
+                    raise ProviderConnectionError(
+                        "stored provider secret could not be decrypted",
+                    ) from exc
+        return await self._diagnose_payload_values(
+            provider=provider,
+            enabled=enabled,
+            capabilities=capabilities,
+            config=config or {},
+            secret=secret or stored_secret,
+            has_existing_secret=has_existing_secret,
+        )
+
+    async def diagnose_saved_payload(
+        self,
+        connection_id: str,
+    ) -> ProviderPayloadDiagnosticResult:
+        """Run the progressive payload test against a saved connection."""
+
+        row = await self._get_required(connection_id)
+        if row.encrypted_secret:
+            try:
+                secret = self._cipher.decrypt(row.encrypted_secret)
+            except ProviderSecretCipherError as exc:
+                raise ProviderConnectionError(
+                    "stored provider secret could not be decrypted",
+                ) from exc
+        else:
+            secret = {}
+        return await self._diagnose_payload_values(
+            provider=row.provider,
+            enabled=row.enabled,
+            capabilities=list(row.capabilities),
+            config=dict(row.config),
+            secret=secret,
+            has_existing_secret=bool(row.encrypted_secret),
+        )
+
+    async def _diagnose_payload_values(
+        self,
+        *,
+        provider: str,
+        enabled: bool,
+        capabilities: list[str],
+        config: dict[str, Any],
+        secret: dict[str, Any],
+        has_existing_secret: bool,
+    ) -> ProviderPayloadDiagnosticResult:
+        """Validate and dispatch one no-write payload diagnostic."""
+
+        effective_secret = dict(secret)
+        try:
+            entry = self._require_catalog(provider)
+            cleaned_capabilities = self._clean_capabilities(entry, capabilities)
+            cleaned_config = self._clean_config(
+                entry,
+                self._normalize_legacy_config(entry, config),
+                fields=entry.config_fields,
+                payload_name="config",
+            )
+            cleaned_secret = self._clean_config(
+                entry,
+                secret,
+                fields=entry.auth_fields,
+                payload_name="secret",
+            )
+            effective_secret = cleaned_secret
+            self._validate_required(
+                entry,
+                config=cleaned_config,
+                secret=cleaned_secret,
+                has_existing_secret=has_existing_secret,
+                enabled=enabled,
+                capabilities=cleaned_capabilities,
+            )
+            if "llm" not in cleaned_capabilities:
+                raise ProviderConnectionError(
+                    "payload diagnostic requires the llm capability",
+                )
+            checks = tuple(
+                await diagnose_llm_payload(
+                    entry=entry,
+                    config=cleaned_config,
+                    secret=cleaned_secret,
+                ),
+            )
+        except Exception as exc:
+            checks = (
+                PayloadDiagnosticCheck(
+                    name="config_check",
+                    ok=False,
+                    status_code=None,
+                    detail=_sanitize_error(str(exc) or exc.__class__.__name__),
+                ),
+            )
+            cleaned_config = config
+        checks = _redact_payload_checks(checks, effective_secret)
+        model = str(cleaned_config.get("default_model") or "")
+        return ProviderPayloadDiagnosticResult(
+            ok=any(check.ok for check in checks if check.name != "model_list"),
+            model=model,
+            checks=checks,
         )
 
     async def _get_required(self, connection_id: str) -> ProviderConnection:

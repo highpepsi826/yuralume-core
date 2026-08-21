@@ -48,7 +48,7 @@ from typing import Any
 
 import httpx
 
-from kokoro_link.contracts.provider_probe import ProbeCheck
+from kokoro_link.contracts.provider_probe import PayloadDiagnosticCheck, ProbeCheck
 from kokoro_link.contracts.provider_settings import ProviderConnection
 from kokoro_link.infrastructure.provider_settings import adapter_builders
 from kokoro_link.infrastructure.provider_settings.catalog import ProviderCatalogEntry
@@ -160,6 +160,46 @@ async def probe_connection(
             for r in reports
         ]
     return reports
+
+
+async def diagnose_llm_payload(
+    *,
+    entry: ProviderCatalogEntry,
+    config: dict[str, Any],
+    secret: dict[str, Any],
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> list[PayloadDiagnosticCheck]:
+    """Run the admin-only progressive payload diagnostic for an LLM row.
+
+    The adapter builder remains the single owner of the actual request
+    shape. This orchestrator only selects the LLM capability and passes the
+    optional test transport through; normal runtime probes and chat traffic
+    are never involved.
+    """
+
+    if entry.id == "yuralume_cloud":
+        return [
+            PayloadDiagnosticCheck(
+                name="unsupported",
+                ok=False,
+                status_code=None,
+                detail="payload diagnostic is only available for direct OpenAI-compatible LLM providers",
+            ),
+        ]
+    model = adapter_builders.build_chat_model(
+        _draft_row(entry, config, "llm"), secret,
+    )
+    hook = getattr(model, "diagnose_payload", None)
+    if model is None or not callable(hook):
+        return [
+            PayloadDiagnosticCheck(
+                name="unsupported",
+                ok=False,
+                status_code=None,
+                detail=f"provider {entry.id!r} has no payload diagnostic",
+            ),
+        ]
+    return await hook(transport=transport, timeout_seconds=DEFAULT_TIMEOUT_SECONDS)
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,34 @@ database rows.
 
 ## Current Baseline
 
+### 2026-08-22 - Progressive OpenAI-compatible payload diagnostics
+
+- Status: deployed
+- Type: local customization
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: source changes remain in the working tree; no commit or push was
+  requested.
+- Backup: `not required`; the diagnostic is read-only and makes no schema or
+  provider-row changes.
+- Deployment: rebuilt `yuralume-local/app:custom` from the local source and
+  recreated only the existing `yuralume-app` container. The admin Provider
+  Settings page now has a `Payload diagnostic`
+  action for draft and saved LLM connections. It checks `/models`, then sends
+  bounded non-stream chat shapes, progressively removing max-token,
+  reasoning, extra-parameter, and system-message fields. It stops at the
+  first success; each chat probe is capped at 1 token, never returns payload
+  contents or secrets, and reports the actual HTTP status (or `FAIL` for
+  transport failures).
+- Verification: 99 focused backend tests passed; provider-settings frontend
+  API tests (6) passed, i18n checks passed, and the production frontend/PWA
+  build passed. Runtime `/health` returned `status: ok`; all four Compose
+  services were healthy and the OpenAPI document exposed both diagnostic
+  routes.
+- Follow-up: hard-refresh the browser if its PWA service worker still serves
+  the previous bundle, open Provider Settings, run the diagnostic against the
+  failing source, and use the first successful shape to adjust the provider
+  configuration.
+
 ### 2026-08-22 - Optional non-streaming OpenAI-compatible requests
 
 - Status: partial

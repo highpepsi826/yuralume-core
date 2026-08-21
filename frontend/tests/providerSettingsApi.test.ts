@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import axios from 'axios'
 import {
+  diagnoseDraftProviderPayload,
+  diagnoseProviderPayload,
   testDraftProviderConnection,
   testProviderConnection,
   type ProbeReport,
@@ -129,6 +131,44 @@ describe('provider settings test API — deep flag & probes', () => {
     expect(mockedAxios.post).toHaveBeenCalledWith(
       '/api/v1/admin/providers/conn%2F2/test',
       { deep: true },
+    )
+  })
+
+  it('posts a draft payload diagnostic and can reuse the saved connection secret', async () => {
+    const payload = draftPayload()
+    const result = {
+      ok: false,
+      model: 'gpt-5.6-sol',
+      checks: [
+        {
+          name: 'runtime_non_stream',
+          ok: false,
+          status_code: 400,
+          detail: 'HTTP 400 Bad Request',
+          removed_fields: [],
+          payload_keys: ['model', 'messages'],
+          latency_ms: 40,
+        },
+      ],
+    }
+    mockedAxios.post.mockResolvedValueOnce({ data: result })
+
+    await expect(diagnoseDraftProviderPayload(payload, 'conn-1')).resolves.toEqual(result)
+
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      '/api/v1/admin/providers/payload-diagnostic-draft',
+      { ...payload, connection_id: 'conn-1' },
+    )
+  })
+
+  it('url-encodes the saved connection id for a payload diagnostic', async () => {
+    const result = { ok: true, model: 'gpt-5.6-sol', checks: [] }
+    mockedAxios.post.mockResolvedValueOnce({ data: result })
+
+    await expect(diagnoseProviderPayload('conn/2')).resolves.toEqual(result)
+
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      '/api/v1/admin/providers/conn%2F2/payload-diagnostic',
     )
   })
 })

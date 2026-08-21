@@ -20,6 +20,8 @@ import {
 } from '@/utils/catalogLabels'
 import {
   createProviderConnection,
+  diagnoseDraftProviderPayload,
+  diagnoseProviderPayload,
   deleteProviderConnection,
   listComfyuiCheckpoints,
   listProviderCatalog,
@@ -33,6 +35,8 @@ import {
   type ProviderConnection,
   type ProviderConnectionPayload,
   type ProviderFieldSpec,
+  type PayloadDiagnosticCheck,
+  type ProviderPayloadDiagnosticResult,
 } from '@/utils/api/providerSettings'
 import {
   fieldsForCapability,
@@ -65,16 +69,25 @@ const saving = ref(false)
 const testingId = ref<string | null>(null)
 const testingCapability = ref<string | null>(null)
 const deepTestingCapability = ref<string | null>(null)
+const diagnosingPayloadCapability = ref<string | null>(null)
+const diagnosingPayloadId = ref<string | null>(null)
 const editingId = ref<string | null>(null)
 
 // Per-capability live-probe results from the draft test-draft route.
 // Keyed by capability; cleared whenever the draft provider changes so a
 // stale card never shows probes from a previous provider.
 const capabilityProbes = reactive<Record<string, ProbeReport[]>>({})
+const payloadDiagnostics = reactive<Record<string, ProviderPayloadDiagnosticResult>>({})
 
 function clearCapabilityProbes(): void {
   for (const key of Object.keys(capabilityProbes)) {
     delete capabilityProbes[key]
+  }
+}
+
+function clearPayloadDiagnostics(): void {
+  for (const key of Object.keys(payloadDiagnostics)) {
+    delete payloadDiagnostics[key]
   }
 }
 
@@ -307,6 +320,7 @@ watch(
 function resetFormForCurrentProvider(): void {
   const entry = selectedCatalog.value
   clearCapabilityProbes()
+  clearPayloadDiagnostics()
   form.shared = {}
   form.perCapability = {}
   form.secret = {}
@@ -385,6 +399,7 @@ function startCreate(providerId?: string): void {
 
 function startEdit(row: ProviderConnection): void {
   clearCapabilityProbes()
+  clearPayloadDiagnostics()
   editingId.value = row.id
   form.provider = row.provider
   form.enabled = row.enabled
@@ -549,6 +564,23 @@ function probeActionLabel(action: string): string {
   return label === key ? action : label
 }
 
+function payloadDiagnosticName(name: string): string {
+  const key = `admin.providerSettings.payloadDiagnosticNames.${name}`
+  const label = t(key)
+  return label === key ? name : label
+}
+
+function payloadDiagnosticFields(fields: string[]): string {
+  return fields.length
+    ? fields.join(', ')
+    : t('admin.providerSettings.payloadDiagnosticNone')
+}
+
+function payloadDiagnosticStatusMark(check: PayloadDiagnosticCheck): string {
+  if (check.ok) return 'OK'
+  return check.status_code === null ? 'FAIL' : String(check.status_code)
+}
+
 // Shared runner for the two capability-card test buttons (shallow + deep).
 // Stores the per-capability probe list for the inline results panel and
 // keeps the existing pass/fail notification.
@@ -583,6 +615,35 @@ async function runCapabilityProbe(capability: string, deep: boolean): Promise<vo
 
 function testCapabilityCard(capability: string): Promise<void> {
   return runCapabilityProbe(capability, false)
+}
+
+async function diagnosePayloadCard(capability: string): Promise<void> {
+  if (capability !== 'llm') return
+  diagnosingPayloadCapability.value = capability
+  try {
+    const result = await diagnoseDraftProviderPayload(
+      payloadFor(capability),
+      editingId.value,
+    )
+    payloadDiagnostics[capability] = result
+    notification[result.ok ? 'success' : 'warning']({
+      message: result.ok
+        ? t('admin.providerSettings.payloadDiagnosticPassed')
+        : t('admin.providerSettings.payloadDiagnosticFoundIssue'),
+      description: t('admin.providerSettings.payloadDiagnosticRequests', {
+        count: result.checks.filter(check => check.name !== 'model_list').length,
+      }),
+      duration: 5,
+    })
+  } catch (err) {
+    notification.error({
+      message: t('admin.providerSettings.errors.testFailed'),
+      description: err instanceof Error ? err.message : String(err),
+      duration: 4,
+    })
+  } finally {
+    diagnosingPayloadCapability.value = null
+  }
 }
 
 // Deep test really generates one small image through the provider, so it
@@ -643,6 +704,21 @@ async function test(row: ProviderConnection): Promise<void> {
     })
   } finally {
     testingId.value = null
+  }
+}
+
+async function diagnoseSavedPayload(row: ProviderConnection): Promise<void> {
+  diagnosingPayloadId.value = row.id
+  try {
+    payloadDiagnostics[`saved:${row.id}`] = await diagnoseProviderPayload(row.id)
+  } catch (err) {
+    notification.error({
+      message: t('admin.providerSettings.errors.testFailed'),
+      description: err instanceof Error ? err.message : String(err),
+      duration: 4,
+    })
+  } finally {
+    diagnosingPayloadId.value = null
   }
 }
 
@@ -953,6 +1029,16 @@ onMounted(loadAll)
                             {{ t('admin.providerSettings.actions.testDraft') }}
                           </UiButton>
                           <UiButton
+                            v-if="capability === 'llm'"
+                            size="sm"
+                            variant="ghost"
+                            :loading="diagnosingPayloadCapability === capability"
+                            type="button"
+                            @click="diagnosePayloadCard(capability)"
+                          >
+                            {{ t('admin.providerSettings.actions.payloadDiagnostic') }}
+                          </UiButton>
+                          <UiButton
                             v-if="capability === 'image'"
                             size="sm"
                             variant="ghost"
@@ -1100,6 +1186,38 @@ onMounted(loadAll)
                         </li>
                       </ul>
                     </div>
+
+                    <div
+                      v-if="payloadDiagnostics[capability]?.checks?.length"
+                      class="provider-settings__probes provider-settings__payload-diagnostic"
+                    >
+                      <p class="provider-settings__probes-title">
+                        {{ t('admin.providerSettings.payloadDiagnosticTitle') }}
+                      </p>
+                      <ul class="provider-settings__probe-list">
+                        <li
+                          v-for="check in payloadDiagnostics[capability].checks"
+                          :key="`payload-${capability}-${check.name}`"
+                          class="provider-settings__probe"
+                        >
+                          <UiBadge :variant="check.ok ? 'success' : 'danger'">
+                            {{ payloadDiagnosticStatusMark(check) }}
+                          </UiBadge>
+                          <span class="provider-settings__probe-action">
+                            {{ payloadDiagnosticName(check.name) }}
+                          </span>
+                          <span v-if="check.status_code" class="provider-settings__probe-latency">
+                            HTTP {{ check.status_code }}
+                          </span>
+                          <span class="provider-settings__probe-detail">
+                            {{ check.detail }} · {{ t('admin.providerSettings.payloadDiagnosticSent') }}:
+                            {{ payloadDiagnosticFields(check.payload_keys) }}
+                            · {{ t('admin.providerSettings.payloadDiagnosticRemoved') }}:
+                            {{ payloadDiagnosticFields(check.removed_fields) }}
+                          </span>
+                        </li>
+                      </ul>
+                    </div>
                   </UiCard>
                 </div>
               </div>
@@ -1202,11 +1320,46 @@ onMounted(loadAll)
               >
                 {{ t('admin.providerSettings.actions.test') }}
               </UiButton>
+              <UiButton
+                v-if="row.capabilities.includes('llm')"
+                size="sm"
+                :loading="diagnosingPayloadId === row.id"
+                @click="diagnoseSavedPayload(row)"
+              >
+                {{ t('admin.providerSettings.actions.payloadDiagnostic') }}
+              </UiButton>
               <UiButton size="sm" variant="danger" @click="remove(row)">
                 {{ t('admin.providerSettings.actions.delete') }}
               </UiButton>
             </div>
           </template>
+          <div
+            v-if="payloadDiagnostics[`saved:${row.id}`]?.checks?.length"
+            class="provider-settings__probes provider-settings__payload-diagnostic"
+          >
+            <p class="provider-settings__probes-title">
+              {{ t('admin.providerSettings.payloadDiagnosticTitle') }}
+            </p>
+            <ul class="provider-settings__probe-list">
+              <li
+                v-for="check in payloadDiagnostics[`saved:${row.id}`].checks"
+                :key="`saved-payload-${row.id}-${check.name}`"
+                class="provider-settings__probe"
+              >
+                <UiBadge :variant="check.ok ? 'success' : 'danger'">
+                  {{ payloadDiagnosticStatusMark(check) }}
+                </UiBadge>
+                <span class="provider-settings__probe-action">{{ payloadDiagnosticName(check.name) }}</span>
+                <span v-if="check.status_code" class="provider-settings__probe-latency">HTTP {{ check.status_code }}</span>
+                <span class="provider-settings__probe-detail">
+                  {{ check.detail }} · {{ t('admin.providerSettings.payloadDiagnosticSent') }}:
+                  {{ payloadDiagnosticFields(check.payload_keys) }}
+                  · {{ t('admin.providerSettings.payloadDiagnosticRemoved') }}:
+                  {{ payloadDiagnosticFields(check.removed_fields) }}
+                </span>
+              </li>
+            </ul>
+          </div>
         </UiCard>
       </section>
     </div>

@@ -14,7 +14,9 @@ from kokoro_link.application.services.provider_connection_service import (
     ProviderConnectionService,
     ProviderConnectionTestResult,
     ProviderConnectionView,
+    ProviderPayloadDiagnosticResult,
 )
+from kokoro_link.contracts.provider_probe import PayloadDiagnosticCheck
 from kokoro_link.infrastructure.provider_settings.live_probe import ProbeReport
 from kokoro_link.bootstrap.container import ServiceContainer
 from kokoro_link.domain.entities.operator_profile import OperatorProfile
@@ -152,6 +154,12 @@ class ProviderDraftTestRequest(ProviderConnectionCreateRequest):
     deep: bool = False
 
 
+class ProviderPayloadDiagnosticRequest(ProviderConnectionCreateRequest):
+    """Draft body for the progressive OpenAI-compatible payload test."""
+
+    connection_id: str | None = None
+
+
 class ProviderConnectionTestRequest(BaseModel):
     """Optional body for POST /{id}/test — absent body means deep=False."""
 
@@ -163,6 +171,22 @@ class ProviderConnectionTestResponse(BaseModel):
     last_validated_at: datetime | None
     last_validation_error: str | None
     probes: list[ProbeReportResponse] = Field(default_factory=list)
+
+
+class PayloadDiagnosticCheckResponse(BaseModel):
+    name: str
+    ok: bool
+    status_code: int | None = None
+    detail: str
+    removed_fields: list[str] = Field(default_factory=list)
+    payload_keys: list[str] = Field(default_factory=list)
+    latency_ms: int
+
+
+class ProviderPayloadDiagnosticResponse(BaseModel):
+    ok: bool
+    model: str
+    checks: list[PayloadDiagnosticCheckResponse] = Field(default_factory=list)
 
 
 class ListModelsRequest(BaseModel):
@@ -310,6 +334,33 @@ async def test_draft_connection(
     return _test_result(result)
 
 
+@router.post(
+    "/payload-diagnostic-draft",
+    response_model=ProviderPayloadDiagnosticResponse,
+)
+async def diagnose_draft_payload(
+    payload: ProviderPayloadDiagnosticRequest,
+    admin: OperatorProfile = Depends(require_admin),
+    container: ServiceContainer = Depends(get_container),
+    _unlocked: None = Depends(_require_provider_settings_unlocked),
+) -> ProviderPayloadDiagnosticResponse:
+    """Run bounded, no-write request-shape tests against a draft row."""
+
+    del admin
+    try:
+        result = await _service(container).diagnose_draft_payload(
+            provider=payload.provider,
+            enabled=payload.enabled,
+            capabilities=payload.capabilities,
+            config=payload.config,
+            secret=payload.secret,
+            connection_id=payload.connection_id,
+        )
+    except ProviderConnectionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _payload_diagnostic_result(result)
+
+
 @router.get("/{connection_id}", response_model=ProviderConnectionResponse)
 async def get_connection(
     connection_id: str,
@@ -384,6 +435,27 @@ async def test_connection(
     )
 
 
+@router.post(
+    "/{connection_id}/payload-diagnostic",
+    response_model=ProviderPayloadDiagnosticResponse,
+)
+async def diagnose_saved_payload(
+    connection_id: str,
+    admin: OperatorProfile = Depends(require_admin),
+    container: ServiceContainer = Depends(get_container),
+    _unlocked: None = Depends(_require_provider_settings_unlocked),
+) -> ProviderPayloadDiagnosticResponse:
+    """Run the same diagnostic using the saved encrypted API key."""
+
+    del admin
+    try:
+        result = await _service(container).diagnose_saved_payload(connection_id)
+    except ProviderConnectionError as exc:
+        status_code = 404 if str(exc) == "provider connection not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return _payload_diagnostic_result(result)
+
+
 def _field(field: ProviderFieldSpec) -> ProviderFieldSpecResponse:
     return ProviderFieldSpecResponse(
         key=field.key,
@@ -454,4 +526,28 @@ def _test_result(row: ProviderConnectionTestResult) -> ProviderConnectionTestRes
         last_validated_at=row.last_validated_at,
         last_validation_error=row.last_validation_error,
         probes=[_probe(probe) for probe in row.probes],
+    )
+
+
+def _payload_diagnostic_result(
+    row: ProviderPayloadDiagnosticResult,
+) -> ProviderPayloadDiagnosticResponse:
+    return ProviderPayloadDiagnosticResponse(
+        ok=row.ok,
+        model=row.model,
+        checks=[_payload_check(check) for check in row.checks],
+    )
+
+
+def _payload_check(
+    check: PayloadDiagnosticCheck,
+) -> PayloadDiagnosticCheckResponse:
+    return PayloadDiagnosticCheckResponse(
+        name=check.name,
+        ok=check.ok,
+        status_code=check.status_code,
+        detail=check.detail,
+        removed_fields=list(check.removed_fields),
+        payload_keys=list(check.payload_keys),
+        latency_ms=check.latency_ms,
     )

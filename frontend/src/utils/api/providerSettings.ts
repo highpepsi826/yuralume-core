@@ -94,6 +94,22 @@ export interface ProviderConnectionTestResult {
   probes?: ProbeReport[]
 }
 
+export interface PayloadDiagnosticCheck {
+  name: string
+  ok: boolean
+  status_code: number | null
+  detail: string
+  removed_fields: string[]
+  payload_keys: string[]
+  latency_ms: number
+}
+
+export interface ProviderPayloadDiagnosticResult {
+  ok: boolean
+  model: string
+  checks: PayloadDiagnosticCheck[]
+}
+
 export async function listProviderCatalog(): Promise<ProviderCatalogEntry[]> {
   const { data } = await axios.get<ProviderCatalogEntry[]>(
     '/api/v1/admin/providers/catalog',
@@ -151,6 +167,26 @@ export async function testDraftProviderConnection(
   const { data } = await axios.post<ProviderConnectionTestResult>(
     '/api/v1/admin/providers/test-draft',
     { ...payload, deep },
+  )
+  return data
+}
+
+export async function diagnoseDraftProviderPayload(
+  payload: ProviderConnectionPayload,
+  connectionId?: string | null,
+): Promise<ProviderPayloadDiagnosticResult> {
+  const { data } = await axios.post<ProviderPayloadDiagnosticResult>(
+    '/api/v1/admin/providers/payload-diagnostic-draft',
+    { ...payload, connection_id: connectionId ?? null },
+  )
+  return data
+}
+
+export async function diagnoseProviderPayload(
+  id: string,
+): Promise<ProviderPayloadDiagnosticResult> {
+  const { data } = await axios.post<ProviderPayloadDiagnosticResult>(
+    `/api/v1/admin/providers/${encodeURIComponent(id)}/payload-diagnostic`,
   )
   return data
 }
