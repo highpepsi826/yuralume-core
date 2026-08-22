@@ -255,7 +255,12 @@ async def test_exhaustive_responses_payload_diagnostic_tests_structured_input_va
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/models"):
             return httpx.Response(200, json={"data": [{"id": "gpt-5-mini"}]})
-        payloads.append(json.loads(request.content.decode("utf-8")))
+        body = json.loads(request.content.decode("utf-8"))
+        payloads.append(body)
+        if body.get("stream") is True:
+            return _responses_sse(
+                {"type": "response.output_text.delta", "delta": "pong"},
+            )
         return _responses_ok()
 
     checks = await _build(llm_protocol="responses").diagnose_payload(
@@ -281,6 +286,48 @@ async def test_exhaustive_responses_payload_diagnostic_tests_structured_input_va
         "input": expected_input,
         "stream": True,
     }
+    assert payload_by_name["structured_user_input_stream_text"] == {
+        "model": "gpt-5-mini",
+        "input": expected_input,
+        "stream": True,
+    }
+    stream_text_check = next(
+        check for check in checks
+        if check.name == "structured_user_input_stream_text"
+    )
+    assert stream_text_check.ok is True
+    assert stream_text_check.detail == "received 1 text chunk(s), 4 character(s)"
+
+
+@pytest.mark.asyncio
+async def test_exhaustive_responses_payload_diagnostic_rejects_empty_sse() -> None:
+    """A 2xx stream without extractable text is not runtime-compatible."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "gpt-5-mini"}]})
+        body = json.loads(request.content.decode("utf-8"))
+        if (
+            body.get("stream") is True
+            and isinstance(body.get("input"), list)
+        ):
+            return _responses_sse({"type": "response.completed", "response": {}})
+        return _responses_ok()
+
+    checks = await _build(llm_protocol="responses").diagnose_payload(
+        transport=httpx.MockTransport(handler),
+        exhaustive=True,
+    )
+
+    stream_text_check = next(
+        check for check in checks
+        if check.name == "structured_user_input_stream_text"
+    )
+    assert stream_text_check.ok is False
+    assert stream_text_check.status_code == 200
+    assert stream_text_check.detail == (
+        "HTTP success but Responses stream contained no usable text"
+    )
 
 
 @pytest.mark.asyncio

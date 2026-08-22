@@ -1064,6 +1064,25 @@ class OpenAICompatibleChatModel(ChatModelPort):
                 if check.ok and not exhaustive:
                     break
 
+            if exhaustive:
+                # A 2xx from a streaming endpoint only proves that the relay
+                # accepted the request. Verify that its event stream contains
+                # text Yuralume can actually consume before recommending this
+                # shape as a runtime compatibility profile.
+                checks.append(
+                    await self._diagnose_responses_stream_text_request(
+                        client,
+                        name="structured_user_input_stream_text",
+                        payload=structured_input_stream,
+                        removed_fields=(
+                            "max_output_tokens",
+                            "reasoning",
+                            "instructions",
+                            "extra_request_params",
+                        ),
+                    ),
+                )
+
         return checks
 
     async def _diagnose_models_request(
@@ -1127,6 +1146,63 @@ class OpenAICompatibleChatModel(ChatModelPort):
                 else probe_http_error_detail(response)
             )
             status_code: int | None = response.status_code
+        except httpx.TimeoutException:
+            ok, status_code, detail = False, None, "request timed out"
+        except httpx.HTTPError as exc:
+            ok, status_code, detail = False, None, f"connection failed: {exc}"
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        return PayloadDiagnosticCheck(
+            name=name,
+            ok=ok,
+            status_code=status_code,
+            detail=self._diagnostic_detail(detail),
+            removed_fields=tuple(removed_fields),
+            payload_keys=tuple(str(key) for key in payload),
+            latency_ms=latency_ms,
+        )
+
+    async def _diagnose_responses_stream_text_request(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        name: str,
+        payload: dict,
+        removed_fields: tuple[str, ...],
+    ) -> PayloadDiagnosticCheck:
+        """Verify that a successful Responses SSE stream yields usable text.
+
+        The ordinary diagnostic intentionally checks transport-level request
+        compatibility only. Some relays return HTTP 200 for ``stream: true``
+        yet send an empty or non-Responses event stream; that still cannot
+        power a Yuralume chat or background job. This bounded probe consumes
+        the same structured ``ping`` stream and reports counts, never model
+        output itself.
+        """
+        start = time.perf_counter()
+        try:
+            async with client.stream(
+                "POST",
+                self._completion_url(),
+                json=payload,
+                headers=self._build_headers(),
+            ) as response:
+                status_code: int | None = response.status_code
+                if response.status_code >= 400:
+                    await response.aread()
+                    ok = False
+                    detail = probe_http_error_detail(response)
+                else:
+                    chunks = [
+                        chunk async for chunk in _iter_responses_stream(response)
+                    ]
+                    text_length = sum(len(chunk) for chunk in chunks)
+                    ok = text_length > 0
+                    detail = (
+                        f"received {len(chunks)} text chunk(s), "
+                        f"{text_length} character(s)"
+                        if ok
+                        else "HTTP success but Responses stream contained no usable text"
+                    )
         except httpx.TimeoutException:
             ok, status_code, detail = False, None, "request timed out"
         except httpx.HTTPError as exc:
