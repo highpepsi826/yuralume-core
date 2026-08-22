@@ -4518,7 +4518,7 @@ export const messages: MessageSchema = {
         responses_request_profile: {
           label: 'Responses リクエスト互換モード',
           placeholder: 'standard（既定）',
-          hint: 'Payload テストラボで「構造化 user input + stream」がテキストを返すことを確認した場合だけ structured_streaming を選んでください。この Responses 形式を強制し、Max tokens、reasoning、追加 request パラメータ、「上流ストリーミングを無効化」は無視します。',
+          hint: 'Payload テストラボで「構造化 user input + stream」がテキストを返すことを確認した場合だけ structured_streaming を選んでください。responses ではすべての LLM 呼び出しに適用され、chat_completions では通常のチャットは /chat/completions のまま、非ストリーミングのバックグラウンド／補助処理だけが構造化 Responses ストリームを使います。後者では Max tokens、reasoning、追加 request パラメータ、「上流ストリーミングを無効化」は無視されます。',
         },
         anthropic_version: { label: 'Anthropic バージョン', placeholder: '2023-06-01' },
         max_results: { label: '最大結果数', placeholder: '5' },

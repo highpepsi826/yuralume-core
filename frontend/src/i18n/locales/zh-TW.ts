@@ -4447,7 +4447,7 @@ export const messages = {
         responses_request_profile: {
           label: 'Responses 請求相容模式',
           placeholder: 'standard（預設）',
-          hint: '只有 Payload 測試區已確認「結構化 user input + stream」能回傳文字時，才選 structured_streaming。它會強制使用該 Responses 格式，並忽略 Max tokens、reasoning、額外 request 參數與「停用上游串流」。',
+          hint: '只有 Payload 測試區已確認「結構化 user input + stream」能回傳文字時，才選 structured_streaming。協定為 responses 時，所有 LLM 呼叫都用該 Responses 格式；協定為 chat_completions 時，玩家聊天仍走 /chat/completions，非串流的背景／輔助工作會走結構化 Responses 串流。後者會忽略 Max tokens、reasoning、額外 request 參數與「停用上游串流」。',
         },
         anthropic_version: { label: 'Anthropic 版本', placeholder: '2023-06-01' },
         max_results: { label: '最多結果數', placeholder: '5' },

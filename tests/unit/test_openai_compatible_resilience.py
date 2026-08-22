@@ -126,9 +126,89 @@ def test_invalid_responses_request_profile_is_rejected() -> None:
         _build(responses_request_profile="relay_magic")
 
 
-def test_structured_streaming_profile_requires_responses_protocol() -> None:
-    with pytest.raises(ValueError, match="requires llm_protocol='responses'"):
-        _build(responses_request_profile="structured_streaming")
+def test_structured_streaming_profile_is_allowed_with_chat_protocol() -> None:
+    model = _build(
+        llm_protocol="chat_completions",
+        responses_request_profile="structured_streaming",
+    )
+
+    assert model._llm_protocol == "chat_completions"
+    assert model._responses_request_profile == "structured_streaming"
+
+
+@pytest.mark.asyncio
+async def test_chat_plus_structured_profile_keeps_live_chat_on_chat_and_routes_generate_to_responses() -> None:
+    requests: list[tuple[str, dict[str, Any]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode("utf-8"))
+        requests.append((request.url.path, body))
+        if request.url.path.endswith("/chat/completions"):
+            return _sse_ok("live reply")
+        return _responses_sse(
+            {"type": "response.output_text.delta", "delta": "background "},
+            {"type": "response.output_text.delta", "delta": "reply"},
+        )
+
+    model = _build(
+        llm_protocol="chat_completions",
+        responses_request_profile="structured_streaming",
+        max_tokens=64,
+    )
+    with _patch_transport(httpx.MockTransport(handler)):
+        chunks = [chunk async for chunk in model.generate_stream("chat prompt")]
+        background = await model.generate("background prompt")
+
+    assert chunks == ["live reply"]
+    assert background == "background reply"
+    assert requests == [
+        (
+            "/v1/chat/completions",
+            {
+                "model": "gpt-5-mini",
+                "messages": [
+                    {"role": "system", "content": "You are a roleplay character backend."},
+                    {"role": "user", "content": "chat prompt"},
+                ],
+                "max_tokens": 64,
+                "stream": True,
+            },
+        ),
+        (
+            "/v1/responses",
+            {
+                "model": "gpt-5-mini",
+                "input": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "You are a roleplay character backend.\n\nbackground prompt",
+                    }],
+                }],
+                "stream": True,
+            },
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_plus_structured_profile_keeps_disabled_live_stream_on_chat() -> None:
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return _chat_ok("complete chat reply")
+
+    model = _build(
+        llm_protocol="chat_completions",
+        responses_request_profile="structured_streaming",
+        disable_streaming=True,
+    )
+    with _patch_transport(httpx.MockTransport(handler)):
+        chunks = [chunk async for chunk in model.generate_stream("chat prompt")]
+
+    assert chunks == ["complete chat reply"]
+    assert paths == ["/v1/chat/completions"]
 
 
 @pytest.mark.asyncio

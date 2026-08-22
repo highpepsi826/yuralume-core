@@ -199,9 +199,12 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
         options=("standard", "structured_streaming"),
         hint=(
             "Use structured_streaming only after the Payload test lab proves "
-            "that structured user input plus streaming returns text. It "
-            "forces that narrow Responses shape and ignores max tokens, "
-            "reasoning, extra request params, and Disable upstream streaming."
+            "that structured user input plus streaming returns text. With "
+            "responses it applies to every LLM call; with chat_completions, "
+            "live chat stays on Chat Completions and non-streaming auxiliary "
+            "work uses the narrow structured Responses stream. Those "
+            "Responses requests ignore max tokens, reasoning, extra request "
+            "params, and Disable upstream streaming."
         ),
     )
     anthropic_version = ProviderFieldSpec(

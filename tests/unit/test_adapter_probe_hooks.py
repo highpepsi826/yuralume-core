@@ -65,7 +65,7 @@ def test_probe_chat_inherits_max_completion_tokens_rename() -> None:
             "choices": [{"message": {"content": "ok"}}],
         })
 
-    model = _chat_model()
+    model = _chat_model(max_tokens=64)
     checks = asyncio.run(
         model.probe_chat(transport=httpx.MockTransport(handler)),
     )
@@ -133,7 +133,11 @@ def test_probe_chat_carries_configured_reasoning_knobs() -> None:
             "choices": [{"message": {"content": "ok"}}],
         })
 
-    model = _chat_model(disable_reasoning=True, reasoning_effort="high")
+    model = _chat_model(
+        max_tokens=64,
+        disable_reasoning=True,
+        reasoning_effort="high",
+    )
     checks = asyncio.run(
         model.probe_chat(transport=httpx.MockTransport(handler)),
     )
@@ -144,10 +148,12 @@ def test_probe_chat_carries_configured_reasoning_knobs() -> None:
     assert seen["max_tokens"] == 1  # probe cap via max_tokens_override
 
 
-def test_probe_chat_cap_does_not_change_generate_semantics() -> None:
-    """The 1-token probe cap is an internal override: a runtime
-    generate() on the same instance still omits max_tokens when the
-    operator never configured one."""
+def test_probe_chat_omits_token_limit_when_not_configured() -> None:
+    """The Test button must preserve an intentionally unset limit.
+
+    Some strict relays reject either token-limit field.  When the operator
+    leaves Max tokens blank, both probe and runtime need to send no limit.
+    """
     bodies: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -159,26 +165,14 @@ def test_probe_chat_cap_does_not_change_generate_semantics() -> None:
         })
 
     model = _chat_model()
-    transport = httpx.MockTransport(handler)
-    asyncio.run(model.probe_chat(transport=transport))
+    checks = asyncio.run(
+        model.probe_chat(transport=httpx.MockTransport(handler)),
+    )
 
-    async def _generate() -> str:
-        real_client = httpx.AsyncClient
-
-        def patched(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
-            kwargs.pop("transport", None)
-            return real_client(transport=transport, **kwargs)
-
-        httpx.AsyncClient = patched  # type: ignore[misc]
-        try:
-            return await model.generate("hello")
-        finally:
-            httpx.AsyncClient = real_client  # type: ignore[misc]
-
-    assert asyncio.run(_generate()) == "ok"
-    assert "max_tokens" in bodies[0]  # probe capped
-    assert "max_tokens" not in bodies[1]  # runtime untouched
-    assert "max_completion_tokens" not in bodies[1]
+    assert checks[1].ok is True
+    assert len(bodies) == 1
+    assert "max_tokens" not in bodies[0]
+    assert "max_completion_tokens" not in bodies[0]
 
 
 def test_responses_probe_uses_responses_request_shape() -> None:
@@ -198,7 +192,7 @@ def test_responses_probe_uses_responses_request_shape() -> None:
         })
 
     checks = asyncio.run(
-        _chat_model(llm_protocol="responses").probe_chat(
+        _chat_model(llm_protocol="responses", max_tokens=64).probe_chat(
             transport=httpx.MockTransport(handler),
         ),
     )
@@ -212,6 +206,33 @@ def test_responses_probe_uses_responses_request_shape() -> None:
         "max_output_tokens": 1,
     }]
     assert "Responses request" in checks[1].detail
+
+
+def test_chat_structured_profile_probe_stays_on_chat_completions() -> None:
+    """A dual-mode card tests its foreground chat endpoint, not Responses."""
+    paths: list[str] = []
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "gpt-x"}]})
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": "ok"}}],
+        })
+
+    checks = asyncio.run(
+        _chat_model(
+            llm_protocol="chat_completions",
+            responses_request_profile="structured_streaming",
+        ).probe_chat(transport=httpx.MockTransport(handler)),
+    )
+
+    assert [check.ok for check in checks] == [True, True]
+    assert paths == ["/v1/models", "/v1/chat/completions"]
+    assert "max_tokens" not in bodies[0]
+    assert "max_completion_tokens" not in bodies[0]
 
 
 def test_structured_streaming_responses_probe_reads_sse_text() -> None:

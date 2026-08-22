@@ -4448,7 +4448,7 @@ export const messages: MessageSchema = {
         responses_request_profile: {
           label: 'Responses request profile',
           placeholder: 'standard (default)',
-          hint: 'Select structured_streaming only after the Payload test lab confirms that structured user input plus streaming returns text. It forces that Responses shape and ignores Max tokens, reasoning, extra request params, and Disable upstream streaming.',
+          hint: 'Select structured_streaming only after the Payload test lab confirms that structured user input plus streaming returns text. With responses it applies to every LLM call; with chat_completions, live chat stays on /chat/completions while non-streaming background and auxiliary work uses the structured Responses stream. The latter ignores Max tokens, reasoning, extra request params, and Disable upstream streaming.',
         },
         anthropic_version: { label: 'Anthropic version', placeholder: '2023-06-01' },
         max_results: { label: 'Max results', placeholder: '5' },
