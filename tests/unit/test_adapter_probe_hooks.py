@@ -214,6 +214,49 @@ def test_responses_probe_uses_responses_request_shape() -> None:
     assert "Responses request" in checks[1].detail
 
 
+def test_structured_streaming_responses_probe_reads_sse_text() -> None:
+    paths: list[str] = []
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "gpt-x"}]})
+        bodies.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                'data: {"type":"response.output_text.delta","delta":"ok"}\n\n'
+                "data: [DONE]\n\n"
+            ).encode("utf-8"),
+        )
+
+    checks = asyncio.run(
+        _chat_model(
+            llm_protocol="responses",
+            responses_request_profile="structured_streaming",
+            max_tokens=64,
+            disable_streaming=True,
+        ).probe_chat(transport=httpx.MockTransport(handler)),
+    )
+
+    assert [check.ok for check in checks] == [True, True]
+    assert paths == ["/v1/models", "/v1/responses"]
+    assert bodies == [{
+        "model": "gpt-x",
+        "input": [{
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "You are a roleplay character backend.\n\nping",
+            }],
+        }],
+        "stream": True,
+    }]
+    assert "structured streaming Responses" in checks[1].detail
+
+
 # ---------------------------------------------------------------------------
 # Anthropic probe_chat — URL parity with the runtime adapter
 # ---------------------------------------------------------------------------

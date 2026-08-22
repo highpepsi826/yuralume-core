@@ -4444,6 +4444,11 @@ export const messages = {
           placeholder: 'chat_completions（預設）',
           hint: 'chat_completions 會送到 /chat/completions；只有 provider 文件明確支援 /responses 時才選 responses。請求失敗時不會自動改送另一個端點。',
         },
+        responses_request_profile: {
+          label: 'Responses 請求相容模式',
+          placeholder: 'standard（預設）',
+          hint: '只有 Payload 測試區已確認「結構化 user input + stream」能回傳文字時，才選 structured_streaming。它會強制使用該 Responses 格式，並忽略 Max tokens、reasoning、額外 request 參數與「停用上游串流」。',
+        },
         anthropic_version: { label: 'Anthropic 版本', placeholder: '2023-06-01' },
         max_results: { label: '最多結果數', placeholder: '5' },
         search_depth: { label: '搜尋深度（basic / advanced）', placeholder: 'advanced' },

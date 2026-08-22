@@ -359,6 +359,9 @@ def build_chat_model(
             max_tokens=_config_optional_int(row, "max_tokens"),
             disable_streaming=_config_bool(row, "disable_streaming", False),
             llm_protocol=_config_str(row, "llm_protocol", "chat_completions"),
+            responses_request_profile=_config_str(
+                row, "responses_request_profile", "standard",
+            ),
             disable_reasoning=_config_bool(row, "disable_reasoning", False),
             reasoning_effort=_config_optional_str(row, "reasoning_effort"),
             extra_request_params=_config_optional_json_object(

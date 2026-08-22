@@ -4515,6 +4515,11 @@ export const messages: MessageSchema = {
           placeholder: 'chat_completions（既定）',
           hint: 'chat_completions は /chat/completions に送信します。provider が /responses を明示的に対応している場合だけ responses を選んでください。失敗したリクエストを別のエンドポイントへ自動再送しません。',
         },
+        responses_request_profile: {
+          label: 'Responses リクエスト互換モード',
+          placeholder: 'standard（既定）',
+          hint: 'Payload テストラボで「構造化 user input + stream」がテキストを返すことを確認した場合だけ structured_streaming を選んでください。この Responses 形式を強制し、Max tokens、reasoning、追加 request パラメータ、「上流ストリーミングを無効化」は無視します。',
+        },
         anthropic_version: { label: 'Anthropic バージョン', placeholder: '2023-06-01' },
         max_results: { label: '最大結果数', placeholder: '5' },
         search_depth: { label: '検索の深さ（basic / advanced）', placeholder: 'advanced' },

@@ -31,6 +31,7 @@ export const CAPABILITY_FIELD_KEYS: Record<string, ReadonlySet<string>> = {
     'max_tokens',
     'disable_streaming',
     'llm_protocol',
+    'responses_request_profile',
     'anthropic_version',
     'timeout_seconds',
   ]),

@@ -4445,6 +4445,11 @@ export const messages: MessageSchema = {
           placeholder: 'chat_completions (default)',
           hint: 'chat_completions sends to /chat/completions. Select responses only when this provider explicitly supports /responses; failed requests are not retried on another endpoint.',
         },
+        responses_request_profile: {
+          label: 'Responses request profile',
+          placeholder: 'standard (default)',
+          hint: 'Select structured_streaming only after the Payload test lab confirms that structured user input plus streaming returns text. It forces that Responses shape and ignores Max tokens, reasoning, extra request params, and Disable upstream streaming.',
+        },
         anthropic_version: { label: 'Anthropic version', placeholder: '2023-06-01' },
         max_results: { label: 'Max results', placeholder: '5' },
         search_depth: { label: 'Search depth (basic / advanced)', placeholder: 'advanced' },

@@ -176,6 +176,7 @@ def test_custom_openai_compatible_uses_selected_responses_protocol(monkeypatch) 
                 "base_url": "https://llm.example.test/v1",
                 "default_model": "custom-responses",
                 "llm_protocol": "responses",
+                "responses_request_profile": "structured_streaming",
             },
             "secret": {"api_key": "sk-secret"},
         },
@@ -186,6 +187,7 @@ def test_custom_openai_compatible_uses_selected_responses_protocol(monkeypatch) 
         "custom_openai_compatible",
     )
     assert model._llm_protocol == "responses"
+    assert model._responses_request_profile == "structured_streaming"
 
 
 def test_anthropic_absent_vision_key_defaults_true(monkeypatch) -> None:

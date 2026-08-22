@@ -121,6 +121,16 @@ def test_invalid_llm_protocol_is_rejected() -> None:
         _build(llm_protocol="legacy_completions")
 
 
+def test_invalid_responses_request_profile_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Unsupported Responses request profile"):
+        _build(responses_request_profile="relay_magic")
+
+
+def test_structured_streaming_profile_requires_responses_protocol() -> None:
+    with pytest.raises(ValueError, match="requires llm_protocol='responses'"):
+        _build(responses_request_profile="structured_streaming")
+
+
 @pytest.mark.asyncio
 async def test_responses_generate_uses_native_payload_and_endpoint() -> None:
     requests: list[tuple[str, dict[str, Any]]] = []
@@ -152,6 +162,77 @@ async def test_responses_generate_uses_native_payload_and_endpoint() -> None:
             "reasoning": {"effort": "low"},
         },
     )]
+
+
+@pytest.mark.asyncio
+async def test_structured_streaming_responses_profile_collects_sse_for_generate() -> None:
+    requests: list[tuple[str, dict[str, Any]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((
+            request.url.path,
+            json.loads(request.content.decode("utf-8")),
+        ))
+        return _responses_sse(
+            {"type": "response.output_text.delta", "delta": "background "},
+            {"type": "response.output_text.delta", "delta": "answer"},
+        )
+
+    model = _build(
+        llm_protocol="responses",
+        responses_request_profile="structured_streaming",
+        max_tokens=64,
+        disable_streaming=True,
+        disable_reasoning=True,
+        reasoning_effort="low",
+        extra_request_params={"temperature": 0.1},
+    )
+    with _patch_transport(httpx.MockTransport(handler)):
+        answer = await model.generate("hello")
+
+    assert answer == "background answer"
+    assert requests == [(
+        "/v1/responses",
+        {
+            "model": "gpt-5-mini",
+            "input": [{
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "You are a roleplay character backend.\n\nhello",
+                }],
+            }],
+            "stream": True,
+        },
+    )]
+
+
+@pytest.mark.asyncio
+async def test_structured_streaming_responses_profile_keeps_chat_streaming() -> None:
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content.decode("utf-8")))
+        return _responses_sse(
+            {"type": "response.output_text.delta", "delta": "live "},
+            {"type": "response.output_text.delta", "delta": "reply"},
+        )
+
+    model = _build(
+        llm_protocol="responses",
+        responses_request_profile="structured_streaming",
+        disable_streaming=True,
+    )
+    # A previous configuration can have taught this in-memory adapter a
+    # non-stream fallback. The required-stream profile must override it.
+    model._quirks_for("gpt-5-mini").non_stream_fallback = True
+    with _patch_transport(httpx.MockTransport(handler)):
+        chunks = [chunk async for chunk in model.generate_stream("hello")]
+
+    assert chunks == ["live ", "reply"]
+    assert bodies[0]["stream"] is True
+    assert "instructions" not in bodies[0]
+    assert "max_output_tokens" not in bodies[0]
 
 
 @pytest.mark.asyncio

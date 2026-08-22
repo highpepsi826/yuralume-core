@@ -72,6 +72,13 @@ _SUPPORTED_LLM_PROTOCOLS = frozenset({
     _RESPONSES_PROTOCOL,
 })
 
+_RESPONSES_REQUEST_PROFILE_STANDARD = "standard"
+_RESPONSES_REQUEST_PROFILE_STRUCTURED_STREAMING = "structured_streaming"
+_SUPPORTED_RESPONSES_REQUEST_PROFILES = frozenset({
+    _RESPONSES_REQUEST_PROFILE_STANDARD,
+    _RESPONSES_REQUEST_PROFILE_STRUCTURED_STREAMING,
+})
+
 _CHAT_STRUCTURAL_PARAMS = frozenset({"model", "messages", "stream"})
 _RESPONSES_STRUCTURAL_PARAMS = frozenset({"model", "input", "stream"})
 """Keys the drop-and-retry adaptation must never remove for each protocol.
@@ -150,6 +157,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
         max_tokens: int | None = None,
         disable_streaming: bool = False,
         llm_protocol: str = _CHAT_COMPLETIONS_PROTOCOL,
+        responses_request_profile: str = _RESPONSES_REQUEST_PROFILE_STANDARD,
         disable_reasoning: bool = False,
         reasoning_effort: str | None = None,
         extra_request_params: dict | None = None,
@@ -173,6 +181,23 @@ class OpenAICompatibleChatModel(ChatModelPort):
         # Chat Completions 400 against /responses: that could duplicate a
         # billable request and would hide the actual upstream rejection.
         self._llm_protocol = normalized_protocol
+        normalized_responses_profile = responses_request_profile.strip().lower()
+        if normalized_responses_profile not in _SUPPORTED_RESPONSES_REQUEST_PROFILES:
+            supported = ", ".join(sorted(_SUPPORTED_RESPONSES_REQUEST_PROFILES))
+            raise ValueError(
+                f"Unsupported Responses request profile "
+                f"{responses_request_profile!r}; expected one of: {supported}",
+            )
+        if (
+            normalized_responses_profile
+            != _RESPONSES_REQUEST_PROFILE_STANDARD
+            and normalized_protocol != _RESPONSES_PROTOCOL
+        ):
+            raise ValueError(
+                "Responses request profile 'structured_streaming' requires "
+                "llm_protocol='responses'",
+            )
+        self._responses_request_profile = normalized_responses_profile
         # Some upstreams allow ordinary completions but reject ``stream:
         # true``. Keep this opt-in so existing connections retain
         # incremental output.
@@ -258,6 +283,21 @@ class OpenAICompatibleChatModel(ChatModelPort):
     @property
     def _uses_responses_api(self) -> bool:
         return self._llm_protocol == _RESPONSES_PROTOCOL
+
+    @property
+    def _uses_structured_streaming_responses_profile(self) -> bool:
+        """Whether this relay requires canonical structured Responses SSE.
+
+        This is intentionally an explicit provider setting rather than a
+        fallback learned from an arbitrary 400. Some relays require this
+        narrow shape while normal OpenAI-compatible Responses endpoints
+        accept and benefit from the richer default request.
+        """
+        return (
+            self._uses_responses_api
+            and self._responses_request_profile
+            == _RESPONSES_REQUEST_PROFILE_STRUCTURED_STREAMING
+        )
 
     def _completion_url(self) -> str:
         suffix = "responses" if self._uses_responses_api else "chat/completions"
@@ -369,6 +409,35 @@ class OpenAICompatibleChatModel(ChatModelPort):
         """
         resolved_model = self._resolve_model(model)
         quirks = self._quirks_for(resolved_model)
+        if self._uses_structured_streaming_responses_profile:
+            # This narrow relay profile was verified with a canonical
+            # Responses message-content array and SSE only. Keep it isolated
+            # from ordinary Responses behavior: it intentionally omits every
+            # optional knob (including configured max tokens and advanced
+            # escape-hatch parameters) because the upstream rejects them.
+            input_content: list[dict] = [{
+                "type": "input_text",
+                "text": f"{_SYSTEM_PROMPT}\n\n{prompt}",
+            }]
+            if image_urls and self.supports_vision:
+                for url in image_urls:
+                    if not url:
+                        continue
+                    input_content.append({
+                        "type": "input_image",
+                        "image_url": url,
+                    })
+            payload: dict = {
+                "model": resolved_model,
+                "input": [{
+                    "role": "user",
+                    "content": input_content,
+                }],
+                "stream": True,
+            }
+            for name in quirks.dropped_params:
+                payload.pop(name, None)
+            return payload
         if image_urls and self.supports_vision:
             input_content: list[dict] = [{
                 "type": "input_text",
@@ -490,6 +559,41 @@ class OpenAICompatibleChatModel(ChatModelPort):
             return True, f"{len(_parse_model_ids(data))} models"
 
         async def chat_check() -> tuple[bool, str]:
+            if self._uses_structured_streaming_responses_profile:
+                # This profile is only valid when the relay both accepts the
+                # canonical structured input and returns consumable SSE text.
+                # A normal POST would see HTTP 200 but never prove the latter.
+                payload = self._build_payload(
+                    PROBE_CHAT_PROMPT,
+                    stream=True,
+                    max_tokens_override=1,
+                )
+                model = str(payload.get("model") or self._model)
+                async with probe_http_client(timeout_seconds, transport) as client:
+                    async with client.stream(
+                        "POST",
+                        self._completion_url(),
+                        json=payload,
+                        headers=self._build_headers(),
+                    ) as response:
+                        if response.status_code >= 400:
+                            await response.aread()
+                            return False, (
+                                f"model {model!r}: "
+                                f"{probe_http_error_detail(response)}"
+                            )
+                        chunks = [
+                            chunk async for chunk in _iter_responses_stream(response)
+                        ]
+                if not "".join(chunks).strip():
+                    return False, (
+                        f"model {model!r}: Responses stream contained no "
+                        "usable text"
+                    )
+                return True, (
+                    f"model {model!r} completed a structured streaming "
+                    "Responses request"
+                )
             payload = self._build_payload(PROBE_CHAT_PROMPT, max_tokens_override=1)
             async with probe_http_client(timeout_seconds, transport) as client:
                 response = await client.post(
@@ -1224,6 +1328,42 @@ class OpenAICompatibleChatModel(ChatModelPort):
             cleaned = redact_values(cleaned, (self._api_key,))
         return cleaned[:500]
 
+    async def _generate_structured_streaming_responses(
+        self,
+        prompt: str,
+        *,
+        image_urls: Sequence[str],
+        model: str | None,
+    ) -> str:
+        """Consume a required Responses SSE stream for ``generate()``.
+
+        Background work calls ``generate()`` rather than ``generate_stream()``.
+        The selected relay rejects the normal JSON Responses request, so this
+        bridge collects the verified stream shape into the ordinary string
+        contract without changing any other provider's behavior.
+        """
+        for attempt in range(2):
+            chunks = [
+                chunk async for chunk in self._raw_generate_stream(
+                    prompt,
+                    image_urls=image_urls,
+                    model=model,
+                )
+            ]
+            content = "".join(chunks)
+            if content.strip():
+                return content
+            if attempt == 0:
+                _LOGGER.warning(
+                    "LLM %s returned a 2xx Responses stream without usable "
+                    "text; retrying once",
+                    self.provider_id,
+                )
+        raise OpenAICompatibleResponseShapeError(
+            "OpenAI-compatible Responses stream contained no usable "
+            "assistant text after one retry",
+        )
+
     async def generate(
         self,
         prompt: str,
@@ -1231,6 +1371,15 @@ class OpenAICompatibleChatModel(ChatModelPort):
         image_urls: Sequence[str] = (),
         model: str | None = None,
     ) -> str:
+        if self._uses_structured_streaming_responses_profile:
+            content = await self._generate_structured_streaming_responses(
+                prompt,
+                image_urls=image_urls,
+                model=model,
+            )
+            if self._strip_think_tags:
+                return strip_think_tags_text(content)
+            return content
         payload = self._build_payload(
             prompt, image_urls=image_urls, model=model,
         )
@@ -1330,7 +1479,10 @@ class OpenAICompatibleChatModel(ChatModelPort):
         image_urls: Sequence[str] = (),
         model: str | None = None,
     ) -> AsyncIterator[str]:
-        if self._disable_streaming:
+        if (
+            self._disable_streaming
+            and not self._uses_structured_streaming_responses_profile
+        ):
             # Keep Yuralume's streaming contract intact while sending a
             # normal JSON completion upstream. The caller receives one
             # complete text chunk after the provider finishes generation.
@@ -1343,7 +1495,10 @@ class OpenAICompatibleChatModel(ChatModelPort):
             if isinstance(fallback, str) and fallback:
                 yield fallback
             return
-        if self._quirks_for(self._resolve_model(model)).non_stream_fallback:
+        if (
+            self._quirks_for(self._resolve_model(model)).non_stream_fallback
+            and not self._uses_structured_streaming_responses_profile
+        ):
             # Learned earlier that this model refuses to stream for us
             # (org-verification restriction) — go straight to the
             # non-stream request and serve it as a single chunk.
@@ -1395,6 +1550,8 @@ class OpenAICompatibleChatModel(ChatModelPort):
                         body=text,
                         payload=payload,
                     ):
+                        if self._uses_structured_streaming_responses_profile:
+                            _raise_stream_error(response, text)
                         self._remember_non_stream_fallback(
                             str(payload.get("model") or self._model),
                         )
@@ -1422,6 +1579,12 @@ class OpenAICompatibleChatModel(ChatModelPort):
                             )
                             raise
                     payload = adapted
+        if self._uses_structured_streaming_responses_profile:
+            # This profile's relay only accepts SSE. Never turn a failed
+            # stream into the normal JSON fallback, even if an instance had
+            # learned such a fallback before its provider configuration was
+            # changed.
+            return
         # Stream-open was refused with the verification restriction:
         # degrade to one non-stream completion, yielded as one chunk.
         # Same non-str guard as the memoized fast path above — an
