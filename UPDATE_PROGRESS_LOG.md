@@ -5,6 +5,26 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-22 - Verify streaming Responses payload text
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed `93d3265` on `local/customizations`.
+- Backup: `not required`; this adds a fixed-prompt diagnostic only and has no
+  schema or user-data migration.
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated the existing
+  `migrate` and `app` services using the runtime Compose base plus local
+  override. The complete Responses payload test lab now verifies that the
+  structured `input` plus `stream=true` variant yields readable SSE text,
+  rather than treating HTTP 200 alone as success.
+- Verification: 39 focused backend tests, Vue type-check, frontend production
+  build, and Docker app build passed. All Compose services are healthy and
+  `http://127.0.0.1:8012/health` returned `status: ok`.
+- Follow-up: switch to the affected source, set its protocol to `responses`,
+  and run the complete Payload test lab; capture the new SSE-text verification
+  row before considering a runtime compatibility mode.
+
 ### 2026-08-22 - Structured Responses payload probes
 
 - Status: completed
