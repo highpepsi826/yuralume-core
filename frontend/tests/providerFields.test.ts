@@ -106,6 +106,18 @@ describe('providerFields', () => {
     expect(fieldsForCapability(openrouter, 'llm').map(f => f.key)).toContain('default_model')
   })
 
+  it('renders the LLM protocol selector on the LLM card', () => {
+    const custom = catalogEntry('custom_openai_compatible', ['llm'], [
+      'base_url',
+      'default_model',
+      'llm_protocol',
+    ])
+    expect(sharedFields(custom).map(f => f.key)).not.toContain('llm_protocol')
+    expect(fieldsForCapability(custom, 'llm').map(f => f.key)).toContain(
+      'llm_protocol',
+    )
+  })
+
   it('hides default_model on the image card when image_model exists', () => {
     const entry = catalogEntry('openai', ['image'], [
       'default_model',

@@ -181,6 +181,39 @@ def test_probe_chat_cap_does_not_change_generate_semantics() -> None:
     assert "max_completion_tokens" not in bodies[1]
 
 
+def test_responses_probe_uses_responses_request_shape() -> None:
+    paths: list[str] = []
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "gpt-x"}]})
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "output": [{
+                "type": "message",
+                "content": [{"type": "output_text", "text": "ok"}],
+            }],
+        })
+
+    checks = asyncio.run(
+        _chat_model(llm_protocol="responses").probe_chat(
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+
+    assert [check.ok for check in checks] == [True, True]
+    assert paths == ["/v1/models", "/v1/responses"]
+    assert bodies == [{
+        "model": "gpt-x",
+        "instructions": "You are a roleplay character backend.",
+        "input": "ping",
+        "max_output_tokens": 1,
+    }]
+    assert "Responses request" in checks[1].detail
+
+
 # ---------------------------------------------------------------------------
 # Anthropic probe_chat — URL parity with the runtime adapter
 # ---------------------------------------------------------------------------

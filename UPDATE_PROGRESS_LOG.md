@@ -5,6 +5,28 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-22 - Responses protocol for custom LLM providers
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed on `local/customizations`.
+- Backup: `pre-responses-protocol-20260822-153940.dump`, verified with
+  `pg_restore --list` before deployment.
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated the existing
+  `migrate` and `app` services with the runtime Compose base plus local
+  override. Custom OpenAI-Compatible LLM connections now have an advanced
+  `LLM API protocol` setting. The default remains `chat_completions`; selecting
+  `responses` sends native `/responses` payloads and parses both non-streaming
+  and streaming Responses replies. Payload diagnostics use the selected
+  endpoint and request shape. A failed request is never automatically retried
+  against the other endpoint.
+- Verification: 125 focused backend tests and 11 frontend provider-field tests
+  passed; the Docker production build passed. All four Compose services are
+  healthy and `http://127.0.0.1:8012/health` returned `status: ok`.
+- Follow-up: set the affected custom provider's `LLM API protocol` to
+  `responses`, save it, then run `Payload test lab` against that source.
+
 ### 2026-08-22 - Exhaustive provider payload test lab deployed
 
 - Status: completed

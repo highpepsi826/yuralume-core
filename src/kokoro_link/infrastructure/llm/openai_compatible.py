@@ -65,10 +65,23 @@ model, ``max_tokens`` rename, system-role merge) or removes a payload
 key it just verified was present — so the real bound is the payload's
 key count; the constant only guards against a pathological upstream."""
 
-_STRUCTURAL_PARAMS = frozenset({"model", "messages", "stream"})
-"""Keys the drop-and-retry adaptation must never remove: a chat request
-without them is nonsense, so an error naming one of these is a
-different problem that dropping cannot fix."""
+_CHAT_COMPLETIONS_PROTOCOL = "chat_completions"
+_RESPONSES_PROTOCOL = "responses"
+_SUPPORTED_LLM_PROTOCOLS = frozenset({
+    _CHAT_COMPLETIONS_PROTOCOL,
+    _RESPONSES_PROTOCOL,
+})
+
+_CHAT_STRUCTURAL_PARAMS = frozenset({"model", "messages", "stream"})
+_RESPONSES_STRUCTURAL_PARAMS = frozenset({"model", "input", "stream"})
+"""Keys the drop-and-retry adaptation must never remove for each protocol.
+
+An upstream can teach us that an optional field is unsupported, but dropping
+``messages`` from Chat Completions or ``input`` from Responses would turn the
+retry into a meaningless request. Keep that protection protocol-specific so a
+Responses gateway can still reject and teach us about ``instructions`` or
+``reasoning`` without ever losing its actual user input.
+"""
 
 _UNRECOGNIZED_PARAM_MARKERS = (
     "unrecognized request argument",
@@ -136,6 +149,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
         supports_vision: bool = False,
         max_tokens: int | None = None,
         disable_streaming: bool = False,
+        llm_protocol: str = _CHAT_COMPLETIONS_PROTOCOL,
         disable_reasoning: bool = False,
         reasoning_effort: str | None = None,
         extra_request_params: dict | None = None,
@@ -148,6 +162,17 @@ class OpenAICompatibleChatModel(ChatModelPort):
         self._api_key = api_key
         self._model = model
         self._max_tokens = max_tokens
+        normalized_protocol = llm_protocol.strip().lower()
+        if normalized_protocol not in _SUPPORTED_LLM_PROTOCOLS:
+            supported = ", ".join(sorted(_SUPPORTED_LLM_PROTOCOLS))
+            raise ValueError(
+                f"Unsupported OpenAI-compatible LLM protocol "
+                f"{llm_protocol!r}; expected one of: {supported}",
+            )
+        # Endpoint selection is explicit. Do not silently retry a generic
+        # Chat Completions 400 against /responses: that could duplicate a
+        # billable request and would hide the actual upstream rejection.
+        self._llm_protocol = normalized_protocol
         # Some upstreams allow ordinary completions but reject ``stream:
         # true``. Keep this opt-in so existing connections retain
         # incremental output.
@@ -230,6 +255,19 @@ class OpenAICompatibleChatModel(ChatModelPort):
         clone)."""
         return self._quirks_by_model.setdefault(model, _LearnedQuirks())
 
+    @property
+    def _uses_responses_api(self) -> bool:
+        return self._llm_protocol == _RESPONSES_PROTOCOL
+
+    def _completion_url(self) -> str:
+        suffix = "responses" if self._uses_responses_api else "chat/completions"
+        return f"{self._base_url}/{suffix}"
+
+    def _structural_params(self) -> frozenset[str]:
+        if self._uses_responses_api:
+            return _RESPONSES_STRUCTURAL_PARAMS
+        return _CHAT_STRUCTURAL_PARAMS
+
     def _build_payload(
         self,
         prompt: str,
@@ -239,6 +277,14 @@ class OpenAICompatibleChatModel(ChatModelPort):
         model: str | None = None,
         max_tokens_override: int | None = None,
     ) -> dict:
+        if self._uses_responses_api:
+            return self._build_responses_payload(
+                prompt,
+                stream=stream,
+                image_urls=image_urls,
+                model=model,
+                max_tokens_override=max_tokens_override,
+            )
         resolved_model = self._resolve_model(model)
         quirks = self._quirks_for(resolved_model)
         if quirks.merge_system_into_user:
@@ -305,6 +351,65 @@ class OpenAICompatibleChatModel(ChatModelPort):
             payload.pop(name, None)
         return payload
 
+    def _build_responses_payload(
+        self,
+        prompt: str,
+        *,
+        stream: bool = False,
+        image_urls: Sequence[str] = (),
+        model: str | None = None,
+        max_tokens_override: int | None = None,
+    ) -> dict:
+        """Build the native ``POST /responses`` request shape.
+
+        ``instructions`` carries the small adapter-owned system instruction;
+        the feature prompt itself stays intact as ``input``. When vision is
+        enabled, Responses uses ``input_text`` / ``input_image`` parts rather
+        than Chat Completions' ``text`` / ``image_url`` message content.
+        """
+        resolved_model = self._resolve_model(model)
+        quirks = self._quirks_for(resolved_model)
+        if image_urls and self.supports_vision:
+            input_content: list[dict] = [{
+                "type": "input_text",
+                "text": prompt,
+            }]
+            for url in image_urls:
+                if not url:
+                    continue
+                input_content.append({
+                    "type": "input_image",
+                    "image_url": url,
+                })
+            request_input: str | list[dict] = [{
+                "role": "user",
+                "content": input_content,
+            }]
+        else:
+            request_input = prompt
+        payload: dict = {
+            "model": resolved_model,
+            "instructions": _SYSTEM_PROMPT,
+            "input": request_input,
+        }
+        if max_tokens_override is not None:
+            payload["max_output_tokens"] = max_tokens_override
+        elif self._max_tokens is not None:
+            payload["max_output_tokens"] = self._max_tokens
+        # ``chat_template_kwargs`` is a local Chat Completions template
+        # extension. It has no Responses equivalent and must not leak into a
+        # strict Responses endpoint. ``reasoning.effort`` is the native
+        # Responses representation of the existing opt-in setting.
+        if self._reasoning_effort:
+            payload["reasoning"] = {"effort": self._reasoning_effort}
+        if self._extra_request_params:
+            payload.update(self._extra_request_params)
+        if stream:
+            payload["stream"] = True
+        for name in quirks.dropped_params:
+            payload.pop(name, None)
+        return payload
+
     def _build_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}
         if self._api_key:
@@ -336,7 +441,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
         try:
             async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
                 response = await client.post(
-                    f"{self._base_url}/chat/completions",
+                    self._completion_url(),
                     json=payload,
                     headers=self._build_headers(),
                 )
@@ -362,7 +467,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
 
         Optional hook the probe engine feature-detects (same precedent
         as ``validate_reasoning_effort``): list models, then complete a
-        1-token chat built by THIS adapter's ``_build_payload`` and
+        1-token LLM request built by THIS adapter's ``_build_payload`` and
         healed by the same signal-driven adaptation loop as
         ``generate()`` — so every quirk the runtime copes with
         (``max_completion_tokens`` rename, system-role merge,
@@ -388,7 +493,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
             payload = self._build_payload(PROBE_CHAT_PROMPT, max_tokens_override=1)
             async with probe_http_client(timeout_seconds, transport) as client:
                 response = await client.post(
-                    f"{self._base_url}/chat/completions",
+                    self._completion_url(),
                     json=payload,
                     headers=self._build_headers(),
                 )
@@ -407,7 +512,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
                         break
                     payload = adapted
                     response = await client.post(
-                        f"{self._base_url}/chat/completions",
+                        self._completion_url(),
                         json=payload,
                         headers=self._build_headers(),
                     )
@@ -422,7 +527,10 @@ class OpenAICompatibleChatModel(ChatModelPort):
                 if self._max_tokens_param == "max_completion_tokens"
                 else ""
             )
-            return True, f"model {model!r} completed a 1-token chat{quirk}"
+            request_kind = "Responses request" if self._uses_responses_api else "chat"
+            return True, (
+                f"model {model!r} completed a 1-token {request_kind}{quirk}"
+            )
 
         return [
             await run_probe_check("listed_models", list_models_check),
@@ -449,6 +557,12 @@ class OpenAICompatibleChatModel(ChatModelPort):
         minimal JSON-instruction prompt, and continues after successes so a
         generic upstream 400 can be narrowed down without guessing.
         """
+        if self._uses_responses_api:
+            return await self._diagnose_responses_payload(
+                transport=transport,
+                timeout_seconds=timeout_seconds,
+                exhaustive=exhaustive,
+            )
 
         model = self._resolve_model(None)
         checks: list[PayloadDiagnosticCheck] = []
@@ -704,7 +818,201 @@ class OpenAICompatibleChatModel(ChatModelPort):
                 if fingerprint in seen:
                     continue
                 seen.add(fingerprint)
-                check = await self._diagnose_chat_request(
+                check = await self._diagnose_completion_request(
+                    client,
+                    name=name,
+                    payload=payload,
+                    removed_fields=removed_fields,
+                )
+                checks.append(check)
+                if check.ok and not exhaustive:
+                    break
+
+        return checks
+
+    async def _diagnose_responses_payload(
+        self,
+        *,
+        transport: httpx.AsyncBaseTransport | None,
+        timeout_seconds: float,
+        exhaustive: bool,
+    ) -> list[PayloadDiagnosticCheck]:
+        """Responses counterpart of the Chat Completions payload lab.
+
+        The candidate shapes deliberately use native ``input`` /
+        ``instructions`` fields. A user can select Responses in an unsaved
+        draft and run this lab before deciding whether to persist the protocol
+        change, so it never needs to guess or automatically replay a failed
+        Chat Completions request against another endpoint.
+        """
+        model = self._resolve_model(None)
+        checks: list[PayloadDiagnosticCheck] = []
+
+        async with probe_http_client(timeout_seconds, transport) as client:
+            checks.append(
+                await self._diagnose_models_request(client, model=model),
+            )
+            baseline = self._build_payload(
+                PROBE_CHAT_PROMPT,
+                stream=False,
+                model=None,
+                max_tokens_override=1,
+            )
+            baseline.pop("stream", None)
+            candidates: list[tuple[str, dict, tuple[str, ...]]] = [
+                ("runtime_non_stream", baseline, ()),
+            ]
+
+            if exhaustive:
+                runtime = self._build_payload(
+                    PROBE_CHAT_PROMPT,
+                    stream=not self._disable_streaming,
+                    model=None,
+                    max_tokens_override=1,
+                )
+                candidates.insert(0, ("runtime_configured", runtime, ()))
+
+                forced_stream = copy.deepcopy(baseline)
+                forced_stream["stream"] = True
+                candidates.insert(
+                    1,
+                    ("forced_stream_true", forced_stream, ("stream",)),
+                )
+
+                without_effort = copy.deepcopy(baseline)
+                _drop_payload_keys(without_effort, ("reasoning",))
+                candidates.append(
+                    (
+                        "without_reasoning_effort",
+                        without_effort,
+                        ("reasoning.effort",),
+                    ),
+                )
+
+                for index, key in enumerate(
+                    (
+                        key
+                        for key in (self._extra_request_params or {})
+                        if isinstance(key, str)
+                    ),
+                    start=1,
+                ):
+                    one_extra_removed = copy.deepcopy(baseline)
+                    _drop_payload_keys(one_extra_removed, (key,))
+                    candidates.append(
+                        (
+                            f"without_extra_request_param_{index}",
+                            one_extra_removed,
+                            (key,),
+                        ),
+                    )
+
+                without_instructions = copy.deepcopy(baseline)
+                _drop_payload_keys(without_instructions, ("instructions",))
+                candidates.append(
+                    (
+                        "without_instructions",
+                        without_instructions,
+                        ("instructions",),
+                    ),
+                )
+
+                json_minimal = {
+                    "model": model,
+                    "input": 'Return only this JSON object: {"status":"ok"}',
+                    "max_output_tokens": 1,
+                }
+                candidates.append(
+                    (
+                        "minimal_json_instruction",
+                        json_minimal,
+                        (
+                            "max_output_tokens",
+                            "reasoning",
+                            "instructions",
+                        ),
+                    ),
+                )
+
+                no_model = copy.deepcopy(json_minimal)
+                _drop_payload_keys(no_model, ("model",))
+                candidates.append(("without_model", no_model, ("model",)))
+
+                no_input = copy.deepcopy(json_minimal)
+                _drop_payload_keys(no_input, ("input",))
+                candidates.append(("without_input", no_input, ("input",)))
+
+            explicit_false = dict(baseline)
+            explicit_false["stream"] = False
+            candidates.append(("explicit_stream_false", explicit_false, ()))
+
+            without_max = dict(baseline)
+            _drop_payload_keys(without_max, ("max_output_tokens",))
+            candidates.append(
+                (
+                    "without_max_tokens",
+                    without_max,
+                    ("max_output_tokens",),
+                ),
+            )
+
+            without_reasoning = dict(without_max)
+            _drop_payload_keys(without_reasoning, ("reasoning",))
+            candidates.append(
+                (
+                    "without_reasoning",
+                    without_reasoning,
+                    ("reasoning",),
+                ),
+            )
+
+            without_extra = dict(without_reasoning)
+            extra_keys = tuple(
+                key for key in (self._extra_request_params or {})
+                if isinstance(key, str)
+            )
+            _drop_payload_keys(without_extra, extra_keys)
+            candidates.append(
+                ("without_extra_request_params", without_extra, extra_keys),
+            )
+
+            without_instructions = dict(without_extra)
+            _drop_payload_keys(without_instructions, ("instructions",))
+            candidates.append(
+                (
+                    "without_instructions",
+                    without_instructions,
+                    ("instructions",),
+                ),
+            )
+
+            minimal = {"model": model, "input": PROBE_CHAT_PROMPT}
+            candidates.append(
+                (
+                    "minimal_model_input",
+                    minimal,
+                    (
+                        "max_output_tokens",
+                        "reasoning",
+                        "instructions",
+                        "extra_request_params",
+                    ),
+                ),
+            )
+
+            seen: set[str] = set()
+            for name, payload, removed_fields in candidates:
+                _cap_diagnostic_tokens(payload)
+                fingerprint = json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                check = await self._diagnose_completion_request(
                     client,
                     name=name,
                     payload=payload,
@@ -755,7 +1063,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
             latency_ms=latency_ms,
         )
 
-    async def _diagnose_chat_request(
+    async def _diagnose_completion_request(
         self,
         client: httpx.AsyncClient,
         *,
@@ -766,7 +1074,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
         start = time.perf_counter()
         try:
             response = await client.post(
-                f"{self._base_url}/chat/completions",
+                self._completion_url(),
                 json=payload,
                 headers=self._build_headers(),
             )
@@ -813,7 +1121,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
                 httpx.Response, dict,
             ]:
                 response = await client.post(
-                    f"{self._base_url}/chat/completions",
+                    self._completion_url(),
                     json=request_payload,
                     headers=self._build_headers(),
                 )
@@ -835,7 +1143,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
                         break
                     request_payload = adapted
                     response = await client.post(
-                        f"{self._base_url}/chat/completions",
+                        self._completion_url(),
                         json=request_payload,
                         headers=self._build_headers(),
                     )
@@ -852,8 +1160,13 @@ class OpenAICompatibleChatModel(ChatModelPort):
                 return response, request_payload
 
             response, payload = await post_completion(payload)
+            parse_text = (
+                _responses_text
+                if self._uses_responses_api
+                else _completion_text
+            )
             try:
-                content = _completion_text(response)
+                content = parse_text(response)
             except OpenAICompatibleResponseShapeError:
                 _LOGGER.warning(
                     "LLM %s returned a 2xx completion without usable text; "
@@ -862,7 +1175,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
                 )
                 response, payload = await post_completion(payload)
                 try:
-                    content = _completion_text(response)
+                    content = parse_text(response)
                 except OpenAICompatibleResponseShapeError as retry_error:
                     raise OpenAICompatibleResponseShapeError(
                         "OpenAI-compatible completion response still lacked "
@@ -939,12 +1252,17 @@ class OpenAICompatibleChatModel(ChatModelPort):
             for _ in range(_MAX_PRESCRIBED_RETRIES):
                 async with client.stream(
                     "POST",
-                    f"{self._base_url}/chat/completions",
+                    self._completion_url(),
                     json=payload,
                     headers=self._build_headers(),
                 ) as response:
                     if response.status_code < 400:
-                        async for chunk in _iter_openai_stream(response):
+                        stream_iterator = (
+                            _iter_responses_stream(response)
+                            if self._uses_responses_api
+                            else _iter_openai_stream(response)
+                        )
+                        async for chunk in stream_iterator:
                             yield chunk
                         return
                     # Read the body for diagnostics before raising —
@@ -1071,7 +1389,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
             return None
         failing_model = str(payload.get("model") or self._model)
         adapted: dict | None = None
-        if _is_non_chat_model_error(
+        if not self._uses_responses_api and _is_non_chat_model_error(
             status_code=status_code,
             body=body,
             requested_model=payload.get("model"),
@@ -1085,8 +1403,13 @@ class OpenAICompatibleChatModel(ChatModelPort):
                 model=None,
                 max_tokens_override=max_tokens_override,
             )
-        elif _is_max_tokens_param_error(
-            status_code=status_code, body=body, payload=payload,
+        elif (
+            not self._uses_responses_api
+            and _is_max_tokens_param_error(
+                status_code=status_code,
+                body=body,
+                payload=payload,
+            )
         ):
             # The server literally prescribed the fix — rename the
             # parameter, remember it, retry once.
@@ -1098,8 +1421,13 @@ class OpenAICompatibleChatModel(ChatModelPort):
                 model=model,
                 max_tokens_override=max_tokens_override,
             )
-        elif _is_system_role_rejection(
-            status_code=status_code, body=body, payload=payload,
+        elif (
+            not self._uses_responses_api
+            and _is_system_role_rejection(
+                status_code=status_code,
+                body=body,
+                payload=payload,
+            )
         ):
             self._remember_system_role_merge(failing_model)
             adapted = self._build_payload(
@@ -1111,7 +1439,10 @@ class OpenAICompatibleChatModel(ChatModelPort):
             )
         else:
             rejected = _named_unrecognized_params(
-                status_code=status_code, body=body, payload=payload,
+                status_code=status_code,
+                body=body,
+                payload=payload,
+                structural_params=self._structural_params(),
             )
             if rejected:
                 for name in rejected:
@@ -1211,6 +1542,50 @@ async def _iter_openai_stream(response: httpx.Response) -> AsyncIterator[str]:
                 yield content
         except (json.JSONDecodeError, KeyError, IndexError):
             continue
+
+
+async def _iter_responses_stream(response: httpx.Response) -> AsyncIterator[str]:
+    """Yield text from native Responses SSE events.
+
+    A native stream emits ``response.output_text.delta`` events. Some
+    OpenAI-compatible relays omit deltas but include the final response in
+    ``response.completed``; use that only when no delta was emitted so a
+    normal stream never duplicates its text at the end.
+    """
+    emitted_delta = False
+    completed_response: dict | None = None
+    async for line in response.aiter_lines():
+        if not line.startswith("data:"):
+            continue
+        data_str = line[5:].strip()
+        if data_str == "[DONE]":
+            break
+        try:
+            event = json.loads(data_str)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "response.output_text.delta":
+            delta = event.get("delta")
+            if isinstance(delta, str) and delta:
+                emitted_delta = True
+                yield delta
+            continue
+        if event.get("type") == "response.completed":
+            candidate = event.get("response")
+            if isinstance(candidate, dict):
+                completed_response = candidate
+            elif "output" in event or "output_text" in event:
+                completed_response = event
+    if emitted_delta or completed_response is None:
+        return
+    try:
+        text = _responses_text_from_data(completed_response)
+    except OpenAICompatibleResponseShapeError:
+        return
+    if text:
+        yield text
 
 
 def _raise_stream_error(response: httpx.Response, text: str) -> None:
@@ -1388,7 +1763,7 @@ def _cap_diagnostic_tokens(payload: dict) -> None:
     still the smallest possible compatibility request.
     """
 
-    for key in ("max_tokens", "max_completion_tokens"):
+    for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
         if key in payload:
             payload[key] = 1
 
@@ -1438,6 +1813,7 @@ def _named_unrecognized_params(
     status_code: int,
     body: str,
     payload: dict,
+    structural_params: frozenset[str] = _CHAT_STRUCTURAL_PARAMS,
 ) -> tuple[str, ...]:
     """Top-level payload keys the error body names as unrecognized.
 
@@ -1464,7 +1840,11 @@ def _named_unrecognized_params(
     candidates.extend(_pydantic_extra_forbidden_locs(body))
     named: list[str] = []
     for name in candidates:
-        if name in named or name in _STRUCTURAL_PARAMS or name not in payload:
+        if (
+            name in named
+            or name in structural_params
+            or name not in payload
+        ):
             continue
         named.append(name)
     return tuple(named)
@@ -1499,15 +1879,13 @@ def _parse_model_ids(data: object) -> list[str]:
 
 
 def _payload_has_image_parts(payload: object) -> bool:
-    """True when the request payload's user message carried the OpenAI
-    multimodal array shape with at least one ``image_url`` part.
+    """True when the request carried an OpenAI image input part.
 
-    This is the structural signal the image-rejection classifier keys on
-    — we only degrade-retry a 4xx when we actually sent images, never by
-    keyword-matching the error body. ``_build_payload`` emits the array
-    shape exactly when it took the ``image_urls and self.supports_vision``
-    branch, so inspecting the payload we're about to send (or just sent)
-    is the reliable "images were attached" test."""
+    This is the structural signal the image-rejection classifier keys on: we
+    only degrade-retry a 4xx when we actually sent images, never by
+    keyword-matching the error body. Chat Completions uses ``image_url``;
+    Responses uses ``input_image``.
+    """
     if not isinstance(payload, dict):
         return False
     messages = payload.get("messages")
@@ -1521,6 +1899,18 @@ def _payload_has_image_parts(payload: object) -> bool:
             continue
         for part in content:
             if isinstance(part, dict) and part.get("type") == "image_url":
+                return True
+    request_input = payload.get("input")
+    if not isinstance(request_input, list):
+        return False
+    for message in request_input:
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "input_image":
                 return True
     return False
 
@@ -1567,6 +1957,52 @@ def _raise_with_body(response: httpx.Response) -> None:
     raise httpx.HTTPStatusError(
         f"{response.status_code} from {response.request.url}: {body[:500]}",
         request=response.request, response=response,
+    )
+
+
+def _responses_text(response: httpx.Response) -> str:
+    """Extract usable assistant text from a successful Responses reply."""
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise OpenAICompatibleResponseShapeError(
+            "OpenAI-compatible Responses reply was not valid JSON"
+        ) from exc
+    return _responses_text_from_data(data)
+
+
+def _responses_text_from_data(data: object) -> str:
+    """Read ``output_text`` or message output parts from a Responses object."""
+    if not isinstance(data, dict):
+        raise OpenAICompatibleResponseShapeError(
+            "OpenAI-compatible Responses reply was not an object"
+        )
+    top_level = data.get("output_text")
+    if isinstance(top_level, str) and top_level.strip():
+        return top_level
+    output = data.get("output")
+    if not isinstance(output, list):
+        raise OpenAICompatibleResponseShapeError(
+            "OpenAI-compatible Responses reply had no output"
+        )
+    parts: list[str] = []
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict) or part.get("type") != "output_text":
+                continue
+            text = part.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text)
+    joined = "".join(parts)
+    if joined.strip():
+        return joined
+    raise OpenAICompatibleResponseShapeError(
+        "OpenAI-compatible Responses reply had no usable assistant content"
     )
 
 

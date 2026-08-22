@@ -97,6 +97,157 @@ def _sse_ok(text: str = "ok") -> httpx.Response:
     )
 
 
+def _responses_ok(text: str = "ok") -> httpx.Response:
+    return httpx.Response(200, json={
+        "output": [{
+            "type": "message",
+            "content": [{"type": "output_text", "text": text}],
+        }],
+    })
+
+
+def _responses_sse(*events: dict[str, Any]) -> httpx.Response:
+    lines = [f"data: {json.dumps(event)}" for event in events]
+    lines.append("data: [DONE]")
+    return httpx.Response(
+        200,
+        headers={"content-type": "text/event-stream"},
+        content=("\n\n".join(lines) + "\n\n").encode("utf-8"),
+    )
+
+
+def test_invalid_llm_protocol_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Unsupported OpenAI-compatible LLM protocol"):
+        _build(llm_protocol="legacy_completions")
+
+
+@pytest.mark.asyncio
+async def test_responses_generate_uses_native_payload_and_endpoint() -> None:
+    requests: list[tuple[str, dict[str, Any]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((
+            request.url.path,
+            json.loads(request.content.decode("utf-8")),
+        ))
+        return _responses_ok("native answer")
+
+    model = _build(
+        llm_protocol="responses",
+        max_tokens=64,
+        disable_reasoning=True,
+        reasoning_effort="low",
+    )
+    with _patch_transport(httpx.MockTransport(handler)):
+        answer = await model.generate("hello")
+
+    assert answer == "native answer"
+    assert requests == [(
+        "/v1/responses",
+        {
+            "model": "gpt-5-mini",
+            "instructions": "You are a roleplay character backend.",
+            "input": "hello",
+            "max_output_tokens": 64,
+            "reasoning": {"effort": "low"},
+        },
+    )]
+
+
+@pytest.mark.asyncio
+async def test_responses_stream_yields_deltas_without_repeating_completed_text() -> None:
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return _responses_sse(
+            {"type": "response.output_text.delta", "delta": "native "},
+            {"type": "response.output_text.delta", "delta": "stream"},
+            {
+                "type": "response.completed",
+                "response": {
+                    "output": [{
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text",
+                            "text": "native stream",
+                        }],
+                    }],
+                },
+            },
+        )
+
+    model = _build(llm_protocol="responses")
+    with _patch_transport(httpx.MockTransport(handler)):
+        chunks = [chunk async for chunk in model.generate_stream("hello")]
+
+    assert chunks == ["native ", "stream"]
+    assert paths == ["/v1/responses"]
+
+
+@pytest.mark.asyncio
+async def test_responses_stream_uses_completed_event_when_deltas_are_omitted() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _responses_sse({
+            "type": "response.completed",
+            "response": {
+                "output": [{
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "whole answer"}],
+                }],
+            },
+        })
+
+    model = _build(llm_protocol="responses")
+    with _patch_transport(httpx.MockTransport(handler)):
+        chunks = [chunk async for chunk in model.generate_stream("hello")]
+
+    assert chunks == ["whole answer"]
+
+
+@pytest.mark.asyncio
+async def test_responses_disable_streaming_sends_one_non_stream_completion() -> None:
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/responses"
+        bodies.append(json.loads(request.content.decode("utf-8")))
+        return _responses_ok("complete response")
+
+    model = _build(llm_protocol="responses", disable_streaming=True)
+    with _patch_transport(httpx.MockTransport(handler)):
+        chunks = [chunk async for chunk in model.generate_stream("hello")]
+
+    assert chunks == ["complete response"]
+    assert len(bodies) == 1
+    assert "stream" not in bodies[0]
+
+
+@pytest.mark.asyncio
+async def test_responses_payload_diagnostic_uses_responses_endpoint() -> None:
+    requests: list[tuple[str, dict[str, Any] | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            requests.append((request.url.path, None))
+            return httpx.Response(200, json={"data": [{"id": "gpt-5-mini"}]})
+        body = json.loads(request.content.decode("utf-8"))
+        requests.append((request.url.path, body))
+        return _responses_ok()
+
+    checks = await _build(llm_protocol="responses").diagnose_payload(
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert [check.name for check in checks] == ["model_list", "runtime_non_stream"]
+    endpoint, payload = requests[1]
+    assert endpoint == "/v1/responses"
+    assert payload is not None
+    assert payload["input"] == "ping"
+    assert payload["max_output_tokens"] == 1
+    assert "messages" not in payload
+
+
 @pytest.mark.asyncio
 async def test_payload_diagnostic_progressively_removes_fields_and_stops_on_success() -> None:
     """The admin diagnostic exposes the first compatible request shape.

@@ -177,6 +177,19 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
             "Yuralume as one complete chunk."
         ),
     )
+    llm_protocol = ProviderFieldSpec(
+        key="llm_protocol",
+        label="LLM API protocol",
+        kind="select",
+        placeholder="chat_completions (default)",
+        advanced=True,
+        options=("chat_completions", "responses"),
+        hint=(
+            "chat_completions sends POST /chat/completions. Select responses "
+            "only when this custom provider documents POST /responses; this "
+            "does not auto-retry failed requests on another endpoint."
+        ),
+    )
     anthropic_version = ProviderFieldSpec(
         key="anthropic_version",
         label="Anthropic version",
@@ -672,6 +685,7 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
                 supports_vision,
                 max_tokens,
                 disable_streaming,
+                llm_protocol,
                 disable_reasoning,
                 reasoning_effort,
                 extra_request_params,
