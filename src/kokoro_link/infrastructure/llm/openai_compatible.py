@@ -1000,6 +1000,48 @@ class OpenAICompatibleChatModel(ChatModelPort):
                 ),
             )
 
+            # Some OpenAI-compatible relays only recognize the canonical
+            # Responses message-content structure, rather than string input.
+            # Keep these probes independent of provider prompts and optional
+            # controls so a result isolates that protocol distinction.
+            structured_input = {
+                "model": model,
+                "input": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": PROBE_CHAT_PROMPT,
+                    }],
+                }],
+            }
+            candidates.append(
+                (
+                    "structured_user_input",
+                    structured_input,
+                    (
+                        "max_output_tokens",
+                        "reasoning",
+                        "instructions",
+                        "extra_request_params",
+                    ),
+                ),
+            )
+
+            structured_input_stream = copy.deepcopy(structured_input)
+            structured_input_stream["stream"] = True
+            candidates.append(
+                (
+                    "structured_user_input_stream",
+                    structured_input_stream,
+                    (
+                        "max_output_tokens",
+                        "reasoning",
+                        "instructions",
+                        "extra_request_params",
+                    ),
+                ),
+            )
+
             seen: set[str] = set()
             for name, payload, removed_fields in candidates:
                 _cap_diagnostic_tokens(payload)

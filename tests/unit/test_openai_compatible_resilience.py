@@ -249,6 +249,41 @@ async def test_responses_payload_diagnostic_uses_responses_endpoint() -> None:
 
 
 @pytest.mark.asyncio
+async def test_exhaustive_responses_payload_diagnostic_tests_structured_input_variants() -> None:
+    payloads: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "gpt-5-mini"}]})
+        payloads.append(json.loads(request.content.decode("utf-8")))
+        return _responses_ok()
+
+    checks = await _build(llm_protocol="responses").diagnose_payload(
+        transport=httpx.MockTransport(handler),
+        exhaustive=True,
+    )
+
+    payload_by_name = dict(zip(
+        (check.name for check in checks if check.name != "model_list"),
+        payloads,
+        strict=True,
+    ))
+    expected_input = [{
+        "role": "user",
+        "content": [{"type": "input_text", "text": "ping"}],
+    }]
+    assert payload_by_name["structured_user_input"] == {
+        "model": "gpt-5-mini",
+        "input": expected_input,
+    }
+    assert payload_by_name["structured_user_input_stream"] == {
+        "model": "gpt-5-mini",
+        "input": expected_input,
+        "stream": True,
+    }
+
+
+@pytest.mark.asyncio
 async def test_payload_diagnostic_progressively_removes_fields_and_stops_on_success() -> None:
     """The admin diagnostic exposes the first compatible request shape.
 
