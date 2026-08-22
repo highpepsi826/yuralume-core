@@ -5,6 +5,26 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-22 - Dual-mode structured Responses relay deployment
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed `5bfa7c5` on `local/customizations`.
+- Backup: `not required`; this changes outgoing provider request routing only
+  and has no schema or user-data migration.
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated only the
+  existing `app` service. A connection may now use primary
+  `chat_completions` with `structured_streaming`: foreground chat remains on
+  Chat Completions, while complete background calls use the verified
+  structured Responses SSE relay.
+- Verification: 59 focused backend tests passed. Docker Compose reported the
+  app, PostgreSQL, storage, and WhatsApp services healthy, and
+  `http://127.0.0.1:8012/health` returned `status: ok`.
+- Follow-up: for the affected source, set protocol to `chat_completions`,
+  Responses request profile to `structured_streaming`, leave Max tokens blank,
+  and keep Disable upstream streaming off.
+
 ### 2026-08-22 - Structured streaming Responses relay compatibility
 
 - Status: completed
