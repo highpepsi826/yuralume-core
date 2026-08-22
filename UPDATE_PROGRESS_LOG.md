@@ -5,6 +5,29 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-22 - Structured streaming Responses relay compatibility
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed `24e240d` on `local/customizations`.
+- Backup: `not required`; this changes the outgoing provider request shape
+  only and has no schema or user-data migration.
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated the existing
+  `migrate` and `app` services using the runtime Compose base plus local
+  override. Custom OpenAI-compatible Responses connections can now select
+  `structured_streaming`, which always sends the verified structured user
+  input with `stream=true`, while omitting instructions, token limits,
+  reasoning, and extra request parameters. Background calls collect the same
+  SSE stream into their normal text result.
+- Verification: 133 focused backend tests, i18n checks, a frontend production
+  build, and Docker app build passed. All Compose services are healthy;
+  `http://127.0.0.1:8012/health` returned `status: ok` and `/docs` returned
+  HTTP 200.
+- Follow-up: on the affected provider, select `LLM API protocol: responses`
+  and `Responses request profile: structured_streaming`, save, then use the
+  ordinary connection test and an actual chat turn.
+
 ### 2026-08-22 - Verify streaming Responses payload text
 
 - Status: completed
