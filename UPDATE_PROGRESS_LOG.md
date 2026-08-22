@@ -5,6 +5,24 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-22 - Structured Responses payload probes
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.5.2` (`69f5cf7`)
+- Git result: committed `a716ea5` on `local/customizations`.
+- Backup: `not required`; this adds read-only, fixed-prompt diagnostics and
+  has no schema or user-data migration.
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated the existing
+  `migrate` and `app` services using the runtime Compose base plus local
+  override. Complete Responses payload diagnostics now test native structured
+  `input` and the same structure with `stream=true`.
+- Verification: 38 focused backend tests, frontend i18n checks, and the
+  production frontend build passed. All four Compose services are healthy and
+  `http://127.0.0.1:8012/health` returned `status: ok`.
+- Follow-up: run the complete Payload test lab against the affected source and
+  compare the two structured-input variants with the existing minimal input.
+
 ### 2026-08-22 - Responses protocol for custom LLM providers
 
 - Status: completed
