@@ -357,6 +357,9 @@ function resetIntakeState() {
           class="field-input"
           :placeholder="t('characterCreate.initialRelationship.proactiveCadencePlaceholder')"
         />
+        <p v-if="form.proactive_permission" class="field-hint">
+          {{ t('characterCreate.initialRelationship.proactiveCadenceHint') }}
+        </p>
 
         <div v-if="!isEditMode" class="relationship-wizard__grid">
           <label>

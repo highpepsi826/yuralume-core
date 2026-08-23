@@ -170,6 +170,10 @@ class CharacterCreationIntakeQuestionResponse(BaseModel):
     field: str
     question: str
     suggestions: list[str] = Field(default_factory=list)
+    # False for advisory-only nudges (e.g. proactive cadence hint, IR4) that
+    # are worth asking but must not withhold the create button — mirrors
+    # CharacterCreationIntakeWarningResponse.blocking below.
+    blocking: bool = True
 
 
 class CharacterCreationIntakeWarningResponse(BaseModel):
@@ -371,6 +375,7 @@ async def analyze_character_creation_intake(
                 field=item.field,
                 question=item.question,
                 suggestions=list(item.suggestions),
+                blocking=item.blocking,
             )
             for item in result.questions
         ],
@@ -688,61 +693,6 @@ async def get_character(
     if character is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Character not found")
     return character
-
-
-def _require_initial_relationship_repository(container: ServiceContainer):
-    repository = getattr(container, "relationship_seed_repository", None)
-    if repository is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Initial relationship settings are not configured",
-        )
-    return repository
-
-
-@router.get(
-    "/characters/{character_id}/initial-relationship",
-    response_model=InitialRelationshipPayload | None,
-)
-async def get_initial_relationship(
-    character_id: str,
-    container: ServiceContainer = Depends(get_container),
-    current_user_id: str = Depends(get_current_user_id),
-    _owned_character_id: str = Depends(ensure_owned_character_id),
-) -> InitialRelationshipPayload | None:
-    """Return the caller's editable relationship seed for one character."""
-    repository = _require_initial_relationship_repository(container)
-    seed = await repository.get(character_id, current_user_id)
-    if seed is None or seed.is_empty:
-        return None
-    return InitialRelationshipPayload.from_seed(seed)
-
-
-@router.put(
-    "/characters/{character_id}/initial-relationship",
-    response_model=InitialRelationshipPayload,
-)
-async def update_initial_relationship(
-    character_id: str,
-    payload: InitialRelationshipPayload,
-    container: ServiceContainer = Depends(get_container),
-    current_user_id: str = Depends(get_current_user_id),
-    _owned_character_id: str = Depends(ensure_owned_character_id),
-) -> InitialRelationshipPayload:
-    """Create or replace the caller-confirmed relationship seed."""
-    repository = _require_initial_relationship_repository(container)
-    seed = payload.to_seed(
-        character_id=character_id,
-        operator_id=current_user_id,
-        now=datetime.now(timezone.utc),
-    )
-    if seed.is_empty:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one initial relationship setting is required",
-        )
-    await repository.save(seed)
-    return InitialRelationshipPayload.from_seed(seed)
 
 
 @router.patch("/characters/{character_id}", response_model=CharacterResponse)

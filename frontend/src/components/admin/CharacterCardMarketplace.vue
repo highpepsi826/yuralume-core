@@ -11,7 +11,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { notification } from 'ant-design-vue'
 import type { Character, InitialRelationshipPayload } from '@/types/character'
-import InitialRelationshipWizardModal from '@/components/InitialRelationshipWizardModal.vue'
 import {
   listCharacterCards,
   installCharacterCard,
@@ -24,6 +23,7 @@ import {
   shouldShowCloudOnlyNotice,
 } from '@/utils/characterCardSource'
 import { UiCard, UiButton, UiBadge } from '@/components/ui'
+import InitialRelationshipWizardModal from '@/components/InitialRelationshipWizardModal.vue'
 
 const emit = defineEmits<{
   installed: [char: Character]
@@ -36,6 +36,10 @@ const loading = ref(true)
 const loadError = ref<string | null>(null)
 const installingId = ref<string | null>(null)
 const relationshipWizardVisible = ref(false)
+// `CharacterCardPackSummary extends CharacterCardPreview` (with a non-null
+// `pack_id`), so a list row already carries everything the wizard needs
+// (name / suggested_known_context) — no extra preview round-trip here,
+// unlike the file-import path in CharactersAdminPage.vue.
 const pendingPack = ref<CharacterCardPackSummary | null>(null)
 // "翻成我的語言" — bundled packs ship zh-TW; an en/ja admin can opt into
 // LLM-translating the A-layer profile + bundled arc templates on install
@@ -59,7 +63,7 @@ async function load() {
   }
 }
 
-async function install(pack: CharacterCardPackSummary) {
+function install(pack: CharacterCardPackSummary) {
   // The button is already disabled for these; this is the keyboard / stale
   // list path, and the backend refuses too. Three layers because the middle
   // one is the only one that can explain itself.
@@ -68,15 +72,11 @@ async function install(pack: CharacterCardPackSummary) {
   relationshipWizardVisible.value = true
 }
 
-function closeRelationshipWizard() {
-  if (installingId.value !== null) return
-  relationshipWizardVisible.value = false
-  pendingPack.value = null
-}
-
-async function confirmRelationshipWizard(initialRelationship: InitialRelationshipPayload | null) {
+async function confirmInstall(
+  initialRelationship: InitialRelationshipPayload | null,
+) {
   const pack = pendingPack.value
-  if (!pack || installingId.value !== null) return
+  if (!pack) return
   installingId.value = pack.pack_id
   try {
     const { character, landed_arc_template_ids } = await installCharacterCard(
@@ -93,8 +93,7 @@ async function confirmRelationshipWizard(initialRelationship: InitialRelationshi
         : undefined,
     })
     emit('installed', character)
-    relationshipWizardVisible.value = false
-    pendingPack.value = null
+    resetRelationshipWizard()
   } catch (err) {
     notification.error({
       message: t('admin.page.characters.marketplace.installError'),
@@ -103,6 +102,23 @@ async function confirmRelationshipWizard(initialRelationship: InitialRelationshi
   } finally {
     installingId.value = null
   }
+}
+
+// Loading-gated close — bound to the modal's @close so an in-flight install
+// can't be dismissed out from under itself. The success path above must NOT
+// go through this: `installingId` is still set there (finally hasn't run
+// yet), so a guarded close would silently no-op and leave the wizard stuck
+// open with a stale pending pack — see resetRelationshipWizard().
+function closeRelationshipWizard() {
+  if (installingId.value !== null) return
+  resetRelationshipWizard()
+}
+
+// Unguarded reset — the success path calls this directly (not the guarded
+// close above) because it runs while `installingId` is still set.
+function resetRelationshipWizard() {
+  relationshipWizardVisible.value = false
+  pendingPack.value = null
 }
 
 onMounted(load)
@@ -200,7 +216,7 @@ onMounted(load)
     :suggested-known-context="pendingPack?.suggested_known_context ?? ''"
     :loading="installingId !== null"
     @close="closeRelationshipWizard"
-    @confirm="confirmRelationshipWizard"
+    @confirm="confirmInstall"
   />
 </template>
 
