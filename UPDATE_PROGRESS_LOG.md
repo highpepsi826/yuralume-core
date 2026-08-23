@@ -5,6 +5,27 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-23 - Upstream v0.6.0 merge and local deployment
+
+- Status: completed
+- Type: upstream update and local-source deployment
+- Upstream base: `v0.6.0` (`ce5bc09`)
+- Git result: merged `main` into `local/customizations` as `48a1b44`; the
+  branch remains local-only and was not pushed.
+- Backup: `yuralume-pre-v0.6.0-deploy-20260823-235405.dump`, verified with
+  `pg_restore --list` before migration.
+- Deployment: rebuilt `yuralume-local/app:custom`, refreshed the published
+  PostgreSQL, storage, and WhatsApp images, then ran the local image's
+  Alembic migration before recreating the app.
+- Data safety: an isolated restore-and-upgrade-and-rollback rehearsal passed
+  first. The production migration reached `s9l2c5m10044`; core table counts
+  matched the pre-migration baseline, and retired operator status values were
+  preserved in the migration archive table before their obsolete columns were
+  removed.
+- Verification: all four Compose services are healthy, and
+  `http://127.0.0.1:8012/health` returned `status: ok`.
+- Follow-up: none
+
 ### 2026-08-22 - Dual-mode structured Responses relay deployment
 
 - Status: completed
