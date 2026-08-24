@@ -47,7 +47,9 @@ good with no error anywhere.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+from uuid import uuid4
 
 from kokoro_link.application.dto.chat import PresenceFramePayload, SendChatMessageRequest
 from kokoro_link.application.services.chat_service import ChatService
@@ -57,6 +59,7 @@ from kokoro_link.application.services.persona_disclosure_gate import (
     persona_safe_for_account,
 )
 from kokoro_link.application.services.outbound_message_segments import (
+    segment_outbound_message,
     send_segmented_outbound,
 )
 from kokoro_link.contracts.messaging import (
@@ -68,6 +71,11 @@ from kokoro_link.contracts.messaging import (
     OutboundMessage,
 )
 from kokoro_link.contracts.inbound_receipts import InboundReceiptPort
+from kokoro_link.contracts.outbound_deliveries import (
+    OutboundDeliveryDraft,
+    OutboundDeliveryRepositoryPort,
+    serialize_outbound_message,
+)
 from kokoro_link.contracts.repositories import ConversationRepositoryPort
 from kokoro_link.domain.entities.channel_binding import ChannelBinding
 from kokoro_link.domain.entities.conversation import Conversation
@@ -127,6 +135,7 @@ class MessagingDispatcher:
         adapters: dict[Platform, ChannelAdapterPort],
         debouncer: InboundDebouncer | None = None,
         receipt_repository: InboundReceiptPort | None = None,
+        outbound_delivery_repository: OutboundDeliveryRepositoryPort | None = None,
         busy_retry_attempts: int = DEFAULT_BUSY_RETRY_ATTEMPTS,
         busy_retry_delay_seconds: float = DEFAULT_BUSY_RETRY_DELAY_SECONDS,
         public_base_url: str = "",
@@ -145,6 +154,10 @@ class MessagingDispatcher:
         # no-DB / in-memory path, where behaviour stays exactly what it was:
         # a single process is fully covered by the debouncer alone.
         self._receipts = receipt_repository
+        # Durable outbound ledger.  It is optional so small in-memory test
+        # harnesses retain their historical adapter batching behaviour.
+        self._outbound_deliveries = outbound_delivery_repository
+        self._outbound_owner_id = f"dispatcher-{uuid4().hex}"
         self._busy_retry_attempts = max(1, busy_retry_attempts)
         self._busy_retry_delay_seconds = max(0.0, busy_retry_delay_seconds)
         # Relative URLs (``/v1/public/...``) become absolute before
@@ -279,9 +292,10 @@ class MessagingDispatcher:
             )
             return
 
-        await send_segmented_outbound(
-            adapter,
-            OutboundMessage(
+        await self._deliver_outbound(
+            adapter=adapter,
+            account_id=account.id,
+            message=OutboundMessage(
                 platform=message.platform,
                 chat_ref=message.chat_ref,
                 text=reply.assistant_message.content,
@@ -337,9 +351,10 @@ class MessagingDispatcher:
         just to discover the first one failed.
         """
         try:
-            await send_segmented_outbound(
-                adapter,
-                OutboundMessage(
+            await self._deliver_outbound(
+                adapter=adapter,
+                account_id=account.id,
+                message=OutboundMessage(
                     platform=message.platform,
                     chat_ref=message.chat_ref,
                     text=localized_fallback_text(
@@ -356,6 +371,131 @@ class MessagingDispatcher:
                 message.platform.value,
                 message.chat_ref,
             )
+
+    async def _deliver_outbound(
+        self,
+        *,
+        adapter: ChannelAdapterPort,
+        account_id: str,
+        message: OutboundMessage,
+    ) -> None:
+        """Deliver a reply, recording each bubble before its network call.
+
+        A transport failure is deliberately contained here: the inbound turn
+        has already been committed, so raising would make polling retry the
+        update and either duplicate the LLM turn or have it suppressed by the
+        inbound receipt.  The retry worker sends the exact stored payload.
+        """
+        if self._outbound_deliveries is None:
+            await send_segmented_outbound(adapter, message)
+            return
+
+        segments = segment_outbound_message(message)
+        if not segments:
+            return
+
+        now = datetime.now(timezone.utc)
+        batch_id = uuid4().hex if len(segments) > 1 else None
+        drafts = tuple(
+            OutboundDeliveryDraft(
+                id=uuid4().hex,
+                platform=segment.platform.value,
+                account_id=account_id,
+                chat_ref=segment.chat_ref,
+                payload_json=serialize_outbound_message(segment),
+                now=now,
+                batch_id=batch_id,
+                sequence_no=index,
+            )
+            for index, segment in enumerate(segments)
+        )
+        try:
+            saved = await self._outbound_deliveries.create_pending_batch(drafts)
+        except Exception:
+            # The batch contract is atomic: either every bubble is durable or
+            # no row is visible. That makes the old direct path safe as a
+            # fail-open fallback when the ledger itself is unavailable.
+            _LOGGER.exception(
+                "outbound ledger unavailable; using direct delivery "
+                "platform=%s chat_ref=%s",
+                message.platform.value, message.chat_ref,
+            )
+            try:
+                await send_segmented_outbound(adapter, message)
+            except Exception:
+                _LOGGER.exception(
+                    "direct outbound delivery failed platform=%s chat_ref=%s",
+                    message.platform.value, message.chat_ref,
+                )
+            return
+        if len(saved) != len(segments):
+            _LOGGER.error(
+                "outbound ledger returned incomplete batch platform=%s chat_ref=%s",
+                message.platform.value,
+                message.chat_ref,
+            )
+            return
+        pending = [(draft.id, segment) for draft, segment in zip(drafts, segments)]
+
+        for delivery_id, segment in pending:
+            now = datetime.now(timezone.utc)
+            try:
+                claimed = await self._outbound_deliveries.claim(
+                    delivery_id,
+                    owner_id=self._outbound_owner_id,
+                    now=now,
+                    lease_seconds=60.0,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "outbound delivery claim failed id=%s", delivery_id,
+                )
+                break
+            if not claimed:
+                _LOGGER.warning(
+                    "outbound delivery claim lost before send id=%s", delivery_id,
+                )
+                continue
+            try:
+                await adapter.send(segment)
+            except Exception as exc:
+                # Telegram can have accepted a request before a timeout. Keep
+                # the row pending: retrying is the only way to recover a lost
+                # response, with a small unavoidable duplicate risk.
+                try:
+                    await self._outbound_deliveries.mark_retryable(
+                        delivery_id,
+                        owner_id=self._outbound_owner_id,
+                        error=f"{type(exc).__name__}: {str(exc)[:240]}",
+                        next_attempt_at=now + timedelta(seconds=5),
+                        now=now,
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "failed to mark outbound delivery pending id=%s",
+                        delivery_id,
+                    )
+                _LOGGER.warning(
+                    "outbound delivery pending retry id=%s platform=%s "
+                    "error_type=%s",
+                    delivery_id, segment.platform.value, type(exc).__name__,
+                )
+                # Do not attempt later segments in this turn. Their rows do
+                # not exist yet; the failed segment's retry is the durable
+                # continuation point, and preserving order is preferable.
+                break
+            else:
+                try:
+                    await self._outbound_deliveries.mark_delivered(
+                        delivery_id,
+                        owner_id=self._outbound_owner_id,
+                        now=datetime.now(timezone.utc),
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "failed to mark outbound delivery delivered id=%s",
+                        delivery_id,
+                    )
 
     async def _claim_delivery(self, message: InboundMessage) -> _ClaimOutcome:
         """Take the durable at-most-once claim on this inbound delivery.

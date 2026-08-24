@@ -3267,6 +3267,59 @@ class ExternalProactiveEventRow(Base):
     )
 
 
+class OutboundMessageDeliveryRow(Base):
+    """Durable replay record for one outbound channel bubble.
+
+    ``payload_json`` intentionally excludes credentials.  Account credentials
+    are loaded afresh when a worker retries the row, so disabling or rotating
+    an account takes effect without rewriting queued messages.
+    """
+
+    __tablename__ = "outbound_message_deliveries"
+    __table_args__ = (
+        Index(
+            "ix_outbound_message_deliveries_state_due",
+            "state",
+            "next_attempt_at",
+        ),
+        Index(
+            "ix_outbound_message_deliveries_account",
+            "account_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    account_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    chat_ref: Mapped[str] = mapped_column(String(256), nullable=False)
+    batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sequence_no: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+
 
 class StorySceneSessionRow(Base):
     """One player-pulled story scene («起幕») and its live state.

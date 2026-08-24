@@ -247,6 +247,9 @@ from kokoro_link.application.services.discord_gateway_service import (
     DiscordGatewayService,
 )
 from kokoro_link.application.services.messaging_dispatcher import MessagingDispatcher
+from kokoro_link.application.services.outbound_delivery_retry_worker import (
+    OutboundDeliveryRetryWorker,
+)
 from kokoro_link.application.services.messaging_public_url import (
     MessagingPublicUrlResolver,
 )
@@ -1128,6 +1131,7 @@ class ServiceContainer:
     turn_journal_repository: TurnJournalRepositoryPort | None = None
     turn_undo_service: TurnUndoService | None = None
     messaging_dispatcher: MessagingDispatcher | None = None
+    outbound_delivery_retry_worker: OutboundDeliveryRetryWorker | None = None
     telegram_polling_service: TelegramPollingService | None = None
     discord_gateway_service: DiscordGatewayService | None = None
     whatsapp_gateway_service: WhatsAppGatewayService | None = None
@@ -4747,6 +4751,16 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         SAInboundReceiptRepository(db_session_factory)
         if db_session_factory is not None else None
     )
+    if db_session_factory is not None:
+        from kokoro_link.infrastructure.persistence.sa_outbound_deliveries import (
+            SAOutboundDeliveryRepository,
+        )
+        outbound_delivery_port = SAOutboundDeliveryRepository(db_session_factory)
+    else:
+        from kokoro_link.infrastructure.repositories.in_memory_outbound_deliveries import (
+            InMemoryOutboundDeliveryRepository,
+        )
+        outbound_delivery_port = InMemoryOutboundDeliveryRepository()
     # Dispatcher is always wired now — it just does nothing useful until
     # the operator creates at least one MessagingAccount via the UI.
     messaging_dispatcher = MessagingDispatcher(
@@ -4757,9 +4771,16 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         adapters=messaging_adapters,
         debouncer=InboundDebouncer(),
         receipt_repository=inbound_receipt_port,
+        outbound_delivery_repository=outbound_delivery_port,
         public_base_url=app_settings.public_base_url,
         public_base_url_provider=messaging_public_url_resolver.resolve,
         operator_language_resolver=_messaging_operator_language,
+    )
+    outbound_delivery_retry_worker = OutboundDeliveryRetryWorker(
+        ledger=outbound_delivery_port,
+        account_repository=messaging_account_repository,
+        adapters=messaging_adapters,
+        clock=clock,
     )
     telegram_polling_service = TelegramPollingService(
         account_repository=messaging_account_repository,
@@ -6283,6 +6304,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         password_hasher=password_hasher,
         jwt_service=jwt_service,
         messaging_dispatcher=messaging_dispatcher,
+        outbound_delivery_retry_worker=outbound_delivery_retry_worker,
         telegram_polling_service=telegram_polling_service,
         discord_gateway_service=discord_gateway_service,
         whatsapp_gateway_service=whatsapp_gateway_service,

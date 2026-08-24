@@ -5,6 +5,29 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-25 - Durable Telegram outbound retry
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.6.0` (`ce5bc09`)
+- Git result: added the outbound delivery ledger and retry worker on
+  `local/customizations`; commit pending.
+- Backup: `outbound-delivery-fix-20260825.dump`, verified with
+  `pg_restore --list` before migration.
+- Deployment: created the durable outbound message table, rebuilt
+  `yuralume-local/app:custom`, and recreated the existing app/migrate services
+  with the runtime Compose base plus local override. Failed channel sends now
+  retain a credential-free payload for bounded retry without rerunning the
+  LLM turn; segmented replies remain ordered across retries.
+- Verification: focused outbound, dispatcher, segmentation, and SQLAlchemy
+  tests passed (30 tests); source compilation and frontend syntax checks
+  passed; all Compose services are healthy and
+  `http://127.0.0.1:8012/health` returned `status: ok`. Alembic reports
+  `t9q4v7x10045 (head)`.
+- Follow-up: observe the next real Telegram transport failure; Telegram has no
+  universal idempotency key, so a timeout after remote acceptance can still
+  produce a rare duplicate on retry.
+
 ### 2026-08-23 - Upstream v0.6.0 merge and local deployment
 
 - Status: completed

@@ -234,6 +234,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         telegram_polling = container.telegram_polling_service
         discord_gateway = container.discord_gateway_service
         whatsapp_gateway = container.whatsapp_gateway_service
+        outbound_delivery_retry_worker = (
+            container.outbound_delivery_retry_worker
+            if (matrix.serve_api_routes or matrix.start_connectors)
+            else None
+        )
         # P2-B shadow runtime (HOSTED_CORE_SCALING §13 Phase 2). Both are None
         # unless YURALUME_BACKGROUND_SHADOW=postgres on a scheduler-owning role.
         shadow_coordinator = container.background_shadow_coordinator
@@ -383,6 +388,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 await world_event_scheduler.start()
         if matrix.run_background_worker and shadow_worker is not None:
             await shadow_worker.start()
+        # Outbound channel retries must run on both API/webhook and connector
+        # roles. The repository lease prevents two roles from sending the same
+        # pending bubble concurrently.
+        if outbound_delivery_retry_worker is not None:
+            await outbound_delivery_retry_worker.start()
         if matrix.start_connectors:
             if telegram_polling is not None:
                 await telegram_polling.start()
@@ -429,6 +439,14 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                     await discord_gateway.stop()
                 if telegram_polling is not None:
                     await telegram_polling.stop()
+            if outbound_delivery_retry_worker is not None:
+                try:
+                    await outbound_delivery_retry_worker.stop()
+                except Exception as exc:  # fail-soft
+                    print(
+                        "[lifespan] outbound delivery retry worker stop failed: "
+                        f"{exc!r}"
+                    )
             # Mirror startup order in reverse: durable worker/coordinator loops
             # first (each gated on the same flag it started under), then the
             # embedded schedulers.
