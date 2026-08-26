@@ -5,6 +5,26 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-27 - Future shared-event date guard
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.6.0` (`ce5bc09`)
+- Git result: committed `211a9cb` on `local/customizations`.
+- Backup: `pre-schedule-date-fix-20260827-021235.dump`, verified with
+  `pg_restore --list` before deployment.
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated the existing
+  app/migrate services using the runtime Compose base plus local override.
+  Future story events may now inform preparation, but cannot be rendered as
+  an early shared activity; manual regeneration preserves confirmed future
+  commitments and their structured participant references.
+- Verification: 68 focused schedule-planning tests passed; source compilation
+  and Docker image build passed; all Compose services are healthy and
+  `http://127.0.0.1:8012/health` returned `status: ok`. Regenerated future
+  schedule checks confirmed no early shared activity and retention of the
+  confirmed commitment on its actual date.
+- Follow-up: `none`
+
 ### 2026-08-25 - Durable Telegram outbound retry
 
 - Status: completed
