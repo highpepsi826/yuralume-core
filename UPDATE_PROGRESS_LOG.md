@@ -5,6 +5,25 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-27 - Prevent early future-event venue visits
+
+- Status: completed
+- Type: local customization and deployment
+- Upstream base: `v0.6.0` (`ce5bc09`)
+- Git result: committed locally on `local/customizations`.
+- Backup: covered by the verified `pre-schedule-date-fix-20260827-021235.dump`
+  backup created before this schedule-fix deployment.
+- Deployment: rebuilt and redeployed the local app. A future physical event
+  may still inform earlier preparation, but unconfirmed plans and
+  carried-forward wishes can no longer schedule travel to, waiting at, or
+  attendance at that event venue before its scheduled date. Confirmed shared
+  slots remain authoritative.
+- Verification: 68 focused schedule tests and source compilation passed; the
+  app health endpoint returned `status: ok`. Regenerated the affected gap day
+  and the actual event day; the gap day contains no early venue activity and
+  the actual day retained its confirmed shared activity.
+- Follow-up: none
+
 ### 2026-08-27 - Future shared-event date guard
 
 - Status: completed

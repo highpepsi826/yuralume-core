@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -11,9 +11,11 @@ from kokoro_link.domain.entities.schedule import (
     MeetingAffordance,
     OPERATOR_WISH_ROLE,
     ScenePrivacy,
+    ScheduleActivity,
 )
 from kokoro_link.domain.value_objects.character_state import CharacterState
 from kokoro_link.domain.value_objects.personality_type import CharacterPersonalityType
+from kokoro_link.domain.value_objects.actor import ParticipantRef
 from kokoro_link.infrastructure.schedule.llm_planner import LLMSchedulePlanner
 
 UTC = timezone.utc
@@ -314,6 +316,7 @@ async def test_today_beat_in_future_renders_preparation_block() -> None:
     assert "鋪陳" in prompt or "準備" in prompt
     assert "再 3 天" in prompt
     assert "試鏡當天" in prompt
+    assert "不得前往、等待、進入、使用或勘景" in prompt
     # Explicit "do NOT play this scene today" guard.
     assert "不要" in prompt
 
@@ -333,16 +336,42 @@ async def test_future_player_scene_drops_early_shared_activity_but_keeps_prep() 
         title="香港森境online夏祭線下見面",
         summary="角色與玩家會在線下會場初次見面。",
         scene_characters=("桃桃",),
+        location="香港森境online夏祭線下會場",
+        operator_note="他要把夏祭後的空白留給你。",
     )
     payload = (
         '[{"start":"10:00","end":"11:00",'
         '"description":"整理明天與桃桃見面時要穿的衣服",'
         '"category":"preparation"},'
+        '{"start":"18:00","end":"19:00",'
+        '"description":"搭港鐵前往夏祭會場",'
+        '"category":"travel","location":"港鐵與夏祭會場周邊"},'
+        '{"start":"19:00","end":"21:00",'
+        '"description":"在夏祭會場一個人逛攤位",'
+        '"category":"social","location":"夏祭會場"},'
+        '{"start":"21:00","end":"22:00",'
+        '"description":"在夏祭會場一個人坐著等散場",'
+        '"category":"social","location":"夏祭會場"},'
         '{"start":"18:00","end":"21:00",'
         '"description":"在香港森境online夏祭線下會場與桃桃見面，經桃桃明確同意後牽手逛夏祭",'
         '"category":"social","companion_names":["桃桃"]}]'
     )
     planner = LLMSchedulePlanner(model=FakeModel(payload))
+    carried_forward_venue_wish = ScheduleActivity.create(
+        start_at=datetime(2026, 8, 30, 18, 0, tzinfo=UTC),
+        end_at=datetime(2026, 8, 30, 19, 0, tzinfo=UTC),
+        description="搭港鐵前往夏祭會場",
+        category="travel",
+        location="港鐵與夏祭會場周邊",
+        participant_refs=(
+            ParticipantRef(
+                actor_kind="operator",
+                actor_id="user-1",
+                display_name="桃桃",
+                role=OPERATOR_WISH_ROLE,
+            ),
+        ),
+    )
 
     schedule = await planner.plan_day(
         character=_character(),
@@ -350,6 +379,7 @@ async def test_future_player_scene_drops_early_shared_activity_but_keeps_prep() 
         local_tz=UTC,
         today_beat=future_beat,
         operator_reference_names=("桃桃",),
+        pre_committed_activities=(carried_forward_venue_wish,),
     )
 
     assert [activity.description for activity in schedule.activities] == [

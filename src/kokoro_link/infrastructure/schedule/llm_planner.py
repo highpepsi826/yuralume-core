@@ -119,6 +119,34 @@ _DIRECT_SHARED_EVENT_ACTIONS = (
     "參加|出席|到場|共度"
 )
 
+# A future beat containing one of these terms denotes a physical event rather
+# than a purely conversational scene.  The terms become anchors only when
+# they occur in that future beat; they are not global bans on ordinary days.
+_FUTURE_PHYSICAL_EVENT_TERMS = (
+    "夏祭",
+    "文化祭",
+    "祭典",
+    "展覽",
+    "演唱會",
+    "市集",
+    "活動會場",
+    "線下會場",
+    "線下活動",
+    "festival",
+    "exhibition",
+    "concert",
+    "market",
+    "offline event",
+    "in-person event",
+)
+
+_FUTURE_EVENT_ATTENDANCE_ACTIONS = re.compile(
+    r"前往|抵達|到達|進入|入場|出席|參加|造訪|探訪|踩點|勘景|"
+    r"使用|逛|參觀|遊覽|排隊|等待|停留|待在|攤位|表演區|"
+    r"travel to|arrive|enter|attend|visit|queue|wait|browse",
+    re.IGNORECASE,
+)
+
 # SE1 — bounds on the story-event inspiration block. Narratives are 2–3
 # sentences by contract but the expander is an LLM, so both axes are
 # clamped: at most this many events (most recent win) and at most this
@@ -165,6 +193,22 @@ class LLMSchedulePlanner(SchedulePlannerPort):
         operator_primary_language: str = "zh-TW",
         operator_reference_names: tuple[str, ...] = (),
     ) -> DailySchedule:
+        future_beats = tuple(
+            beat
+            for beat in (today_beat, *upcoming_beats)
+            if beat is not None and beat.scheduled_date > date_
+        )
+        if future_beats:
+            # A prior bad plan can carry an ``operator_wish`` forward as a
+            # live commitment during manual regeneration. It must not bypass
+            # the gap-day venue guard, while a genuinely confirmed shared
+            # slot remains authoritative.
+            pre_committed_activities = (
+                _drop_unconfirmed_early_future_event_venue_commitments(
+                    pre_committed_activities,
+                    future_beats=future_beats,
+                )
+            )
         if await self._resolver.is_fake(character=character):
             # Even with the fake provider we honour chat-extracted
             # commitments — otherwise local dev would silently drop
@@ -219,16 +263,19 @@ class LLMSchedulePlanner(SchedulePlannerPort):
             local_tz=local_tz,
             operator_primary_language=operator_primary_language,
         )
-        if today_beat is not None and today_beat.scheduled_date > date_:
-            # On a gap day the next beat is useful preparation context, but it
-            # is not permission for the model to materialise a player scene
-            # early. Keep solo preparation; remove only direct claims that the
-            # operator is already present unless a matching confirmed slot was
-            # explicitly supplied by the schedule service.
+        if future_beats:
+            # A future beat is useful preparation context, but it is not
+            # permission to materialise either the player scene or the
+            # physical event venue early. Keep solo preparation; remove only
+            # direct player co-presence and premature venue attendance.
             activities = _drop_unconfirmed_future_operator_events(
                 activities,
                 operator_reference_names=operator_reference_names,
                 pre_committed_activities=pre_committed_activities,
+            )
+            activities = _drop_early_future_event_venue_activities(
+                activities,
+                future_beats=future_beats,
             )
         # Defensive merge: if the LLM ignored the commitment directive
         # and didn't emit one of the pre-commitments, splice them back
@@ -784,7 +831,8 @@ def _render_arc_block(
         if today_beat.location:
             lines.append(
                 f"  * 那場戲的地點是：{today_beat.location}"
-                "（今天可以路過、勘景，但不要在那裡演出主場景）",
+                "（在該日期前不得前往、等待、進入、使用或勘景；"
+                "準備請安排在其他地方）",
             )
         if today_beat.scene_characters:
             who = "、".join(today_beat.scene_characters)
@@ -1149,6 +1197,111 @@ def _drop_unconfirmed_future_operator_events(
             )
         )
     ]
+
+
+def _drop_early_future_event_venue_activities(
+    activities: list[ScheduleActivity],
+    *,
+    future_beats: tuple[StoryArcBeat, ...],
+) -> list[ScheduleActivity]:
+    """Drop early physical attendance at a future event's venue.
+
+    A scheduled shared event can support preparation on earlier days, but a
+    solo trip to its venue still advances the event's substance a day early.
+    We require a future-beat anchor *and* a concrete attendance action, so
+    references such as preparing an outfit for tomorrow remain valid.
+    """
+    anchors = _future_physical_event_anchors(future_beats)
+    if not anchors:
+        return activities
+    return [
+        activity
+        for activity in activities
+        if not _depicts_early_future_event_attendance(activity, anchors=anchors)
+    ]
+
+
+def _drop_unconfirmed_early_future_event_venue_commitments(
+    commitments: tuple[ScheduleActivity, ...],
+    *,
+    future_beats: tuple[StoryArcBeat, ...],
+) -> tuple[ScheduleActivity, ...]:
+    """Keep confirmed slots, but remove a carried-forward premature venue wish."""
+    anchors = _future_physical_event_anchors(future_beats)
+    if not anchors:
+        return commitments
+    return tuple(
+        activity
+        for activity in commitments
+        if (
+            any(
+                ref.role == OPERATOR_CONFIRMED_SHARED_ROLE
+                for ref in activity.participant_refs
+            )
+            or not _depicts_early_future_event_attendance(
+                activity,
+                anchors=anchors,
+            )
+        )
+    )
+
+
+def _future_physical_event_anchors(
+    future_beats: tuple[StoryArcBeat, ...],
+) -> tuple[str, ...]:
+    """Return physical-event names and locations mentioned by future beats."""
+    anchors: set[str] = set()
+    for beat in future_beats:
+        source_fields = (
+            beat.title,
+            beat.summary,
+            beat.location or "",
+            beat.operator_note or "",
+        )
+        source_text = "\n".join(source_fields).casefold()
+        if not any(term in source_text for term in _FUTURE_PHYSICAL_EVENT_TERMS):
+            continue
+        anchors.update(
+            term
+            for term in _FUTURE_PHYSICAL_EVENT_TERMS
+            if term in source_text
+        )
+        if beat.location:
+            anchors.add(beat.location.strip().casefold())
+    return tuple(sorted(anchors, key=len, reverse=True))
+
+
+def _depicts_early_future_event_attendance(
+    activity: ScheduleActivity,
+    *,
+    anchors: tuple[str, ...],
+) -> bool:
+    """Whether an activity physically attends a venue tied to a future beat."""
+    text = "\n".join(
+        part for part in (activity.description, activity.location) if part
+    ).casefold()
+    if not text:
+        return False
+    anchor_positions = [
+        match.start()
+        for anchor in anchors
+        for match in re.finditer(re.escape(anchor), text)
+    ]
+    if not anchor_positions:
+        return False
+    for anchor in anchors:
+        for match in re.finditer(
+            rf"(?:在|於)\s*{re.escape(anchor)}(?:會場|場館|展場|現場|場地)?",
+            text,
+        ):
+            if not _has_later_time_reference(text, before=match.start()):
+                return True
+    for action in _FUTURE_EVENT_ATTENDANCE_ACTIONS.finditer(text):
+        if _has_later_time_reference(text, before=action.start()):
+            continue
+        if any(abs(action.start() - anchor) <= 48 for anchor in anchor_positions):
+            return True
+    return False
 
 
 def _claims_direct_operator_presence(
