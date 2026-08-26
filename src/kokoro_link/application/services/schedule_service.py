@@ -493,6 +493,7 @@ class ScheduleService:
                 recent_story_events=recent_story_events,
                 recurring_patterns=recurring_patterns,
                 operator_primary_language=_operator_language(operator),
+                operator_reference_names=_operator_reference_names(operator),
             )
         except Exception:
             # Fail closed on cost for this civil day. Re-running from every
@@ -757,9 +758,9 @@ class ScheduleService:
         weather_context = await self._weather_for_plan(
             target, operator=operator, local_today=local_today,
         )
-        # Carry forward any chat-extracted seed commitments on the
-        # existing row so a manual regenerate doesn't silently drop
-        # them. Memorialised activities (the past) we always preserve.
+        # Carry forward chat-extracted seeds and live structured operator
+        # commitments on an existing row. Manual regeneration must preserve a
+        # confirmed shared activity just as a stale-day refresh does.
         existing = await self._repository.get(character.id, target)
         existing, expired_commitments = await self._expire_stale_commitments(
             character.id,
@@ -767,13 +768,7 @@ class ScheduleService:
             local_today=local_today,
             local_tz=local_tz,
         )
-        pre_commitments: tuple[ScheduleActivity, ...] = ()
-        if existing is not None and not existing.is_planned:
-            pre_commitments = tuple(
-                activity
-                for activity in existing.activities
-                if not has_expired_operator_commitment(activity)
-            )
+        pre_commitments = self._carry_forward_commitments(existing)
         recurring_patterns = await self._load_recurring_patterns(character.id)
         recent_activities = await self._load_recent_activity_digest(
             character.id, target=target,
@@ -808,6 +803,7 @@ class ScheduleService:
             recent_story_events=recent_story_events,
             recurring_patterns=recurring_patterns,
             operator_primary_language=_operator_language(operator),
+            operator_reference_names=_operator_reference_names(operator),
         )
         await self._repository.save(schedule)
         return schedule
@@ -1801,6 +1797,24 @@ def _operator_language(operator: OperatorProfile | None) -> str:
         return "zh-TW"
     lang = (operator.primary_language or "").strip()
     return lang or "zh-TW"
+
+
+def _operator_reference_names(
+    operator: OperatorProfile | None,
+) -> tuple[str, ...]:
+    """Return the operator's stable names for planner-side validation."""
+    if operator is None:
+        return ()
+    seen: set[str] = set()
+    names: list[str] = []
+    for raw in (operator.display_name, *operator.aliases):
+        name = (raw or "").strip()
+        key = name.casefold()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return tuple(names)
 
 
 def _resolve_overlaps(activities: list[ScheduleActivity]) -> list[ScheduleActivity]:

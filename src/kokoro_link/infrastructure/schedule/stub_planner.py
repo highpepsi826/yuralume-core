@@ -72,6 +72,7 @@ class StubSchedulePlanner(SchedulePlannerPort):
         recent_story_events: tuple[StoryEvent, ...] = (),
         recurring_patterns: tuple[BehavioralPattern, ...] = (),
         operator_primary_language: str = "zh-TW",
+        operator_reference_names: tuple[str, ...] = (),
     ) -> DailySchedule:
         template = _WEEKEND_PLAN if date_.weekday() >= 5 else _WEEKDAY_PLAN
         activities: list[ScheduleActivity] = []

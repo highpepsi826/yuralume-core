@@ -42,6 +42,7 @@ class NullSchedulePlanner(SchedulePlannerPort):
         recent_story_events: tuple[StoryEvent, ...] = (),
         recurring_patterns: tuple[BehavioralPattern, ...] = (),
         operator_primary_language: str = "zh-TW",
+        operator_reference_names: tuple[str, ...] = (),
     ) -> DailySchedule:
         # Preserve any seed commitments so chat-extracted "明天 7 點看
         # 電影" survives even when the null planner is selected — and

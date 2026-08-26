@@ -42,6 +42,7 @@ class SchedulePlannerPort(Protocol):
         recent_story_events: tuple[StoryEvent, ...] = (),
         recurring_patterns: tuple[BehavioralPattern, ...] = (),
         operator_primary_language: str = "zh-TW",
+        operator_reference_names: tuple[str, ...] = (),
     ) -> DailySchedule:
         """Return a planned day for ``character`` on ``date_``.
 
@@ -148,6 +149,12 @@ class SchedulePlannerPort(Protocol):
         ``schedule_involvement_policy`` is one of ``none``,
         ``mention_only``, ``invite_required`` or ``shared_allowed`` and
         controls how strongly the planner may include the user.
+
+        ``operator_reference_names`` contains the operator's current display
+        name and aliases. It is private validation context: planners use it
+        to recognise when a gap-day preparation response has incorrectly
+        placed the operator in a future story scene before that scene's date.
+        Empty tuple keeps the generic role-name guard only.
 
         ``recent_story_events`` are the character's story events (gacha
         rolls + realized arc beats) for the civil days around ``date_``

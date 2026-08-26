@@ -17,7 +17,9 @@ Post-processing:
 
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
+import re
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any
 
@@ -33,6 +35,7 @@ from kokoro_link.domain.entities.character import Character
 from kokoro_link.domain.entities.schedule import (
     DailySchedule,
     MeetingAffordance,
+    OPERATOR_CONFIRMED_SHARED_ROLE,
     OPERATOR_CONFIRMED_LAPSED_ROLE,
     OPERATOR_INVITE_EXPIRED_ROLE,
     OPERATOR_INVITE_PENDING_ROLE,
@@ -67,6 +70,54 @@ _MAX_CATEGORY_CHARS = 40
 _MAX_LOCATION_CHARS = 80
 _MAX_COMPANION_NAMES_PER_ACTIVITY = 3
 _MAX_COMPANION_NAME_CHARS = 40
+
+_GENERIC_OPERATOR_REFERENCE_NAMES = (
+    "使用者",
+    "玩家",
+    "你",
+    "user",
+    "player",
+    "the user",
+    "the player",
+    "ユーザー",
+    "あなた",
+)
+
+# A reference to an explicitly later day is a preparation or anticipation
+# fact, not evidence that the operator is already present in today's scene.
+# Keep this narrowly local to an otherwise direct co-presence match so an
+# unrelated "明天" elsewhere in a long activity does not weaken the guard.
+_FUTURE_REFERENCE_MARKERS = (
+    "明天",
+    "明日",
+    "翌日",
+    "隔天",
+    "明後日",
+    "下週",
+    "下周",
+    "tomorrow",
+    "the next day",
+)
+_CURRENT_REFERENCE_MARKERS = (
+    "今天",
+    "今日",
+    "今晚",
+    "現在",
+    "當下",
+    "today",
+    "tonight",
+    "now",
+)
+
+# These are deliberately concrete co-presence actions, not a loose bag of
+# relationship words. A gap-day preparation may truthfully mention the player
+# (for example, preparing an outfit for a later date); only a claim that the
+# player is already present must be rejected.
+_DIRECT_SHARED_EVENT_ACTIONS = (
+    "見面|碰面|會面|約會|赴約|相約|會合|同行|相聚|牽手|擁抱|"
+    "逛(?:街|夏祭|展覽|市集)?|吃(?:飯|晚餐|午餐)?|看(?:電影|展覽)?|"
+    "參加|出席|到場|共度"
+)
 
 # SE1 — bounds on the story-event inspiration block. Narratives are 2–3
 # sentences by contract but the expander is an LLM, so both axes are
@@ -112,6 +163,7 @@ class LLMSchedulePlanner(SchedulePlannerPort):
         recent_story_events: tuple[StoryEvent, ...] = (),
         recurring_patterns: tuple[BehavioralPattern, ...] = (),
         operator_primary_language: str = "zh-TW",
+        operator_reference_names: tuple[str, ...] = (),
     ) -> DailySchedule:
         if await self._resolver.is_fake(character=character):
             # Even with the fake provider we honour chat-extracted
@@ -167,6 +219,17 @@ class LLMSchedulePlanner(SchedulePlannerPort):
             local_tz=local_tz,
             operator_primary_language=operator_primary_language,
         )
+        if today_beat is not None and today_beat.scheduled_date > date_:
+            # On a gap day the next beat is useful preparation context, but it
+            # is not permission for the model to materialise a player scene
+            # early. Keep solo preparation; remove only direct claims that the
+            # operator is already present unless a matching confirmed slot was
+            # explicitly supplied by the schedule service.
+            activities = _drop_unconfirmed_future_operator_events(
+                activities,
+                operator_reference_names=operator_reference_names,
+                pre_committed_activities=pre_committed_activities,
+            )
         # Defensive merge: if the LLM ignored the commitment directive
         # and didn't emit one of the pre-commitments, splice them back
         # in. ``_resolve_overlaps`` style logic isn't needed here because
@@ -725,7 +788,7 @@ def _render_arc_block(
             )
         if today_beat.scene_characters:
             who = "、".join(today_beat.scene_characters)
-            lines.append(f"  * 那場戲的出場人物：{who}（今天可以提及或聯絡，不一定要碰面）")
+            lines.append(f"  * 那場戲的出場人物：{who}（今天可以提及或聯絡；只有非使用者 NPC 才可安排碰面）")
         if today_beat.dramatic_question:
             lines.append(f"  * 那場戲的戲劇問題：{today_beat.dramatic_question}（今天可以醞釀情緒）")
         if today_beat.summary:
@@ -733,6 +796,11 @@ def _render_arc_block(
             if len(summary) > 200:
                 summary = summary[:200] + "…"
             lines.append(f"  * 那場戲的脈絡：{summary}")
+        lines.append(
+            "  * 若下一場戲牽涉使用者／玩家，使用者今天尚未到場、尚未參與；"
+            "除非上方「已既定的承諾時段」明確列出今天的共同活動，否則不可把"
+            "見面、約會、同行、牽手、共同出席等寫進今天的行程。"
+        )
     if upcoming_beats:
         lines.append("- 接下來幾天即將發生（僅供參考，今天不需強行帶到，但行程可預留鋪陳空間）：")
         for beat in upcoming_beats[:2]:
@@ -1053,6 +1121,124 @@ def _coerce_text(raw: Any, *, limit: int) -> str:
     return raw.strip()[:limit]
 
 
+def _drop_unconfirmed_future_operator_events(
+    activities: list[ScheduleActivity],
+    *,
+    operator_reference_names: tuple[str, ...],
+    pre_committed_activities: tuple[ScheduleActivity, ...],
+) -> list[ScheduleActivity]:
+    """Remove only impossible early player co-presence on a gap day.
+
+    A future beat may inspire real preparation today, so this is not a
+    keyword ban on player references. It requires both an operator identity
+    and a concrete co-presence action. A confirmed pre-committed activity is
+    authoritative and remains eligible for the normal merge path below.
+    """
+    if not activities:
+        return activities
+    return [
+        activity
+        for activity in activities
+        if (
+            not _claims_direct_operator_presence(
+                activity,
+                operator_reference_names=operator_reference_names,
+            )
+            or _is_covered_by_confirmed_operator_commitment(
+                activity, pre_committed_activities,
+            )
+        )
+    ]
+
+
+def _claims_direct_operator_presence(
+    activity: ScheduleActivity,
+    *,
+    operator_reference_names: tuple[str, ...],
+) -> bool:
+    """Whether an activity states that the operator is physically present."""
+    references = _operator_reference_terms(operator_reference_names)
+    if not references:
+        return False
+    companion_names = {
+        companion.casefold() for companion in activity.companion_names
+    }
+    if any(reference in companion_names for reference in references):
+        return True
+    text = "\n".join(
+        part for part in (activity.description, activity.location) if part
+    ).casefold()
+    return any(
+        _text_claims_direct_operator_presence(text, reference)
+        for reference in references
+    )
+
+
+def _operator_reference_terms(
+    operator_reference_names: tuple[str, ...],
+) -> tuple[str, ...]:
+    seen: set[str] = set()
+    terms: list[str] = []
+    for raw in (*operator_reference_names, *_GENERIC_OPERATOR_REFERENCE_NAMES):
+        term = raw.strip().casefold()
+        if not term or term in seen:
+            continue
+        seen.add(term)
+        terms.append(term)
+    return tuple(terms)
+
+
+def _text_claims_direct_operator_presence(text: str, reference: str) -> bool:
+    """Match direct shared-event phrasing tied to one operator reference."""
+    escaped = re.escape(reference)
+    patterns = (
+        rf"(?:與|跟|和|同|陪)\s*{escaped}\s*(?:一起)?\s*(?:{_DIRECT_SHARED_EVENT_ACTIONS})",
+        rf"{escaped}\s*(?:已|正|正在|也)?\s*(?:到場|出席|抵達|來到|參加|陪同|同行|牽手|擁抱|會合|相聚)",
+        rf"{escaped}.{{0,24}}(?:明確同意後|牽手|擁抱|一起逛|一起吃|一起看|共同出席)",
+        rf"(?:meet|date|hang out|go out|spend time)\s+(?:with\s+)?{escaped}",
+        rf"with\s+{escaped}.{{0,40}}(?:meet|date|hang out|go out|attend|hold hands)",
+        rf"{escaped}\s*(?:と)?\s*(?:会う|デート|待ち合わせ|一緒に|手をつなぐ)",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            if not _has_later_time_reference(text, before=match.start()):
+                return True
+    return False
+
+
+def _has_later_time_reference(text: str, *, before: int) -> bool:
+    """Whether a direct-action phrase is qualified as explicitly future."""
+    context = text[max(0, before - 32):before]
+    latest_future = max(
+        (context.rfind(marker) for marker in _FUTURE_REFERENCE_MARKERS),
+        default=-1,
+    )
+    latest_current = max(
+        (context.rfind(marker) for marker in _CURRENT_REFERENCE_MARKERS),
+        default=-1,
+    )
+    return latest_future >= 0 and latest_future > latest_current
+
+
+def _is_covered_by_confirmed_operator_commitment(
+    activity: ScheduleActivity,
+    commitments: tuple[ScheduleActivity, ...],
+) -> bool:
+    """Whether a stored confirmed shared slot fully covers ``activity``."""
+    for commitment in commitments:
+        if not any(
+            ref.role == OPERATOR_CONFIRMED_SHARED_ROLE
+            for ref in commitment.participant_refs
+        ):
+            continue
+        if (
+            activity.start_at <= commitment.start_at
+            and activity.end_at >= commitment.end_at
+        ):
+            return True
+    return False
+
+
 def _merge_pre_commitments(
     llm_activities: list[ScheduleActivity],
     commitments: tuple[ScheduleActivity, ...],
@@ -1080,8 +1266,13 @@ def _merge_pre_commitments(
         overlap_idx = _find_overlap(result, commitment)
         if overlap_idx is not None:
             # LLM honoured the commitment — keep its richer activity,
-            # don't duplicate. (Future enhancement: cross-check description
-            # similarity and override if the LLM rewrote it wrongly.)
+            # don't duplicate. The stored participant refs are authoritative:
+            # the LLM has no right to turn a confirmed shared activity into an
+            # unstructured or merely wished-for one during regeneration.
+            result[overlap_idx] = replace(
+                result[overlap_idx],
+                participant_refs=commitment.participant_refs,
+            )
             continue
         # LLM missed it. Trim any overlapping non-exact neighbours, then
         # insert.
@@ -1116,8 +1307,6 @@ def _trim_to_make_room(
 ) -> list[ScheduleActivity]:
     """Trim or drop activities that overlap with ``commitment`` so the
     splice keeps the schedule overlap-free."""
-    from dataclasses import replace as dc_replace
-
     cstart, cend = commitment.start_at, commitment.end_at
     out: list[ScheduleActivity] = []
     for act in activities:
@@ -1132,10 +1321,10 @@ def _trim_to_make_room(
             # commitment fully inside act → drop act (preserve commitment)
             continue
         if act.start_at < cstart:
-            out.append(dc_replace(act, end_at=cstart))
+            out.append(replace(act, end_at=cstart))
             continue
         if act.end_at > cend:
-            out.append(dc_replace(act, start_at=cend))
+            out.append(replace(act, start_at=cend))
             continue
         # commitment fully covers act → drop
     return out

@@ -8,6 +8,7 @@ import pytest
 
 from kokoro_link.domain.entities.character import Character
 from kokoro_link.domain.entities.schedule import (
+    OPERATOR_CONFIRMED_SHARED_ROLE,
     OPERATOR_CONFIRMED_LAPSED_ROLE,
     OPERATOR_INVITE_EXPIRED_ROLE,
     ScheduleActivity,
@@ -145,6 +146,39 @@ def test_merge_keeps_llm_block_when_it_covers_commitment_window() -> None:
     merged = _merge_pre_commitments(llm_acts, (commitment,))
     assert len(merged) == 1
     assert merged[0].description == "去電影院看《奧本海默》"
+
+
+def test_merge_preserves_confirmed_shared_participant_refs() -> None:
+    """Manual regeneration cannot erase the structured shared-slot marker."""
+    commitment = ScheduleActivity.create(
+        start_at=datetime(2026, 5, 20, 19, 0, tzinfo=UTC),
+        end_at=datetime(2026, 5, 20, 21, 0, tzinfo=UTC),
+        description="與桃桃在夏祭見面",
+        category="social",
+        participant_refs=(
+            ParticipantRef(
+                actor_kind="operator",
+                actor_id="user-1",
+                display_name="桃桃",
+                role=OPERATOR_CONFIRMED_SHARED_ROLE,
+            ),
+        ),
+    )
+    llm_acts = [
+        ScheduleActivity.create(
+            start_at=datetime(2026, 5, 20, 18, 30, tzinfo=UTC),
+            end_at=datetime(2026, 5, 20, 21, 30, tzinfo=UTC),
+            description="在會場等待進場並一起逛夏祭",
+            category="social",
+        ),
+    ]
+
+    merged = _merge_pre_commitments(llm_acts, (commitment,))
+
+    assert merged[0].description == "在會場等待進場並一起逛夏祭"
+    assert [ref.role for ref in merged[0].participant_refs] == [
+        OPERATOR_CONFIRMED_SHARED_ROLE,
+    ]
 
 
 def test_merge_splices_when_llm_missed_commitment() -> None:

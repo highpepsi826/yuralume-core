@@ -12,7 +12,11 @@ from kokoro_link.domain.entities.character_operator_relationship_seed import (
 )
 from kokoro_link.domain.entities.character import Character
 from kokoro_link.domain.entities.operator_profile import DEFAULT_OPERATOR_ID
-from kokoro_link.domain.entities.schedule import DailySchedule, ScheduleActivity
+from kokoro_link.domain.entities.schedule import (
+    DailySchedule,
+    OPERATOR_CONFIRMED_SHARED_ROLE,
+    ScheduleActivity,
+)
 from kokoro_link.domain.value_objects.actor import ParticipantRef
 from kokoro_link.domain.value_objects.character_state import CharacterState
 from kokoro_link.infrastructure.repositories.in_memory_schedules import (
@@ -134,6 +138,65 @@ async def test_regenerate_forces_planner_call() -> None:
 
     assert planner.calls == 2
     assert regenerated.activities[0].description == "call-2"
+
+
+@pytest.mark.asyncio
+async def test_regenerate_carries_confirmed_shared_activity() -> None:
+    """A manual refresh keeps an existing, chat-confirmed shared slot."""
+
+    class CapturingPlanner:
+        def __init__(self) -> None:
+            self.pre_committed: tuple[ScheduleActivity, ...] = ()
+
+        async def plan_day(
+            self,
+            *,
+            character: Character,
+            date_: date,
+            local_tz: tzinfo,
+            pre_committed_activities: tuple[ScheduleActivity, ...] = (),
+            **_: object,
+        ) -> DailySchedule:
+            self.pre_committed = pre_committed_activities
+            return DailySchedule.create(
+                character_id=character.id,
+                date_=date_,
+                activities=list(pre_committed_activities),
+                is_planned=True,
+            )
+
+    target = date(2099, 4, 18)
+    character = _character()
+    commitment = ScheduleActivity.create(
+        start_at=datetime(2099, 4, 18, 19, 0, tzinfo=UTC),
+        end_at=datetime(2099, 4, 18, 21, 0, tzinfo=UTC),
+        description="與使用者看電影",
+        category="leisure",
+        participant_refs=(
+            ParticipantRef(
+                actor_kind="operator",
+                actor_id="user-1",
+                display_name="使用者",
+                role=OPERATOR_CONFIRMED_SHARED_ROLE,
+            ),
+        ),
+    )
+    repo = InMemoryScheduleRepository()
+    await repo.save(
+        DailySchedule.create(
+            character_id=character.id,
+            date_=target,
+            activities=[commitment],
+            is_planned=True,
+        ),
+    )
+    planner = CapturingPlanner()
+    service = ScheduleService(repository=repo, planner=planner, local_tz=UTC)
+
+    regenerated = await service.regenerate(character, date_=target)
+
+    assert planner.pre_committed == (commitment,)
+    assert regenerated.activities == (commitment,)
 
 
 @pytest.mark.asyncio

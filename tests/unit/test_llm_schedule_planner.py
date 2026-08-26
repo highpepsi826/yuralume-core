@@ -319,6 +319,45 @@ async def test_today_beat_in_future_renders_preparation_block() -> None:
 
 
 @pytest.mark.asyncio
+async def test_future_player_scene_drops_early_shared_activity_but_keeps_prep() -> None:
+    """A future player scene may inform preparation, never early attendance."""
+    from datetime import timedelta
+
+    from kokoro_link.domain.entities.story_arc import StoryArcBeat
+
+    today = date(2026, 8, 30)
+    future_beat = StoryArcBeat.create(
+        arc_id="arc-hk-summer-festival",
+        sequence=1,
+        scheduled_date=today + timedelta(days=1),
+        title="香港森境online夏祭線下見面",
+        summary="角色與玩家會在線下會場初次見面。",
+        scene_characters=("桃桃",),
+    )
+    payload = (
+        '[{"start":"10:00","end":"11:00",'
+        '"description":"整理明天與桃桃見面時要穿的衣服",'
+        '"category":"preparation"},'
+        '{"start":"18:00","end":"21:00",'
+        '"description":"在香港森境online夏祭線下會場與桃桃見面，經桃桃明確同意後牽手逛夏祭",'
+        '"category":"social","companion_names":["桃桃"]}]'
+    )
+    planner = LLMSchedulePlanner(model=FakeModel(payload))
+
+    schedule = await planner.plan_day(
+        character=_character(),
+        date_=today,
+        local_tz=UTC,
+        today_beat=future_beat,
+        operator_reference_names=("桃桃",),
+    )
+
+    assert [activity.description for activity in schedule.activities] == [
+        "整理明天與桃桃見面時要穿的衣服",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_no_arc_block_when_today_beat_absent() -> None:
     """Without a today_beat the prompt skips the arc directive entirely
     so old characters (no arc) keep behaving as before."""
