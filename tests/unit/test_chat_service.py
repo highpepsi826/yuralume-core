@@ -22,6 +22,7 @@ from kokoro_link.domain.entities.behavioral_pattern import (
 )
 from kokoro_link.domain.entities.character import Character
 from kokoro_link.contracts.post_turn import (
+    ArcAdjustmentSignal,
     EmotionEventCandidate,
     PostTurnResult,
     StateSuggestion,
@@ -440,6 +441,40 @@ class _CapturingStoryArcService:
                 "open_new_season": open_new_season,
             }
         )
+        return None
+
+
+class _ArcAdjustmentPostTurnProcessor:
+    async def process(self, **_kwargs):  # noqa: ANN003
+        return PostTurnResult(
+            arc_adjustments=[
+                ArcAdjustmentSignal(
+                    action="mark_realized",
+                    beat_id="future-central-beat",
+                    narrative="不應提前完成的見面。",
+                ),
+            ],
+        )
+
+
+class _RejectingStoryEventService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def record_arc_beat_realization(self, character, **kwargs):  # noqa: ANN001
+        self.calls.append({"character_id": character.id, **kwargs})
+        return None
+
+
+class _RecordingArcAdjustmentService:
+    def __init__(self) -> None:
+        self.applied: list[tuple[str, list[object]]] = []
+
+    async def get_active(self, character_id: str):
+        return None
+
+    async def apply_adjustments(self, *, character_id: str, adjustments):  # noqa: ANN001
+        self.applied.append((character_id, list(adjustments)))
         return None
 
 
@@ -1752,6 +1787,50 @@ async def test_post_turn_loads_active_schedule_in_owner_timezone(monkeypatch) ->
 
     assert schedule_service.calls == [(character.id, date(2026, 6, 15))]
     assert processor.calls[-1]["active_schedule_date"] == date(2026, 6, 15)
+
+
+@pytest.mark.asyncio
+async def test_post_turn_does_not_fallback_when_event_realization_is_rejected() -> None:
+    """A rejected event-sourced realization must not silently flip a beat's
+    status through StoryArcService.apply_adjustments()."""
+    arc_service = _RecordingArcAdjustmentService()
+    event_service = _RejectingStoryEventService()
+    chat_service = ChatService(
+        character_repository=InMemoryCharacterRepository(),
+        conversation_repository=InMemoryConversationRepository(),
+        memory_repository=InMemoryMemoryRepository(),
+        post_turn_processor=_ArcAdjustmentPostTurnProcessor(),
+        prompt_context_builder=DefaultPromptContextBuilder(),
+        model_registry=InMemoryChatModelRegistry(default_provider_id="fake"),
+        state_engine=SimpleStateEngine(),
+        story_arc_service=arc_service,  # type: ignore[arg-type]
+        story_event_service=event_service,  # type: ignore[arg-type]
+    )
+    character = Character.create(
+        name="Mio",
+        summary="",
+        personality=[],
+        interests=[],
+        speaking_style="",
+        boundaries=[],
+        state=CharacterState(
+            emotion="neutral", affection=50, fatigue=0, trust=50, energy=100,
+        ),
+    )
+
+    await chat_service._do_post_turn(
+        character=character,
+        conversation_id="conv-1",
+        turn_record_id="turn-1",
+        user_text="今天先聊到這裡",
+        assistant_text="好，我會記得。",
+        prior_messages=[],
+    )
+
+    assert [call["beat_id"] for call in event_service.calls] == [
+        "future-central-beat",
+    ]
+    assert arc_service.applied == []
 
 
 @pytest.mark.asyncio

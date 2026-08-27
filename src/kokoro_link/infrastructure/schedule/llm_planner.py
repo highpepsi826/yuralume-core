@@ -772,45 +772,53 @@ def _render_arc_block(
 ) -> str:
     """Inject the active arc's scene beats into the planner prompt.
 
-    When ``today_beat.scheduled_date == target_date`` we emit a hard
-    "**必須**" directive so today's activities embed the scene. When
-    the supplied ``today_beat`` is actually scheduled for a future day
-    (the schedule service falls back to the next forward beat on gap
-    days), we render an "anticipation/preparation" block instead — the
-    planner is told the date so it doesn't stage the scene today.
-    Upcoming beats are surfaced as softer context so the planner can
-    leave space (rest, prep, rehearsal) for what's coming.
+    All beats dated ``target_date`` are hard requirements.  The schedule
+    service keeps the first in ``today_beat`` and passes remaining same-day
+    beats ahead of future context in ``upcoming_beats`` for port
+    compatibility.  Beats after ``target_date`` remain softer preparation
+    context.  When the supplied ``today_beat`` is actually scheduled for a
+    future day (the gap-day fallback), we render an
+    "anticipation/preparation" block instead of staging it early.
     """
-    if today_beat is None and not upcoming_beats:
+    all_beats = tuple(
+        beat for beat in (today_beat, *upcoming_beats) if beat is not None
+    )
+    same_day_beats = tuple(
+        beat for beat in all_beats if beat.scheduled_date == target_date
+    )
+    future_beats = tuple(
+        beat for beat in all_beats if beat.scheduled_date > target_date
+    )
+    if not same_day_beats and not future_beats:
         return ""
     lines: list[str] = [""]
-    is_today = (
-        today_beat is not None
-        and today_beat.scheduled_date == target_date
-    )
-    if today_beat is not None and is_today:
-        lines.append("本日劇情骨架（**必須**反映在行程中）：")
+    if same_day_beats:
+        lines.append("本日劇情骨架（以下每一場都**必須**反映在行程中）：")
+        for index, beat in enumerate(same_day_beats, start=1):
+            lines.append(
+                f"- 今天第 {index} 場戲《{beat.title}》，"
+                "請在當天行程中安排一個**對應這場戲**的時段（時間自訂、合理即可）。",
+            )
+            if beat.location:
+                lines.append(
+                    f"  * 場景地點：{beat.location}（行程的 location 欄位請填這個）",
+                )
+            if beat.scene_characters:
+                who = "、".join(beat.scene_characters)
+                lines.append(f"  * 出場人物：{who}（請在 description 裡帶到這些人）")
+            if beat.dramatic_question:
+                lines.append(f"  * 戲劇問題：{beat.dramatic_question}")
+            if beat.summary:
+                summary = beat.summary.strip().replace("\n", " ")
+                if len(summary) > 200:
+                    summary = summary[:200] + "…"
+                lines.append(f"  * 場景脈絡：{summary}")
+            if not beat.required:
+                lines.append("  * （此 beat 標為可選；若與性格／既有行程嚴重衝突可弱化處理）")
         lines.append(
-            f"- 今天有一場戲叫《{today_beat.title}》，"
-            "請在當天行程中安排一個**對應這場戲**的時段（時間自訂、合理即可）。",
-        )
-        if today_beat.location:
-            lines.append(f"  * 場景地點：{today_beat.location}（行程的 location 欄位請填這個）")
-        if today_beat.scene_characters:
-            who = "、".join(today_beat.scene_characters)
-            lines.append(f"  * 出場人物：{who}（請在 description 裡帶到這些人）")
-        if today_beat.dramatic_question:
-            lines.append(f"  * 戲劇問題：{today_beat.dramatic_question}")
-        if today_beat.summary:
-            summary = today_beat.summary.strip().replace("\n", " ")
-            if len(summary) > 200:
-                summary = summary[:200] + "…"
-            lines.append(f"  * 場景脈絡：{summary}")
-        if not today_beat.required:
-            lines.append("  * （此 beat 標為可選；若與性格／既有行程嚴重衝突可弱化處理）")
-        lines.append(
-            "  * 當天的行程要圍繞這場戲鋪陳：之前可有準備／路上的時段，"
-            "之後可有結束後的反應／休息／回家路上等。不要讓這場戲變成憑空插入。",
+            "  * 當天的行程要依上述每一場戲鋪陳：之前可有準備／路上的時段，"
+            "之後可有結束後的反應／休息／回家路上等。不要遺漏其中任何一場，"
+            "也不要把不同地點或不同階段的戲硬合併成一個模糊時段。",
         )
     elif today_beat is not None:
         # today_beat is from the future — gap-day fallback. Don't stage
@@ -849,9 +857,9 @@ def _render_arc_block(
             "除非上方「已既定的承諾時段」明確列出今天的共同活動，否則不可把"
             "見面、約會、同行、牽手、共同出席等寫進今天的行程。"
         )
-    if upcoming_beats:
+    if future_beats:
         lines.append("- 接下來幾天即將發生（僅供參考，今天不需強行帶到，但行程可預留鋪陳空間）：")
-        for beat in upcoming_beats[:2]:
+        for beat in future_beats[:2]:
             day_diff = (beat.scheduled_date - target_date).days
             when = (
                 f"再 {day_diff} 天" if day_diff > 0

@@ -420,6 +420,22 @@ class StoryEventService:
         if beat is None or beat.status != "pending":
             return None
         today = await self._today_for_character(character, now)
+        if (
+            beat.operator_position == OPERATOR_POSITION_CENTRAL
+            and beat.scheduled_date > today
+        ):
+            # A player-central scene cannot become canon before its planned
+            # civil date.  The post-turn processor may still reschedule it
+            # explicitly, but it must not turn an unrelated chat into an
+            # early shared event.
+            _LOGGER.info(
+                "arc beat realization rejected before scheduled date "
+                "beat=%s scheduled=%s today=%s",
+                beat_id,
+                beat.scheduled_date,
+                today,
+            )
+            return None
         existing = await self._events.get_for_day(
             character.id, today.isoformat(),
         )

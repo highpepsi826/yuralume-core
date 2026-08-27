@@ -320,6 +320,46 @@ async def test_record_arc_beat_realization_writes_event_memory_and_status() -> N
 
 
 @pytest.mark.asyncio
+async def test_record_arc_beat_realization_rejects_future_central_beat() -> None:
+    """A later player-centered meeting must stay pending after unrelated
+    chat on an earlier day."""
+    today = date(2026, 8, 22)
+    now = datetime(2026, 8, 22, 10, 0, tzinfo=timezone.utc)
+    event_service, arc_service, arc_repo, _, event_repo, _, memory_repo = (
+        _services(today, operator_position=OPERATOR_POSITION_CENTRAL)
+    )
+    character = _character()
+    arc = await arc_service.start_new_arc(character, today=today)
+    original = arc.beats[0]
+    future_beat = StoryArcBeat.create(
+        arc_id=arc.id,
+        sequence=original.sequence,
+        scheduled_date=today + timedelta(days=9),
+        title="夏祭會場見面",
+        summary="在夏祭會場入口和玩家見面。",
+        operator_position=OPERATOR_POSITION_CENTRAL,
+    )
+    await arc_repo.save(arc.with_beats([future_beat]))
+
+    event = await event_service.record_arc_beat_realization(
+        character,
+        beat_id=future_beat.id,
+        narrative="我們在夏祭會場見面了。",
+        now=now,
+    )
+
+    assert event is None
+    assert await event_repo.get_for_day(character.id, today.isoformat()) == []
+    updated = await arc_repo.get(arc.id)
+    assert updated is not None
+    pending = updated.find_beat(future_beat.id)
+    assert pending is not None
+    assert pending.status == BEAT_PENDING
+    assert pending.realized_event_id is None
+    assert await memory_repo.query(character.id) == []
+
+
+@pytest.mark.asyncio
 async def test_climax_arc_beat_realization_writes_milestone_memory() -> None:
     today = date(2026, 5, 10)
     now = datetime(2026, 5, 10, 10, 0, tzinfo=timezone.utc)

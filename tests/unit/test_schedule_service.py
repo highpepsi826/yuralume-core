@@ -529,6 +529,80 @@ async def test_ensure_schedule_falls_back_to_next_beat_when_today_empty() -> Non
 
 
 @pytest.mark.asyncio
+async def test_ensure_schedule_keeps_all_same_day_arc_beats() -> None:
+    """Preparation, encounter, and aftermath on one date must all reach
+    the planner; only the first used to survive this service boundary."""
+    from kokoro_link.domain.entities.story_arc import (
+        StoryArc, StoryArcBeat,
+    )
+
+    target = date(2026, 8, 31)
+    arc_id = "arc-same-day-beats"
+    preparation = StoryArcBeat.create(
+        arc_id=arc_id,
+        sequence=1,
+        scheduled_date=target,
+        title="出門前最後確認",
+        summary="整理好夏祭要帶的東西。",
+    )
+    meetup = StoryArcBeat.create(
+        arc_id=arc_id,
+        sequence=2,
+        scheduled_date=target,
+        title="香港森境online夏祭線下會場與桃桃見面",
+        summary="在會場入口和玩家碰面。",
+        location="香港森境online夏祭會場入口",
+    )
+    aftermath = StoryArcBeat.create(
+        arc_id=arc_id,
+        sequence=3,
+        scheduled_date=target,
+        title="夏祭散場後的回味",
+        summary="回家後整理今天的心情。",
+    )
+    future = StoryArcBeat.create(
+        arc_id=arc_id,
+        sequence=4,
+        scheduled_date=target + timedelta(days=2),
+        title="傳照片給朋友",
+        summary="把夏祭照片整理好。",
+    )
+    arc = StoryArc.create(
+        id=arc_id,
+        character_id="c1",
+        title="夏祭",
+        premise="...",
+        theme="daily",
+        start_date=target - timedelta(days=2),
+        end_date=target + timedelta(days=5),
+        beats=[preparation, meetup, aftermath, future],
+    )
+
+    class _StubArcService:
+        async def ensure_active_arc(self, character, *, today=None, auto_start=True):
+            return arc
+
+    repo = InMemoryScheduleRepository()
+    planner = _ArcCapturingPlanner()
+    service = ScheduleService(
+        repository=repo,
+        planner=planner,
+        local_tz=UTC,
+        story_arc_service=_StubArcService(),
+    )
+
+    await service.ensure_schedule(_character(), date_=target)
+
+    assert planner.captured_today_beat is not None
+    assert planner.captured_today_beat.id == preparation.id
+    assert [beat.id for beat in planner.captured_upcoming] == [
+        meetup.id,
+        aftermath.id,
+        future.id,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ensure_schedule_no_arc_service_passes_none() -> None:
     """Without story_arc_service the planner gets ``today_beat=None``,
     not an exception. Backward-compatible default."""

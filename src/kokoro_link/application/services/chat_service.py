@@ -6660,21 +6660,21 @@ class ChatService:
                         continue
                     if (
                         sig.action == "mark_realized"
-                        and sig.beat_id
-                        and sig.narrative
                         and self._story_event_service is not None
                     ):
-                        event = await (
-                            self._story_event_service
-                            .record_arc_beat_realization(
+                        if sig.beat_id:
+                            await self._story_event_service.record_arc_beat_realization(
                                 character,
                                 beat_id=sig.beat_id,
                                 narrative=sig.narrative,
                                 now=post_turn_started,
                             )
-                        )
-                        if event is not None:
-                            continue
+                        # A realized beat must always have a StoryEvent
+                        # through the event-sourcing path.  In particular,
+                        # do not fall back to raw status mutation when that
+                        # path rejects an early player-central scene or its
+                        # persistence fails.
+                        continue
                     translated.append(
                         ArcAdjustment(
                             action=sig.action,

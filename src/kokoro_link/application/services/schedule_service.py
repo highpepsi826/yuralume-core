@@ -1007,11 +1007,16 @@ class ScheduleService:
         character: Character,
         target: date,
     ) -> tuple[StoryArcBeat | None, tuple[StoryArcBeat, ...]]:
-        """Pull today's beat + next 1–2 upcoming beats from the active arc.
+        """Pull today's beats + next 1–2 future beats from the active arc.
 
         Returns ``(None, ())`` when no arc service is wired, no active
         arc exists, or any failure occurs — schedule generation continues
         unconditionally; arc context is enrichment, not a hard dep.
+
+        ``today_beat`` remains the first same-day beat for compatibility
+        with the planner port.  Any remaining same-day beats are prepended
+        to ``upcoming``.  The LLM planner separates them by date and treats
+        them as mandatory scenes instead of future preparation context.
 
         ``auto_start=False`` is critical: the schedule path must never
         trigger arc planning. First-arc lazy creation can happen in chat,
@@ -1035,8 +1040,15 @@ class ScheduleService:
         try:
             today_beats = arc.beats_on(target)
             today_beat = today_beats[0] if today_beats else None
+            # An arc can deliberately contain a preparation, the main
+            # encounter, and its aftermath on the same day.  Passing only
+            # the first one here made the main scene disappear from a
+            # regenerated schedule.  Keep their chronological order ahead
+            # of genuinely future context.
             upcoming = tuple(
-                arc.forward_beats(after=target, limit=2, include_today=False)
+                [*today_beats[1:], *arc.forward_beats(
+                    after=target, limit=2, include_today=False,
+                )]
             )
         except Exception:
             _LOGGER.exception(
