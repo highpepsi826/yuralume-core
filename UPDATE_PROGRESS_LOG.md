@@ -509,3 +509,20 @@ database rows.
 - Verification: Docker services were healthy and
   `http://127.0.0.1:8012/health` succeeded.
 - Follow-up: `none`
+
+### 2026-08-27 - Preserve same-day story-arc scenes
+
+- Status: completed
+- Type: local behavior repair and targeted data correction
+- Git result: committed `d46c98a` on `local/customizations`.
+- Backup: `pre-schedule-date-fix-20260827-021235.dump` (verified with
+  `pg_restore`).
+- Deployment: rebuilt `yuralume-local/app:custom` and recreated the local
+  `app` and `migrate` services.
+- Data repair: restored one future player-central beat that had been falsely
+  marked realized, then regenerated the two affected daily schedules.
+- Verification: 89 focused backend tests passed; Docker build succeeded; all
+  Compose services were healthy and `http://127.0.0.1:8012/health` returned
+  `status: ok`. The corrected future beat is pending, the preceding day has
+  no venue activity, and the event-day schedule contains venue activities.
+- Follow-up: `none`
