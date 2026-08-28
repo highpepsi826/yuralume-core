@@ -46,7 +46,10 @@ class BackupRecord(BaseModel):
     def from_row(cls, row: Any) -> Self:
         data: dict[str, Any] = {}
         for name in cls.model_fields:
-            value = getattr(row, name)
+            # New nullable/defaulted columns must remain export-compatible
+            # with ORM rows from a pre-migration runtime.  Pydantic still
+            # validates required fields after the fallback is applied.
+            value = getattr(row, name, None)
             if isinstance(value, datetime):
                 value = ensure_utc(value)
             data[name] = value

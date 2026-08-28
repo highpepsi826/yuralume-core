@@ -7925,7 +7925,7 @@ class ChatService:
         character_id: str,
         conversation_id: str,
         promises: list,
-        turn_record_id: str,
+        turn_record_id: str | None = None,
         operator: OperatorProfile | None = None,
         content_mode: MessageContentMode | str = MessageContentMode.NORMAL,
     ) -> None:
@@ -8001,6 +8001,66 @@ class ChatService:
                     "scheduled-promise persist failed character=%s",
                     character_id,
                 )
+
+    async def _reconcile_message_promises(
+        self, *, character_id: str, promises: list,
+        operator: OperatorProfile | None,
+    ) -> None:
+        """Update one uniquely keyed open scheduled promise in place.
+
+        Reconciliation is deliberately exact-key only and limited to queued or
+        resolving rows.  Delivery-slot and dedupe keys are derived again when
+        the promised time changes; historical rows remain immutable.
+        """
+        repo = self._pending_follow_up_repository
+        if repo is None:
+            return
+        keyed = [p for p in promises if getattr(p, "commitment_key", None)]
+        if not keyed:
+            return
+        open_rows = await repo.list_open_for_character(character_id)
+        by_key: dict[str, list] = {}
+        for row in open_rows:
+            if (
+                getattr(row.kind, "value", row.kind) == "scheduled_promise"
+                and row.commitment_key
+            ):
+                by_key.setdefault(row.commitment_key, []).append(row)
+        from dataclasses import replace
+        from kokoro_link.domain.entities.pending_follow_up import (
+            scheduled_promise_dedupe_key,
+            scheduled_promise_delivery_slot_key,
+        )
+        now = self._resolve_now()
+        local_tz = _operator_timezone(operator)
+        for promise in keyed:
+            rows = by_key.get(promise.commitment_key or "", [])
+            if len(rows) != 1:
+                continue
+            parsed = _parse_promise_datetime(
+                promise.scheduled_for_iso, local_tz=local_tz,
+            )
+            if parsed is None or parsed <= now:
+                continue
+            row = rows[0]
+            intent = (promise.intent or "").strip() or row.promise_intent
+            updated = replace(
+                row,
+                scheduled_for=parsed,
+                promise_intent=intent,
+                commitment_key=promise.commitment_key,
+                dedupe_key=scheduled_promise_dedupe_key(
+                    character_id=character_id,
+                    promise_intent=intent,
+                    scheduled_for=parsed,
+                ),
+                delivery_slot_key=scheduled_promise_delivery_slot_key(
+                    character_id=character_id, scheduled_for=parsed,
+                ),
+                updated_at=now,
+            )
+            if updated != row:
+                await repo.save(updated)
 
     def _maybe_auto_consolidate(self, character_id: str) -> None:
         if self._auto_consolidation_trigger is None:

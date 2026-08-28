@@ -707,6 +707,12 @@ class ScheduleActivityRow(Base):
     """JSON-encoded list of structured ``ParticipantRef`` rows for real
     system actors in this activity. Private NPC companions remain in
     ``companion_names_json`` for backwards compatibility."""
+    commitment_key: Mapped[str | None] = mapped_column(
+        String(120), nullable=True, index=True,
+    )
+    is_first_meeting: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+    )
 
     schedule: Mapped["DailyScheduleRow"] = relationship(back_populates="activities")
 
@@ -1942,6 +1948,21 @@ class PendingFollowUpRow(Base):
     )
     """Natural-language description of what the character promised to do
     at ``scheduled_for``. Empty string for ``kind=busy_defer`` rows."""
+    dedupe_key: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default="",
+    )
+    delivery_slot_key: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default="",
+    )
+    source_turn_key: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default="",
+    )
+    obligations_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]",
+    )
+    commitment_key: Mapped[str | None] = mapped_column(
+        String(120), nullable=True, index=True,
+    )
     turn_record_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, index=True,
     )
