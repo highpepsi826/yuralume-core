@@ -29,6 +29,7 @@ import {
 import { buildCharacterCardIntakeDraft } from '@/utils/characterCardInitialRelationship'
 import {
   buildInitialRelationshipPayload,
+  initialRelationshipFormFromPayload,
   newCharacterInitialRelationshipForm,
 } from '@/composables/useInitialRelationshipForm'
 
@@ -91,6 +92,17 @@ const personaNoteCounter = computed(() => t('playerPersonaNote.counter', {
   max: personaNoteMaxChars,
 }))
 
+const isEditMode = computed(() => props.mode === 'edit')
+const eyebrowLabel = computed(() => t(isEditMode.value
+  ? 'characterEdit.initialRelationship.eyebrow'
+  : 'playerSidebar.characterCards.relationship.eyebrow'))
+const titleLabel = computed(() => t(isEditMode.value
+  ? 'characterEdit.initialRelationship.editTitle'
+  : 'playerSidebar.characterCards.relationship.title', { name: props.cardName }))
+const hintLabel = computed(() => t(isEditMode.value
+  ? 'characterEdit.initialRelationship.editHint'
+  : 'playerSidebar.characterCards.relationship.hint'))
+
 const payload = computed(() => buildInitialRelationshipPayload(form.value))
 const canSubmitSeed = computed(() => payload.value !== null)
 /**
@@ -121,7 +133,9 @@ const showIntakeFeedback = computed(() => Boolean(
 
 watch(() => props.visible, (visible) => {
   if (visible) {
-    const fresh = newCharacterInitialRelationshipForm()
+    const fresh = isEditMode.value
+      ? initialRelationshipFormFromPayload(props.initialRelationship)
+      : newCharacterInitialRelationshipForm()
     // Pre-fill known_context from a converted SillyTavern scenario (D5).
     // The importer still edits/confirms it before it seeds anything.
     if (!isEditMode.value && props.suggestedKnownContext) {

@@ -4,6 +4,7 @@ import {
   buildInitialRelationshipPayload,
   emptyInitialRelationshipEditForm,
   emptyInitialRelationshipForm,
+  initialRelationshipFormFromPayload,
   newCharacterInitialRelationshipForm,
   splitList,
   type InitialRelationshipEditForm,
