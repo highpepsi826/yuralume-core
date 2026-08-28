@@ -10,10 +10,11 @@ progresses — without drifting every single turn.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from kokoro_link.domain.value_objects.goal_status import GoalStatus
+from kokoro_link.domain.value_objects.commitment import normalize_commitment_key
 
 
 def _utcnow() -> datetime:
@@ -45,6 +46,11 @@ class CharacterGoal:
     last_progressed_at: datetime | None = None
     review_notes: str | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
+    commitment_key: str | None = None
+    target_date: date | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "commitment_key", normalize_commitment_key(self.commitment_key))
 
     @classmethod
     def create(
@@ -57,6 +63,8 @@ class CharacterGoal:
         origin: str = ORIGIN_MANUAL,
         tags: list[str] | tuple[str, ...] | None = None,
         created_at: datetime | None = None,
+        commitment_key: object = None,
+        target_date: date | None = None,
     ) -> "CharacterGoal":
         trimmed = content.strip()
         if not trimmed:
@@ -70,6 +78,8 @@ class CharacterGoal:
             origin=origin,
             created_at=created_at or _utcnow(),
             tags=tuple(tags or ()),
+            commitment_key=commitment_key,
+            target_date=target_date,
         )
 
     def with_status(

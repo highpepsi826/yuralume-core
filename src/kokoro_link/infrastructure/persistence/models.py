@@ -601,6 +601,8 @@ class CharacterGoalRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_progressed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    commitment_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    target_date_iso: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 class DailyScheduleRow(Base):
@@ -670,6 +672,8 @@ class ScheduleActivityRow(Base):
     )
     scene_privacy: Mapped[str | None] = mapped_column(String(40), nullable=True)
     meeting_affordance: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    commitment_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    is_first_meeting: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     memorialized: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False,
     )
@@ -1341,6 +1345,8 @@ class StoryArcBeatRow(Base):
         String(16), nullable=True,
     )
     operator_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    commitment_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    is_first_meeting: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
 
 class AppPreferenceRow(Base):
@@ -1867,6 +1873,7 @@ class PendingFollowUpRow(Base):
         Text, nullable=False, default="[]", server_default="[]",
     )
     """JSON array of all obligations merged into this visible callback."""
+    commitment_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
 
 
 class OperatorProfileFieldRow(Base):

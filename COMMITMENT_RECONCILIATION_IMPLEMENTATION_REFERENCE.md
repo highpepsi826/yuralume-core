@@ -2,8 +2,9 @@
 
 ## Status
 
-Planned. No source, migration, runtime, database, schedule, story, goal, or
-pending-follow-up data changes have been made for this work yet.
+In implementation. Source and an additive, unexecuted migration are being
+prepared; runtime, database, schedule, story, goal, pending-follow-up, and
+user data remain untouched.
 
 This document is the durable implementation reference for the post-turn
 commitment reconciliation repair. Read and update it before making any code,
@@ -76,6 +77,15 @@ Every entity constructor, factory, replace/with-fields method, SQLAlchemy row,
 mapper, repository, in-memory repository, turn snapshot codec, and character
 backup DTO must round-trip these fields. The additive database migration must
 continue from Alembic revision t9q4v7x10045 and leave existing rows nullable.
+
+### Approved Goal Target-Date Representation
+
+`CharacterGoal.target_date` is a first-class optional `date` domain field.
+Persistence stores the matching nullable `character_goals.target_date_iso`
+(`YYYY-MM-DD`) column. The post-turn signal's `target_date_iso` is parsed and
+validated before it reaches the domain; it must never be appended to
+`review_notes`. Snapshots and character backup carry the field. This is an
+additive source/migration change only until separately approved deployment.
 
 ## Post-turn Contract and Prompt
 

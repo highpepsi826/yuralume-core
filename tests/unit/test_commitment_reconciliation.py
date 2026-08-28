@@ -8,6 +8,7 @@ from kokoro_link.application.dto.goal import CreateGoalRequest, UpdateGoalReques
 from kokoro_link.application.services.goal_service import GoalService
 from kokoro_link.application.services.schedule_service import ScheduleService
 from kokoro_link.application.services.story_arc_service import ArcAdjustment, StoryArcService
+from kokoro_link.application.services.chat_service import ChatService
 from kokoro_link.contracts.post_turn import GoalAdjustmentSignal, ScheduleAdjustment
 from kokoro_link.domain.entities.character_goal import CharacterGoal
 from kokoro_link.domain.entities.schedule import DailySchedule, ScheduleActivity
@@ -21,6 +22,8 @@ from kokoro_link.domain.entities.story_arc import (
 from kokoro_link.infrastructure.repositories.in_memory_goals import InMemoryGoalRepository
 from kokoro_link.infrastructure.repositories.in_memory_schedules import InMemoryScheduleRepository
 from kokoro_link.infrastructure.repositories.in_memory_story_arcs import InMemoryStoryArcRepository
+from kokoro_link.infrastructure.repositories.in_memory_pending_follow_ups import InMemoryPendingFollowUpRepository
+from kokoro_link.domain.entities.pending_follow_up import PendingFollowUp, PendingFollowUpStatus
 
 
 UTC = timezone.utc
@@ -133,5 +136,63 @@ async def test_goal_reconciliation_requires_one_active_key() -> None:
     stored_active = await repo.get(active.id)
     stored_done = await repo.get(done.id)
     assert stored_active is not None and stored_active.content == "updated"
-    assert stored_active.review_notes == "target_date_iso=2026-08-31"
+    assert stored_active.target_date == date(2026, 8, 31)
     assert stored_done is not None and stored_done.content == "done"
+
+
+@pytest.mark.asyncio
+async def test_pending_promise_reconciliation_updates_open_only() -> None:
+    repo = InMemoryPendingFollowUpRepository()
+    now = datetime(2026, 8, 28, 12, 0, tzinfo=UTC)
+    row = PendingFollowUp.new_promise(
+        character_id="c1", conversation_id="conv", promise_intent="舊提醒",
+        scheduled_for=datetime(2026, 8, 29, 10, 0, tzinfo=UTC),
+        now=now, commitment_key="meet",
+    )
+    resolving = PendingFollowUp.new_promise(
+        character_id="c1", conversation_id="conv", promise_intent="另一個",
+        scheduled_for=datetime(2026, 8, 29, 11, 0, tzinfo=UTC),
+        now=now, commitment_key="resolve",
+    )
+    resolving = resolving.marked_resolving(now=now)
+    done = PendingFollowUp.new_promise(
+        character_id="c1", conversation_id="conv", promise_intent="已完成",
+        scheduled_for=datetime(2026, 8, 29, 12, 0, tzinfo=UTC),
+        now=now, commitment_key="done",
+    ).marked_resolved(message_text="done", now=now)
+    ambiguous = PendingFollowUp.new_promise(
+        character_id="c1", conversation_id="conv", promise_intent="A",
+        scheduled_for=datetime(2026, 8, 29, 13, 0, tzinfo=UTC),
+        now=now, commitment_key="ambiguous",
+    )
+    ambiguous2 = PendingFollowUp.new_promise(
+        character_id="c1", conversation_id="conv", promise_intent="B",
+        scheduled_for=datetime(2026, 8, 29, 14, 0, tzinfo=UTC),
+        now=now, commitment_key="ambiguous",
+    )
+    for item in (row, resolving, done, ambiguous, ambiguous2):
+        await repo.add(item)
+
+    service = object.__new__(ChatService)
+    service._pending_follow_up_repository = repo
+    service._clock = None
+    from kokoro_link.contracts.post_turn import MessagePromise
+    await ChatService._reconcile_message_promises(
+        service,
+        character_id="c1",
+        promises=[
+            MessagePromise(scheduled_for_iso="2026-08-29T15:30:00+00:00", intent="新提醒", commitment_key="meet"),
+            MessagePromise(scheduled_for_iso="2026-08-29T16:30:00+00:00", intent="新另一個", commitment_key="resolve"),
+            MessagePromise(scheduled_for_iso="2026-08-29T17:30:00+00:00", intent="不可改", commitment_key="done"),
+            MessagePromise(scheduled_for_iso="2026-08-29T18:30:00+00:00", intent="不明確", commitment_key="ambiguous"),
+        ],
+        operator=None,
+    )
+    updated = await repo.get(row.id)
+    updated_resolving = await repo.get(resolving.id)
+    unchanged_done = await repo.get(done.id)
+    unchanged_ambiguous = await repo.get(ambiguous.id)
+    assert updated is not None and updated.scheduled_for.hour == 15 and updated.promise_intent == "新提醒"
+    assert updated_resolving is not None and updated_resolving.scheduled_for.hour == 16
+    assert unchanged_done is not None and unchanged_done.scheduled_for.hour == 12
+    assert unchanged_ambiguous is not None and unchanged_ambiguous.scheduled_for.hour == 13

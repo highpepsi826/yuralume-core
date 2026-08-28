@@ -37,6 +37,8 @@ class CharacterGoalBackupRecord(BackupRecord):
     created_at: datetime
     last_progressed_at: datetime | None = None
     review_notes: str | None = None
+    commitment_key: str | None = None
+    target_date_iso: date | None = None
 
 
 class EmotionEventBackupRecord(BackupRecord):

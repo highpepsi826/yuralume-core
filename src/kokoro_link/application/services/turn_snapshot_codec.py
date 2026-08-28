@@ -118,6 +118,8 @@ def goal_to_dict(goal: CharacterGoal) -> dict[str, Any]:
         ),
         "review_notes": goal.review_notes,
         "tags": list(goal.tags),
+        "commitment_key": goal.commitment_key,
+        "target_date_iso": goal.target_date.isoformat() if goal.target_date else None,
     }
 
 
@@ -136,6 +138,8 @@ def goal_from_dict(payload: dict[str, Any]) -> CharacterGoal:
         ),
         review_notes=payload.get("review_notes"),
         tags=tuple(payload.get("tags") or ()),
+        commitment_key=payload.get("commitment_key"),
+        target_date=(date.fromisoformat(payload["target_date_iso"]) if payload.get("target_date_iso") else None),
     )
 
 
@@ -152,6 +156,8 @@ def _activity_to_dict(activity: ScheduleActivity) -> dict[str, Any]:
         "location": activity.location,
         "busy_score": activity.busy_score,
         "memorialized": activity.memorialized,
+        "commitment_key": activity.commitment_key,
+        "is_first_meeting": activity.is_first_meeting,
     }
 
 
@@ -165,6 +171,8 @@ def _activity_from_dict(payload: dict[str, Any]) -> ScheduleActivity:
         location=payload.get("location"),
         busy_score=float(payload.get("busy_score", DEFAULT_UNKNOWN_BUSY_SCORE)),
         memorialized=bool(payload.get("memorialized", False)),
+        commitment_key=payload.get("commitment_key"),
+        is_first_meeting=bool(payload.get("is_first_meeting", False)),
     )
 
 
@@ -224,6 +232,8 @@ def _beat_to_dict(beat: StoryArcBeat) -> dict[str, Any]:
         ),
         "operator_position": beat.operator_position,
         "operator_note": beat.operator_note,
+        "commitment_key": beat.commitment_key,
+        "is_first_meeting": beat.is_first_meeting,
     }
 
 
@@ -264,6 +274,8 @@ def _beat_from_dict(payload: dict[str, Any]) -> StoryArcBeat:
         # right fallback, same stance as the failure counters above.
         operator_position=payload.get("operator_position"),
         operator_note=payload.get("operator_note"),
+        commitment_key=payload.get("commitment_key"),
+        is_first_meeting=bool(payload.get("is_first_meeting", False)),
     )
 
 

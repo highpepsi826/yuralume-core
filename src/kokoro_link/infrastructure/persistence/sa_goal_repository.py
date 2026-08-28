@@ -108,6 +108,8 @@ def _apply_to_row(goal: CharacterGoal, row: CharacterGoalRow) -> None:
     row.created_at = goal.created_at
     row.last_progressed_at = goal.last_progressed_at
     row.review_notes = goal.review_notes
+    row.commitment_key = goal.commitment_key
+    row.target_date_iso = goal.target_date
 
 
 def _to_domain(row: CharacterGoalRow) -> CharacterGoal:
@@ -129,4 +131,6 @@ def _to_domain(row: CharacterGoalRow) -> CharacterGoal:
         created_at=created_at,
         last_progressed_at=progressed,
         review_notes=row.review_notes,
+        commitment_key=getattr(row, "commitment_key", None),
+        target_date=getattr(row, "target_date_iso", None),
     )

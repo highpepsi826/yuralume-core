@@ -8,6 +8,8 @@ just applies proposals and records the outcome.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
+from datetime import date
 
 from kokoro_link.application.dto.goal import (
     CreateGoalRequest,
@@ -129,3 +131,46 @@ class GoalService:
                 await self._repository.add_many(new_goals)
             except Exception:
                 _LOGGER.exception("Failed to persist newly proposed goals")
+
+    async def reconcile_commitment_adjustments(
+        self,
+        *,
+        character_id: str,
+        adjustments: list[object],
+    ) -> None:
+        """Apply exact-key updates to active goals only.
+
+        Goal rows are deliberately resolved from a fresh repository read and
+        terminal statuses are never rewritten.  A key must identify exactly
+        one active goal; ids may further constrain that match.
+        """
+        goals = await self.list_active_goals(character_id)
+        by_key: dict[str, list[CharacterGoal]] = {}
+        for goal in goals:
+            if goal.commitment_key:
+                by_key.setdefault(goal.commitment_key, []).append(goal)
+        for adjustment in adjustments:
+            key = getattr(adjustment, "commitment_key", None)
+            candidates = by_key.get(key or "", [])
+            if len(candidates) != 1:
+                continue
+            goal = candidates[0]
+            goal_id = getattr(adjustment, "goal_id", None)
+            if goal_id and goal_id != goal.id:
+                continue
+            content = getattr(adjustment, "content", None)
+            if isinstance(content, str):
+                content = content.strip()
+                if not content:
+                    continue
+            else:
+                content = goal.content
+            updated = replace(goal, content=content, commitment_key=key)
+            target_date = getattr(adjustment, "target_date_iso", None)
+            if isinstance(target_date, str) and target_date.strip():
+                try:
+                    updated = replace(updated, target_date=date.fromisoformat(target_date.strip()))
+                except ValueError:
+                    continue
+            if updated != goal:
+                await self._repository.save(updated)
