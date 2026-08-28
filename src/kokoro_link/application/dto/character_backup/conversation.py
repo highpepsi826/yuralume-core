@@ -68,6 +68,11 @@ class PendingFollowUpBackupRecord(BackupRecord):
     last_error: str | None = None
     kind: str = "busy_defer"
     promise_intent: str = ""
+    dedupe_key: str = ""
+    delivery_slot_key: str = ""
+    source_turn_key: str = ""
+    obligations_json: str = "[]"
+    commitment_key: str | None = None
     turn_record_id: str | None = None
     """Added after v1 — defaults to ``None`` so an archive written
     before the column existed still restores (base.py §version policy).
