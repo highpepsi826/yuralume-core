@@ -5,6 +5,26 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-29 - Repair legacy meeting and festival projections
+
+- Status: completed
+- Type: approved live-data repair and deployment verification
+- Git result: committed `f7bf8b7` on `local/customizations`.
+- Backup: `legacy-commitment-repair-pre-live-20260829-015633.dump` (verified
+  before the live transaction).
+- Data repair: applied the approved 17:30 card-handover / 18:00 festival
+  identity split, removed the approved obsolete goal and duplicate queued
+  promises, and preserved the manually adjusted schedule, historical records,
+  and proactive cooldown.
+- Deployment: recreated only `migrate` and `app` with the runtime Compose base
+  plus local source overlay; existing PostgreSQL, storage, and sidecar volumes
+  were retained.
+- Verification: isolated rollback/commit rehearsals passed; `migrate` exited 0,
+  Alembic reached `u2c6m8p10046`, all services were healthy, and
+  `http://127.0.0.1:8012/health` returned `status: ok`.
+- Follow-up: monitor the repaired schedule, story, goal, and pending-promise
+  views; do not rerun the one-shot repair SQL.
+
 ### 2026-08-27 - Prevent early future-event venue visits
 
 - Status: completed

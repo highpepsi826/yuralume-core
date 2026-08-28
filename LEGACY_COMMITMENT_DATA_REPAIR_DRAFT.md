@@ -13,7 +13,7 @@
 2. 建立一份新的、已驗證的 PostgreSQL custom-format 備份。 **已完成**
 3. 將確定的修復內容套用到該備份的隔離還原環境中進行演練。 **已完成**
 4. 在正式環境以單一交易執行修復，並寫入稽核記錄及變更前後的數量。 **已完成**
-5. 驗證變更後的讀取結果、回滾檢查與應用程式健康狀態。 **資料驗證已完成；應用程式健康檢查待重啟**
+5. 驗證變更後的讀取結果、回滾檢查與應用程式健康狀態。 **已完成**
 
 真正送出主動訊息後的現有 30 分鐘 cooldown 不在本次修復範圍內，必須維持
 不變。
@@ -173,15 +173,15 @@ premise 是唯一建議修正的 aggregate 文字。
 ## 目前狀態
 
 - 修復文件已完成繁中化並記錄操作者批准的 mapping。
-- 唯讀 preflight 已完成：正式環境 health=`status=ok`，Alembic revision
-  `u2c6m8p10046`；數量為 characters=1、daily_schedules=22、
+- 唯讀 preflight 已完成：正式環境在修復前 health=`status=ok`，Alembic
+  revision `u2c6m8p10046`；修復前數量為 characters=1、daily_schedules=22、
   schedule_activities=267、story_arcs=4、story_arc_beats=31、
   character_goals=21、pending_follow_ups=55。
 - 已建立並驗證備份：
   `C:\\Entertainment\\yuralume\\backups\\legacy-commitment-repair-pre-20260829-012533.dump`；
   custom archive 640 個 TOC 項目、107243296 bytes；SHA-256 為
   `DEB10A1FAA83703C30832D2EB3C97002D04CFE07638A25363B47100D830DFAC`。
-- 正式環境已以 `tools/legacy_commitment_repair_live.sql` 單一
+- 正式環境已於 2026-08-29 以 `tools/legacy_commitment_repair_live.sql` 單一
   `SERIALIZABLE` 交易完成修復，結果為 `LEGACY_REPAIR_COMMITTED`。
 - 正式環境修復後數量：characters=1、daily_schedules=22、
   schedule_activities=267、story_arcs=4、story_arc_beats=31、
@@ -195,7 +195,8 @@ premise 是唯一建議修正的 aggregate 文字。
   `C:\\Entertainment\\yuralume\\backups\\legacy-commitment-repair-pre-live-20260829-015633.dump`；
   SHA-256 為 `B1E68E183AB34879DC85CC7955315179E3F9218C198202B89CDD2AE5FCC13B08`。
 - 隔離 rollback／commit rehearsal 均已通過；正式交易沒有重跑 rehearsal
-  以外的資料操作。`yuralume-postgres`、Storage、WhatsApp sidecar 健康，
-  `yuralume-app` 目前停止中（退出碼 0）。
-- 下一步：使用 runtime 的兩個 Compose 檔只重建／啟動 `migrate` 與 `app`，
-  然後驗證 Compose health、`/health`、Alembic revision 與上述資料數量。
+  以外的資料操作。部署後 `yuralume-postgres`、Storage、WhatsApp sidecar
+  與 `yuralume-app` 均 healthy；`migrate` 退出碼為 0，Alembic revision
+  為 `u2c6m8p10046 (head)`，`GET /health` 回傳 `status=ok`。
+- 本文件的執行關卡已全部完成；後續只需監察執行中的 app 與使用者介面，
+  不再重跑修復 SQL 或 migration。
