@@ -172,6 +172,15 @@ premise 是唯一建議修正的 aggregate 文字。
 ## 目前狀態
 
 - 修復文件已完成繁中化並記錄操作者批准的 mapping。
+- 唯讀 preflight 已完成：正式環境 health=`status=ok`，Alembic revision
+  `u2c6m8p10046`；數量為 characters=1、daily_schedules=22、
+  schedule_activities=267、story_arcs=4、story_arc_beats=31、
+  character_goals=21、pending_follow_ups=55。
+- 已建立並驗證備份：
+  `C:\\Entertainment\\yuralume\\backups\\legacy-commitment-repair-pre-20260829-012533.dump`；
+  custom archive 640 個 TOC 項目、107243296 bytes；SHA-256 為
+  `DEB10A1FAA83703C30832D2EB3C97002D04CFE07638A25363B47100D830DFAC`。
 - 正式環境資料變更：無。
-- 備份／migration／部署：尚未開始。
-- 下一步：唯讀 preflight，建立並驗證備份，然後在隔離資料庫演練交易。
+- 隔離 rehearsal／正式交易／部署：尚未開始。
+- 下一步：將已驗證備份還原至明確隔離的 PostgreSQL，先演練 rollback，
+  再演練 commit 與所有不變式。
