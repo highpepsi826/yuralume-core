@@ -366,6 +366,16 @@ class PendingFollowUp:
     ``BUSY_DEFER``. The composer reads this to write the actual message
     — the persona + intent + current context drive content, no
     templating."""
+    dedupe_key: str = ""
+    delivery_slot_key: str = ""
+    source_turn_key: str = ""
+    obligations: tuple[ScheduledPromiseObligation, ...] = ()
+    commitment_key: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "commitment_key", normalize_commitment_key(self.commitment_key),
+        )
     turn_record_id: str | None = None
     """Id of the ``turn_records`` row for the turn that wrote this — the
     anchor turn-undo deletes by (TU4).
@@ -517,7 +527,19 @@ class PendingFollowUp:
             updated_at=timestamp,
             kind=PendingFollowUpKind.SCHEDULED_PROMISE,
             promise_intent=intent[:500],
+            dedupe_key=scheduled_promise_dedupe_key(
+                character_id=character_id,
+                promise_intent=intent[:500],
+                scheduled_for=scheduled_for,
+            ),
+            delivery_slot_key=scheduled_promise_delivery_slot_key(
+                character_id=character_id,
+                scheduled_for=scheduled_for,
+            ),
+            source_turn_key=source_turn_key,
+            obligations=(obligation,),
             turn_record_id=turn_record_id,
+            commitment_key=commitment_key,
         )
 
     @property
@@ -527,6 +549,22 @@ class PendingFollowUp:
     @property
     def is_scheduled_promise(self) -> bool:
         return self.kind == PendingFollowUpKind.SCHEDULED_PROMISE
+
+    @property
+    def scheduled_promise_obligations(self) -> tuple[ScheduledPromiseObligation, ...]:
+        if self.obligations:
+            return self.obligations
+        if not self.is_scheduled_promise or not self.promise_intent.strip():
+            return ()
+        source_text = self.messages[0].content if self.messages else ""
+        source_key = self.source_turn_key or scheduled_promise_source_turn_key(
+            source_text=source_text or self.promise_intent,
+        )
+        return (ScheduledPromiseObligation(
+            intent=self.promise_intent,
+            source_turn_key=source_key,
+            source_text=source_text,
+        ),)
 
     @property
     def is_honesty_repair(self) -> bool:

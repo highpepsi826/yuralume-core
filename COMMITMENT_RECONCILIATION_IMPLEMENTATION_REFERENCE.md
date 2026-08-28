@@ -76,8 +76,11 @@ It must not infer a key from user-visible text.
 
 Every entity constructor, factory, replace/with-fields method, SQLAlchemy row,
 mapper, repository, in-memory repository, turn snapshot codec, and character
-backup DTO must round-trip these fields. The additive database migration must
-continue from Alembic revision t9q4v7x10045 and leave existing rows nullable.
+backup DTO must round-trip these fields. The additive database migration
+joins the local outbound-delivery revision `t9q4v7x10045` with the upstream
+v0.7.0 revision `e9x5p3m10054` before adding the new columns, preserving both
+histories and leaving existing rows nullable. This ordering keeps the merged
+deployment on one Alembic head.
 
 ### Approved Goal Target-Date Representation
 

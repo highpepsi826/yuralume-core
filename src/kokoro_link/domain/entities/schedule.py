@@ -206,6 +206,8 @@ class ScheduleActivity:
         scene_privacy: ScenePrivacy | str | None = None,
         meeting_affordance: MeetingAffordance | str | None = None,
         source_beat_id: str | None = None,
+        commitment_key: object = None,
+        is_first_meeting: bool = False,
     ) -> "ScheduleActivity":
         desc = description.strip()
         if not desc:
@@ -251,6 +253,8 @@ class ScheduleActivity:
             scene_privacy=_coerce_scene_privacy(scene_privacy),
             meeting_affordance=_coerce_meeting_affordance(meeting_affordance),
             source_beat_id=(source_beat_id or "").strip() or None,
+            commitment_key=commitment_key,
+            is_first_meeting=is_first_meeting,
         )
 
     def with_memorialized(self, flag: bool = True) -> "ScheduleActivity":

@@ -7,7 +7,9 @@ import sqlalchemy as sa
 
 
 revision = "u2c6m8p10046"
-down_revision = "t9q4v7x10045"
+# Join the local outbound-delivery branch and the upstream v0.7.0 branch.
+# Both parents must be present before the commitment columns are added.
+down_revision = ("t9q4v7x10045", "e9x5p3m10054")
 branch_labels = None
 depends_on = None
 

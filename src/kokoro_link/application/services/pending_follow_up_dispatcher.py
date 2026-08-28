@@ -1185,6 +1185,15 @@ class PendingFollowUpDispatcher:
         uncertain is the wording. That is what the terminal check protects:
         whoever DID send owns ``resolved_message``, so once they have filed it our
         never-delivered ``body`` can no longer be stamped over it."""
+        if not attachments and _claims_media_delivery_without_attachment(
+            row.promise_intent, body,
+        ):
+            await self._fail_back_to_queued(
+                row,
+                error="media delivery claimed without attachment",
+                now=now,
+            )
+            return False
         if not await self._claim_follow_up_slot(character_id, row.id):
             # Another executor already committed this row's send (crash-after-send
             # → reclaim). At-most-once: resolve without re-delivering.

@@ -6,6 +6,8 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import asc, delete, desc, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kokoro_link.contracts.pending_follow_up import (
@@ -239,8 +241,13 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
                     last_error=follow_up.last_error,
                     kind=follow_up.kind.value,
                     promise_intent=follow_up.promise_intent,
+                    dedupe_key=follow_up.dedupe_key,
+                    delivery_slot_key=follow_up.delivery_slot_key,
+                    source_turn_key=follow_up.source_turn_key,
+                    obligations_json=_obligations_to_json(follow_up.obligations),
                     turn_record_id=follow_up.turn_record_id,
                     honesty_park_attempts=follow_up.honesty_park_attempts,
+                    commitment_key=follow_up.commitment_key,
                 ))
             else:
                 existing.character_id = follow_up.character_id
@@ -258,10 +265,91 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
                 existing.last_error = follow_up.last_error
                 existing.kind = follow_up.kind.value
                 existing.promise_intent = follow_up.promise_intent
+                existing.dedupe_key = follow_up.dedupe_key
+                existing.delivery_slot_key = follow_up.delivery_slot_key
+                existing.source_turn_key = follow_up.source_turn_key
+                existing.obligations_json = _obligations_to_json(
+                    follow_up.obligations,
+                )
                 existing.turn_record_id = follow_up.turn_record_id
                 existing.honesty_park_attempts = (
                     follow_up.honesty_park_attempts
                 )
+                existing.commitment_key = follow_up.commitment_key
+
+    async def _add_scheduled_promise(
+        self, follow_up: PendingFollowUp,
+    ) -> PendingFollowUp:
+        async with self._session_factory() as session:
+            existing = await _find_open_by_delivery_slot_key(
+                session, follow_up.delivery_slot_key,
+            )
+            if existing is not None:
+                return await _merge_scheduled_promise_context(
+                    session, existing, follow_up,
+                )
+            session.add(_domain_to_row(follow_up))
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                existing = await _find_open_by_delivery_slot_key(
+                    session, follow_up.delivery_slot_key,
+                )
+                if existing is not None:
+                    return await _merge_scheduled_promise_context(
+                        session, existing, follow_up,
+                    )
+                raise
+        return follow_up
+
+
+async def _find_open_by_delivery_slot_key(
+    session: AsyncSession, delivery_slot_key: str,
+) -> PendingFollowUpRow | None:
+    stmt = (
+        select(PendingFollowUpRow)
+        .where(PendingFollowUpRow.delivery_slot_key == delivery_slot_key)
+        .where(PendingFollowUpRow.kind == PendingFollowUpKind.SCHEDULED_PROMISE.value)
+        .where(PendingFollowUpRow.status.in_(_OPEN_STATUSES))
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+def _domain_to_row(follow_up: PendingFollowUp) -> PendingFollowUpRow:
+    return PendingFollowUpRow(
+        id=follow_up.id, character_id=follow_up.character_id,
+        conversation_id=follow_up.conversation_id, status=follow_up.status.value,
+        activity_id=follow_up.activity_id, brief_reply=follow_up.brief_reply,
+        defer_reason=follow_up.defer_reason,
+        messages_json=json.dumps([_message_to_payload(m) for m in follow_up.messages], ensure_ascii=False),
+        scheduled_for=follow_up.scheduled_for, queued_at=follow_up.queued_at,
+        updated_at=follow_up.updated_at, resolved_at=follow_up.resolved_at,
+        resolved_message=follow_up.resolved_message, last_error=follow_up.last_error,
+        kind=follow_up.kind.value, promise_intent=follow_up.promise_intent,
+        dedupe_key=follow_up.dedupe_key, delivery_slot_key=follow_up.delivery_slot_key,
+        source_turn_key=follow_up.source_turn_key,
+        obligations_json=_obligations_to_json(follow_up.obligations),
+        turn_record_id=follow_up.turn_record_id,
+        honesty_park_attempts=follow_up.honesty_park_attempts,
+        commitment_key=follow_up.commitment_key,
+    )
+
+
+async def _merge_scheduled_promise_context(
+    session: AsyncSession, row: PendingFollowUpRow, duplicate: PendingFollowUp,
+) -> PendingFollowUp:
+    canonical = _row_to_domain(row)
+    merged = canonical.merged_scheduled_promise_context(duplicate)
+    if merged != canonical:
+        row.messages_json = json.dumps([_message_to_payload(m) for m in merged.messages], ensure_ascii=False)
+        row.promise_intent = merged.promise_intent
+        row.obligations_json = _obligations_to_json(merged.obligations)
+        row.scheduled_for = merged.scheduled_for
+        row.updated_at = merged.updated_at
+        await session.commit()
+    return merged
 
 
 def _message_to_payload(message: PendingFollowUpMessage) -> dict:
@@ -364,6 +452,10 @@ def _row_to_domain(row: PendingFollowUpRow) -> PendingFollowUp:
         last_error=row.last_error,
         kind=PendingFollowUpKind(kind_raw),
         promise_intent=getattr(row, "promise_intent", "") or "",
+        dedupe_key=getattr(row, "dedupe_key", "") or "",
+        delivery_slot_key=getattr(row, "delivery_slot_key", "") or "",
+        source_turn_key=getattr(row, "source_turn_key", "") or "",
+        obligations=_obligations_from_json(getattr(row, "obligations_json", "[]")),
         # ``getattr`` for the same reason ``kind`` uses it: a row read
         # through a build that predates migration ``t0h6b3e10045`` has no
         # such attribute, and "no anchor" is the correct answer there.
@@ -374,6 +466,7 @@ def _row_to_domain(row: PendingFollowUpRow) -> PendingFollowUp:
         honesty_park_attempts=int(
             getattr(row, "honesty_park_attempts", 0) or 0
         ),
+        commitment_key=getattr(row, "commitment_key", None),
     )
 
 
