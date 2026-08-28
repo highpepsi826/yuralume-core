@@ -72,6 +72,7 @@ class PendingFollowUpBackupRecord(BackupRecord):
     delivery_slot_key: str = ""
     source_turn_key: str = ""
     obligations_json: str = "[]"
+    commitment_key: str | None = None
 
 
 class DeferredIntentBackupRecord(BackupRecord):

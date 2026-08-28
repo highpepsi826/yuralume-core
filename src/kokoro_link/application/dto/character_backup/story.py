@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import field_validator
+
 from kokoro_link.application.dto.character_backup.base import BackupRecord
 
 
@@ -52,6 +54,13 @@ class StoryArcBeatBackupRecord(BackupRecord):
     required: bool = True
     operator_position: str | None = None
     operator_note: str | None = None
+    commitment_key: str | None = None
+    is_first_meeting: bool = False
+
+    @field_validator("is_first_meeting", mode="before")
+    @classmethod
+    def _null_first_meeting_is_false(cls, value: object) -> bool:
+        return False if value is None else bool(value)
 
 
 class StorySceneSessionBackupRecord(BackupRecord):

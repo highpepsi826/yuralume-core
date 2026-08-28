@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import field_validator
+
 from kokoro_link.application.dto.character_backup.base import BackupRecord
 
 # Mirrors ``SCHEDULE_UNKNOWN_BUSY_SCORE_DEFAULT`` (infrastructure models)
@@ -41,3 +43,10 @@ class ScheduleActivityBackupRecord(BackupRecord):
     has_memory: bool = False
     companion_names_json: str = "[]"
     participant_refs_json: str = "[]"
+    commitment_key: str | None = None
+    is_first_meeting: bool = False
+
+    @field_validator("is_first_meeting", mode="before")
+    @classmethod
+    def _null_first_meeting_is_false(cls, value: object) -> bool:
+        return False if value is None else bool(value)
