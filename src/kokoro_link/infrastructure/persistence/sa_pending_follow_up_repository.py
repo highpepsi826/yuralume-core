@@ -297,6 +297,7 @@ def _domain_to_row(follow_up: PendingFollowUp) -> PendingFollowUpRow:
         delivery_slot_key=follow_up.delivery_slot_key,
         source_turn_key=follow_up.source_turn_key,
         obligations_json=_obligations_to_json(follow_up.obligations),
+        commitment_key=follow_up.commitment_key,
     )
 
 
@@ -323,6 +324,7 @@ def _copy_domain_to_row(row: PendingFollowUpRow, follow_up: PendingFollowUp) -> 
     row.delivery_slot_key = follow_up.delivery_slot_key
     row.source_turn_key = follow_up.source_turn_key
     row.obligations_json = _obligations_to_json(follow_up.obligations)
+    row.commitment_key = follow_up.commitment_key
 
 
 def _message_to_payload(message: PendingFollowUpMessage) -> dict:
@@ -431,6 +433,7 @@ def _row_to_domain(row: PendingFollowUpRow) -> PendingFollowUp:
         obligations=_obligations_from_json(
             getattr(row, "obligations_json", "[]"),
         ),
+        commitment_key=getattr(row, "commitment_key", None),
     )
 
 

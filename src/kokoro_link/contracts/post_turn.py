@@ -48,6 +48,8 @@ class ScheduleAdjustment:
 
     action: str  # "add" | "remove" | "modify"
     activity_id: str | None = None
+    commitment_key: str | None = None
+    is_first_meeting: bool = False
     start: str | None = None  # "HH:MM" in the character's local timezone
     end: str | None = None
     description: str | None = None
@@ -94,6 +96,8 @@ class ArcAdjustmentSignal:
 
     action: str
     beat_id: str | None = None
+    commitment_key: str | None = None
+    is_first_meeting: bool = False
     days: int | None = None
     scheduled_date: date | None = None
     title: str | None = None
@@ -155,6 +159,7 @@ class MessagePromise:
     only carrier of *which shape* of promise this is, so a rendezvous
     states the joining action and a completion states both the finishing
     condition and what to report back."""
+    commitment_key: str | None = None
     source_text: str = ""
     """Original user-side wording that produced the promise (例: "明天
     10 點叫我起床嘛"). Optional — empty when the post-turn LLM can't
@@ -175,10 +180,22 @@ class PeerMeetIntent:
     local civil time; the planner then finds the first valid low-busy slot
     on or after that point.
     """
+
+
     topic: str
     """Natural-language topic/reason to carry into encounter trigger_reason."""
     peer_name: str = ""
     source_text: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class GoalAdjustmentSignal:
+    """Exact-key patch for one active character goal."""
+
+    goal_id: str | None = None
+    commitment_key: str | None = None
+    target_date_iso: str | None = None
+    content: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,6 +276,7 @@ class PostTurnResult:
     schedule_adjustments: list[ScheduleAdjustment] = field(default_factory=list)
     arc_adjustments: list[ArcAdjustmentSignal] = field(default_factory=list)
     message_promises: list[MessagePromise] = field(default_factory=list)
+    goal_adjustments: list[GoalAdjustmentSignal] = field(default_factory=list)
     """Future-time promises the character made to message the user.
     Routed through :class:`PendingFollowUp` to bypass proactive gates.
     Empty list (default) keeps every legacy code path identical."""
@@ -297,6 +315,8 @@ class PostTurnProcessorPort(Protocol):
         now: datetime | None = None,
         peer_context_lines: list[str] | None = None,
         player_persona_note: str = "",
+        upcoming_schedules: list[DailySchedule] | None = None,
+        active_goals: list[object] | None = None,
     ) -> PostTurnResult:
         """Extract memories, suggest state updates, propose schedule
         adjustments, and — when an arc is active — emit optional arc

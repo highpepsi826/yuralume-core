@@ -71,6 +71,8 @@ def _activity_to_row(
             activity.meeting_affordance.value
             if activity.meeting_affordance is not None else None
         ),
+        commitment_key=activity.commitment_key,
+        is_first_meeting=bool(activity.is_first_meeting),
         memorialized=bool(activity.memorialized),
         has_memory=bool(activity.has_memory),
         companion_names_json=json.dumps(
@@ -128,6 +130,8 @@ def _row_to_activity(row: ScheduleActivityRow) -> ScheduleActivity:
         participant_refs=refs,
         scene_privacy=getattr(row, "scene_privacy", None),
         meeting_affordance=getattr(row, "meeting_affordance", None),
+        commitment_key=getattr(row, "commitment_key", None),
+        is_first_meeting=bool(getattr(row, "is_first_meeting", False)),
     )
 
 

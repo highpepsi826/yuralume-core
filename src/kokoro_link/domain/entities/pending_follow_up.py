@@ -34,6 +34,7 @@ from hashlib import sha256
 from typing import ClassVar
 from unicodedata import normalize
 from uuid import uuid4
+from kokoro_link.domain.value_objects.commitment import normalize_commitment_key
 
 from kokoro_link.domain.entities.conversation import MessageContentMode
 
@@ -347,6 +348,10 @@ class PendingFollowUp:
     """Fingerprint of the canonical source turn for audit and idempotency."""
     obligations: tuple[ScheduledPromiseObligation, ...] = ()
     """All distinct promises to fulfil in the one visible callback."""
+    commitment_key: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "commitment_key", normalize_commitment_key(self.commitment_key))
 
     @classmethod
     def new(
@@ -360,6 +365,7 @@ class PendingFollowUp:
         scheduled_for: datetime,
         activity_id: str | None = None,
         now: datetime | None = None,
+        commitment_key: object = None,
     ) -> "PendingFollowUp":
         timestamp = now or _utcnow()
         reply = (brief_reply or "").strip()
@@ -380,6 +386,7 @@ class PendingFollowUp:
             scheduled_for=scheduled_for,
             queued_at=timestamp,
             updated_at=timestamp,
+            commitment_key=commitment_key,
         )
 
     @classmethod
@@ -394,6 +401,7 @@ class PendingFollowUp:
         source_content_mode: MessageContentMode | str = MessageContentMode.NORMAL,
         source_safe_summary: str = "",
         now: datetime | None = None,
+        commitment_key: object = None,
     ) -> "PendingFollowUp":
         """Create a ``SCHEDULED_PROMISE`` row.
 
@@ -455,6 +463,7 @@ class PendingFollowUp:
             ),
             source_turn_key=source_turn_key,
             obligations=(obligation,),
+            commitment_key=commitment_key,
         )
 
     @property

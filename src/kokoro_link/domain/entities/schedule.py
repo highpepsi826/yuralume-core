@@ -27,6 +27,7 @@ from enum import StrEnum
 from uuid import uuid4
 
 from kokoro_link.domain.value_objects.actor import ParticipantRef
+from kokoro_link.domain.value_objects.commitment import normalize_commitment_key
 
 DEFAULT_UNKNOWN_BUSY_SCORE = 0.4
 """Reachable fallback when an activity has no usable busy score."""
@@ -146,6 +147,8 @@ class ScheduleActivity:
     the main chat may draw on later (e.g. letting a character set a
     boundary in-story during a private moment)."""
     meeting_affordance: MeetingAffordance | None = None
+    commitment_key: str | None = None
+    is_first_meeting: bool = False
     """Planner-produced indication of whether an activity naturally allows
     encounter, requires invitation, or is not available for meeting.
 
@@ -166,6 +169,8 @@ class ScheduleActivity:
                 "meeting_affordance",
                 MeetingAffordance(self.meeting_affordance),
             )
+        object.__setattr__(self, "commitment_key", normalize_commitment_key(self.commitment_key))
+        object.__setattr__(self, "is_first_meeting", bool(self.is_first_meeting))
 
     @classmethod
     def create(
@@ -183,6 +188,8 @@ class ScheduleActivity:
         participant_refs: tuple[ParticipantRef, ...] | list[ParticipantRef] | None = None,
         scene_privacy: ScenePrivacy | str | None = None,
         meeting_affordance: MeetingAffordance | str | None = None,
+        commitment_key: object = None,
+        is_first_meeting: bool = False,
     ) -> "ScheduleActivity":
         desc = description.strip()
         if not desc:
@@ -227,6 +234,8 @@ class ScheduleActivity:
             participant_refs=_dedupe_participant_refs(participant_refs or ()),
             scene_privacy=_coerce_scene_privacy(scene_privacy),
             meeting_affordance=_coerce_meeting_affordance(meeting_affordance),
+            commitment_key=commitment_key,
+            is_first_meeting=is_first_meeting,
         )
 
     def with_memorialized(self, flag: bool = True) -> "ScheduleActivity":

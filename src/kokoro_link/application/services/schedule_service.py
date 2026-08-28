@@ -1526,6 +1526,98 @@ class ScheduleService:
                 today_result = updated
         return today_result
 
+    async def reconcile_commitment_adjustments(
+        self,
+        *,
+        character_id: str,
+        adjustments: list[ScheduleAdjustment],
+        character: Character | None = None,
+    ) -> None:
+        """Apply exact-identity commitment edits, including date moves.
+
+        This is deliberately separate from the legacy adjustment path: a
+        commitment may be moved between civil-date buckets, so resolving it
+        against today's row would silently leave stale projections behind.
+        Ambiguous or blank keys are ignored.
+        """
+        keyed = [a for a in adjustments if a.action == "modify" and a.commitment_key]
+        if not keyed:
+            return
+        schedules = await self._repository.list_for_character(character_id, limit=30)
+        by_id = {a.id: (schedule, a) for schedule in schedules for a in schedule.activities}
+        by_key: dict[str, list[tuple[DailySchedule, ScheduleActivity]]] = {}
+        for schedule in schedules:
+            for activity in schedule.activities:
+                if activity.commitment_key:
+                    by_key.setdefault(activity.commitment_key, []).append((schedule, activity))
+        local_tz = (
+            await self._resolve_operator_timezone(character)
+            if character is not None else self._local_tz
+        )
+        touched: dict[date, DailySchedule] = {}
+        selected_first_id: str | None = None
+        for adj in keyed:
+            target_pair = by_id.get(adj.activity_id) if adj.activity_id else None
+            if target_pair is None:
+                candidates = by_key.get(adj.commitment_key or "", [])
+                if len(candidates) != 1:
+                    continue
+                target_pair = candidates[0]
+            source_schedule, activity = target_pair
+            if activity.memorialized:
+                continue
+            target_date = _parse_iso_date(adj.target_date_iso) or source_schedule.date
+            updated_items, changed = _apply_modify(
+                [activity], activity_id=activity.id, adj=adj,
+                date_=target_date, local_tz=local_tz,
+            )
+            if not changed:
+                continue
+            updated_activity = updated_items[0]
+            if adj.is_first_meeting:
+                # Use the activity actually resolved by id/key.  The input id
+                # may be absent when an exact commitment key was used.
+                selected_first_id = activity.id
+            if source_schedule.date != target_date:
+                source_items = [a for a in source_schedule.activities if a.id != activity.id]
+                touched[source_schedule.date] = source_schedule.with_activities(source_items)
+                destination = touched.get(target_date) or await self._repository.get(character_id, target_date)
+                if destination is None:
+                    destination = DailySchedule.create(
+                        character_id=character_id, date_=target_date,
+                        activities=[], is_planned=False,
+                    )
+                touched[target_date] = destination.with_activities(
+                    [*destination.activities, updated_activity],
+                )
+            else:
+                touched[source_schedule.date] = source_schedule.with_activities(
+                    [updated_activity if a.id == activity.id else a for a in source_schedule.activities],
+                )
+        if not touched:
+            return
+        if selected_first_id is not None:
+            # Enforce uniqueness across every live activity for this
+            # character, including rows not otherwise touched by the edit.
+            # Historical/memorialized records are intentionally immutable.
+            for schedule in schedules:
+                current = touched.get(schedule.date, schedule)
+                activities = []
+                changed = False
+                for activity in current.activities:
+                    if (
+                        activity.id != selected_first_id
+                        and activity.is_first_meeting
+                        and not activity.memorialized
+                    ):
+                        activity = replace(activity, is_first_meeting=False)
+                        changed = True
+                    activities.append(activity)
+                if changed:
+                    touched[schedule.date] = current.with_activities(activities)
+        for schedule in touched.values():
+            await self._repository.save(schedule)
+
     async def _apply_adjustments_for_date(
         self,
         *,
@@ -1664,6 +1756,14 @@ def _apply_modify(
                 location=new_location,
                 busy_score=max(0.0, min(1.0, new_busy)),
                 participant_refs=participant_refs,
+                commitment_key=(
+                    adj.commitment_key
+                    if adj.commitment_key is not None else activity.commitment_key
+                ),
+                is_first_meeting=(
+                    bool(adj.is_first_meeting)
+                    if adj.commitment_key is not None else activity.is_first_meeting
+                ),
             )
         )
         changed = True
@@ -1697,6 +1797,8 @@ def _build_added_activity(
                 role=adj.operator_involvement,
                 display_name=adj.operator_display_name,
             ),
+            commitment_key=adj.commitment_key,
+            is_first_meeting=adj.is_first_meeting,
         )
     except ValueError:
         return None

@@ -16,6 +16,7 @@ ${operator_section}
 ${history_section}
 ${schedule_section}
 ${arc_section}
+${goals_section}
 
 本輪對話：
 使用者說：${user_message}
@@ -23,7 +24,9 @@ ${character_name} 回覆：${assistant_message}
 
 輸出規則：
 - 只輸出一個 JSON 物件，不要任何散文、前言或 code fence。
-- 物件包含六個欄位：memories、state、schedule_adjustments、arc_adjustments、message_promises、address_changes。
+- 物件包含欄位：memories、state、schedule_adjustments、arc_adjustments、goal_adjustments、message_promises、address_changes。
+- 同一個玩家承諾若同時出現在行程、劇情、目標或待回覆，所有相關輸出必須使用同一個穩定、非空的 commitment_key（例如 meeting_2026_08_31）；不要用標題、日期或 delivery_slot_key 當身份。
+- 已知的 activity_id、beat_id、goal_id 只能從上方 context 引用；沒有唯一 exact key/ID 就不要輸出調整。真正第一次見面只能在同一個 live commitment 上標記 is_first_meeting=true。
 
 時間紀律（memories.content、schedule_adjustments.description／reason、arc_adjustments 的
 title／summary／narrative 共同適用；state 與 address_changes 不受此限）：

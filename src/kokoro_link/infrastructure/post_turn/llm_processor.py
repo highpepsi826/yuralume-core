@@ -22,6 +22,7 @@ from kokoro_link.contracts.llm import ChatModelPort
 from kokoro_link.contracts.post_turn import (
     ArcAdjustmentSignal,
     EmotionEventCandidate,
+    GoalAdjustmentSignal,
     PeerMeetIntent,
     PostTurnProcessorPort,
     PostTurnResult,
@@ -40,6 +41,7 @@ from kokoro_link.domain.entities.schedule import (
 )
 from kokoro_link.domain.entities.story_arc import StoryArc
 from kokoro_link.domain.value_objects.actor import ParticipantRef
+from kokoro_link.domain.value_objects.commitment import normalize_commitment_key
 from kokoro_link.domain.value_objects.memory_kind import CANONICAL_KINDS, MemoryKind
 from kokoro_link.domain.value_objects.resolved_address import ResolvedAddress
 from kokoro_link.domain.value_objects.timezone import timezone_for_id, to_timezone
@@ -126,6 +128,8 @@ class LLMPostTurnProcessor(PostTurnProcessorPort):
         recent_messages: list[Message] | None = None,
         active_schedule: DailySchedule | None = None,
         active_arc: StoryArc | None = None,
+        upcoming_schedules: list[DailySchedule] | None = None,
+        active_goals: list[object] | None = None,
         operator: OperatorProfile | None = None,
         now: datetime | None = None,
         content_mode: str = "normal",
@@ -145,6 +149,8 @@ class LLMPostTurnProcessor(PostTurnProcessorPort):
             recent_messages=recent_messages or [],
             active_schedule=active_schedule,
             active_arc=active_arc,
+            upcoming_schedules=upcoming_schedules,
+            active_goals=active_goals,
             operator=operator,
             local_tz=_operator_timezone(operator, self._local_tz),
             now=now,
@@ -159,22 +165,39 @@ class LLMPostTurnProcessor(PostTurnProcessorPort):
             _LOGGER.exception("Post-turn LLM call failed")
             return PostTurnResult()
 
-        known_ids = (
-            {a.id for a in active_schedule.activities}
-            if active_schedule is not None
-            else set()
-        )
+        all_schedules = [active_schedule, *(upcoming_schedules or [])]
+        known_ids = {a.id for schedule in all_schedules if schedule is not None for a in schedule.activities}
+        activity_keys: dict[str, set[str]] = {}
+        for schedule in all_schedules:
+            if schedule is None:
+                continue
+            for activity in schedule.activities:
+                if activity.commitment_key:
+                    activity_keys.setdefault(activity.commitment_key, set()).add(activity.id)
         known_beat_ids = (
-            {b.id for b in active_arc.beats if b.status == "pending"}
+            {b.id for b in active_arc.beats if b.status in {"pending", "active"}}
             if active_arc is not None
             else set()
         )
+        beat_keys: dict[str, set[str]] = {}
+        if active_arc is not None:
+            for beat in active_arc.beats:
+                if beat.status in {"pending", "active"} and beat.commitment_key:
+                    beat_keys.setdefault(beat.commitment_key, set()).add(beat.id)
+        goal_keys: dict[str, set[str]] = {}
+        for goal in active_goals or []:
+            key = getattr(goal, "commitment_key", None)
+            if key and getattr(getattr(goal, "status", None), "value", None) == "active":
+                goal_keys.setdefault(key, set()).add(goal.id)
         return _parse_response(
             raw,
             character_id=character.id,
             conversation_id=conversation_id,
             known_activity_ids=known_ids,
+            activity_key_ids=activity_keys,
             known_beat_ids=known_beat_ids,
+            beat_key_ids=beat_keys,
+            goal_key_ids=goal_keys,
             known_peer_lines=peer_context_lines or [],
         )
 
@@ -186,6 +209,8 @@ def _build_prompt(
     recent_messages: list[Message],
     active_schedule: DailySchedule | None = None,
     active_arc: StoryArc | None = None,
+    upcoming_schedules: list[DailySchedule] | None = None,
+    active_goals: list[object] | None = None,
     operator: OperatorProfile | None = None,
     local_tz: tzinfo = timezone.utc,
     now: datetime | None = None,
@@ -198,7 +223,7 @@ def _build_prompt(
     ref_now = ensure_utc(now) if now is not None else datetime.now(timezone.utc)
     today = to_timezone(ref_now, local_tz).date()
     schedule_section = "\n".join(
-        _render_schedule_context(active_schedule, local_tz=local_tz),
+        _render_schedule_context(active_schedule, local_tz=local_tz, upcoming=upcoming_schedules or []),
     )
     arc_section = "\n".join(
         _render_arc_context(
@@ -254,6 +279,7 @@ def _build_prompt(
         history_section=history_section,
         schedule_section=schedule_section,
         arc_section=arc_section,
+        goals_section=_render_goal_context(active_goals or []),
         user_message=user_message,
         assistant_message=assistant_message,
         kinds_hint=", ".join(sorted(_ALLOWED_KINDS)),
@@ -426,6 +452,7 @@ def _render_schedule_context(
     schedule: DailySchedule | None,
     *,
     local_tz: tzinfo,
+    upcoming: list[DailySchedule] | None = None,
 ) -> list[str]:
     if schedule is None or not schedule.activities:
         return [
@@ -451,6 +478,27 @@ def _render_schedule_context(
             f"- id={activity.id} {start}-{end} {activity.description}"
             f"（{activity.category}{loc}{companions}）"
         )
+    for future in upcoming or []:
+        lines.append(f"未來行程 {future.date.isoformat()}（只可引用已驗證 id）：")
+        for activity in future.activities:
+            start = to_timezone(activity.start_at, local_tz).strftime("%H:%M")
+            end = to_timezone(activity.end_at, local_tz).strftime("%H:%M")
+            key = f"｜commitment_key={activity.commitment_key}" if activity.commitment_key else ""
+            lines.append(f"- id={activity.id} {start}-{end} {activity.description}{key}")
+    return lines
+
+
+def _render_goal_context(goals: list[object]) -> list[str]:
+    lines = ["", "進行中的中期目標（只可引用已驗證 goal_id/commitment_key）："]
+    found = False
+    for goal in goals:
+        if getattr(getattr(goal, "status", None), "value", None) != "active":
+            continue
+        found = True
+        key = f"｜commitment_key={goal.commitment_key}" if getattr(goal, "commitment_key", None) else ""
+        lines.append(f"- id={goal.id} {goal.content}{key}")
+    if not found:
+        lines.append("- （無）")
     return lines
 
 
@@ -472,7 +520,10 @@ def _parse_response(
     character_id: str,
     conversation_id: str,
     known_activity_ids: set[str] | None = None,
+    activity_key_ids: dict[str, set[str]] | None = None,
     known_beat_ids: set[str] | None = None,
+    beat_key_ids: dict[str, set[str]] | None = None,
+    goal_key_ids: dict[str, set[str]] | None = None,
     known_peer_lines: list[str] | None = None,
 ) -> PostTurnResult:
     obj = _extract_object(raw)
@@ -484,12 +535,15 @@ def _parse_response(
     adjustments = _parse_adjustments(
         obj.get("schedule_adjustments"),
         known_activity_ids=known_activity_ids or set(),
+        activity_key_ids=activity_key_ids or {},
     )
     arc_adjustments = _parse_arc_adjustments(
         obj.get("arc_adjustments"),
         known_beat_ids=known_beat_ids or set(),
+        beat_key_ids=beat_key_ids or {},
     )
     message_promises = _parse_message_promises(obj.get("message_promises"))
+    goal_adjustments = _parse_goal_adjustments(obj.get("goal_adjustments"), goal_key_ids=goal_key_ids or {})
     peer_ids, peer_names = _known_peers_from_lines(known_peer_lines or [])
     peer_meet_intents = _parse_peer_meet_intents(
         obj.get("peer_meet_intents"),
@@ -504,6 +558,7 @@ def _parse_response(
         schedule_adjustments=adjustments,
         arc_adjustments=arc_adjustments,
         message_promises=message_promises,
+        goal_adjustments=goal_adjustments,
         peer_meet_intents=peer_meet_intents,
         emotion_events=emotion_events,
         address_changes=address_changes,
@@ -658,13 +713,39 @@ def _parse_message_promises(raw: Any) -> list:
         if not scheduled or not intent:
             continue
         source_text = _coerce_adj_text(entry.get("source_text"), limit=200)
+        commitment_key = normalize_commitment_key(entry.get("commitment_key"))
         out.append(
             MessagePromise(
                 scheduled_for_iso=scheduled,
                 intent=intent,
                 source_text=source_text,
+                commitment_key=commitment_key,
             )
         )
+    return out
+
+
+def _parse_goal_adjustments(raw: Any, *, goal_key_ids: dict[str, set[str]]) -> list[GoalAdjustmentSignal]:
+    if not isinstance(raw, list):
+        return []
+    out: list[GoalAdjustmentSignal] = []
+    for entry in raw[:2]:
+        if not isinstance(entry, dict):
+            continue
+        key = normalize_commitment_key(entry.get("commitment_key"))
+        ids = goal_key_ids.get(key or "", set())
+        goal_id = _coerce_plain_str(entry.get("goal_id")) or None
+        if goal_id is not None and not any(goal_id == candidate for values in goal_key_ids.values() for candidate in values):
+            goal_id = None
+        if key is None or len(ids) != 1:
+            continue
+        if goal_id is not None and goal_id not in ids:
+            continue
+        target = _coerce_iso_date(entry.get("target_date_iso"))
+        content = _coerce_adj_text(entry.get("content"), limit=400) or None
+        if target is None and content is None:
+            continue
+        out.append(GoalAdjustmentSignal(goal_id=goal_id or next(iter(ids)), commitment_key=key, target_date_iso=target, content=content))
     return out
 
 
@@ -719,6 +800,7 @@ def _parse_arc_adjustments(
     raw: Any,
     *,
     known_beat_ids: set[str],
+    beat_key_ids: dict[str, set[str]] | None = None,
 ) -> list[ArcAdjustmentSignal]:
     if not isinstance(raw, list):
         return []
@@ -732,6 +814,9 @@ def _parse_arc_adjustments(
 
         if action in {"advance_beat", "delay_beat"}:
             beat_id = _coerce_plain_str(entry.get("beat_id"))
+            key = normalize_commitment_key(entry.get("commitment_key"))
+            if not beat_id and key and len((beat_key_ids or {}).get(key, set())) == 1:
+                beat_id = next(iter((beat_key_ids or {})[key]))
             if beat_id not in known_beat_ids:
                 continue
             days = _coerce_int(entry.get("days"))
@@ -740,12 +825,16 @@ def _parse_arc_adjustments(
             magnitude = min(abs(days), _MAX_ARC_SHIFT_DAYS)
             signed = magnitude if action == "delay_beat" else -magnitude
             out.append(ArcAdjustmentSignal(
-                action=action, beat_id=beat_id, days=signed,
+                action=action, beat_id=beat_id, commitment_key=key,
+                is_first_meeting=bool(entry.get("is_first_meeting", False)), days=signed,
                 reason=_trim(entry.get("reason"), _MAX_REASON_CHARS),
             ))
 
         elif action == "modify_beat":
             beat_id = _coerce_plain_str(entry.get("beat_id"))
+            key = normalize_commitment_key(entry.get("commitment_key"))
+            if not beat_id and key and len((beat_key_ids or {}).get(key, set())) == 1:
+                beat_id = next(iter((beat_key_ids or {})[key]))
             if beat_id not in known_beat_ids:
                 continue
             title = _trim(entry.get("title"), _MAX_ARC_TITLE_CHARS) or None
@@ -755,7 +844,8 @@ def _parse_arc_adjustments(
             if not any([title, summary, tension]):
                 continue
             out.append(ArcAdjustmentSignal(
-                action="modify_beat", beat_id=beat_id,
+                action="modify_beat", beat_id=beat_id, commitment_key=key,
+                is_first_meeting=bool(entry.get("is_first_meeting", False)),
                 title=title, summary=summary, tension=tension,
                 reason=_trim(entry.get("reason"), _MAX_REASON_CHARS),
             ))
@@ -777,6 +867,9 @@ def _parse_arc_adjustments(
 
         elif action == "mark_realized":
             beat_id = _coerce_plain_str(entry.get("beat_id"))
+            key = normalize_commitment_key(entry.get("commitment_key"))
+            if not beat_id and key and len((beat_key_ids or {}).get(key, set())) == 1:
+                beat_id = next(iter((beat_key_ids or {})[key]))
             if beat_id not in known_beat_ids:
                 continue
             narrative = (
@@ -784,17 +877,22 @@ def _parse_arc_adjustments(
                 or _trim(entry.get("summary"), _MAX_ARC_SUMMARY_CHARS)
             )
             out.append(ArcAdjustmentSignal(
-                action="mark_realized", beat_id=beat_id,
+                action="mark_realized", beat_id=beat_id, commitment_key=key,
+                is_first_meeting=bool(entry.get("is_first_meeting", False)),
                 narrative=narrative or None,
                 reason=_trim(entry.get("reason"), _MAX_REASON_CHARS),
             ))
 
         elif action == "skip_beat":
             beat_id = _coerce_plain_str(entry.get("beat_id"))
+            key = normalize_commitment_key(entry.get("commitment_key"))
+            if not beat_id and key and len((beat_key_ids or {}).get(key, set())) == 1:
+                beat_id = next(iter((beat_key_ids or {})[key]))
             if beat_id not in known_beat_ids:
                 continue
             out.append(ArcAdjustmentSignal(
-                action="skip_beat", beat_id=beat_id,
+                action="skip_beat", beat_id=beat_id, commitment_key=key,
+                is_first_meeting=bool(entry.get("is_first_meeting", False)),
                 reason=_trim(entry.get("reason"), _MAX_REASON_CHARS),
             ))
 
@@ -1139,6 +1237,7 @@ def _parse_adjustments(
     raw: Any,
     *,
     known_activity_ids: set[str],
+    activity_key_ids: dict[str, set[str]] | None = None,
 ) -> list[ScheduleAdjustment]:
     if not isinstance(raw, list):
         return []
@@ -1159,6 +1258,11 @@ def _parse_adjustments(
         else:
             activity_id = activity_id.strip()
 
+        commitment_key = normalize_commitment_key(entry.get("commitment_key"))
+        if activity_id is None and commitment_key:
+            matching = (activity_key_ids or {}).get(commitment_key, set())
+            if len(matching) == 1:
+                activity_id = next(iter(matching))
         # remove / modify must target a known id — otherwise skip the
         # adjustment to avoid applying a guess.
         if action in ("remove", "modify"):
@@ -1195,6 +1299,8 @@ def _parse_adjustments(
             ScheduleAdjustment(
                 action=action,
                 activity_id=activity_id,
+                commitment_key=commitment_key,
+                is_first_meeting=bool(entry.get("is_first_meeting", False)),
                 start=start,
                 end=end,
                 description=description,

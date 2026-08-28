@@ -6471,6 +6471,7 @@ class ChatService:
             post_turn_started, _operator_timezone(operator),
         ).date()
         active_schedule = None
+        upcoming_schedules = []
         if self._schedule_service is not None:
             try:
                 active_schedule = await self._schedule_service.get_schedule(
@@ -6479,6 +6480,12 @@ class ChatService:
             except Exception:
                 _LOGGER.exception("Failed to load schedule for post-turn context")
                 active_schedule = None
+            try:
+                upcoming_schedules = await self._schedule_service.load_upcoming_schedules(
+                    character.id, start_after=today_local,
+                )
+            except Exception:
+                _LOGGER.exception("Failed to load upcoming schedules for post-turn context")
 
         active_arc = None
         if self._story_arc_service is not None:
@@ -6487,6 +6494,7 @@ class ChatService:
             except Exception:
                 _LOGGER.exception("Failed to load arc for post-turn context")
                 active_arc = None
+        active_goals = await self._load_active_goals(character.id)
         peer_context_lines = await self._load_peer_context_lines_for_extraction(
             character.id,
         )
@@ -6509,6 +6517,10 @@ class ChatService:
                 "operator": operator,
                 "now": post_turn_started,
             }
+            if _accepts_keyword(self._post_turn_processor.process, "upcoming_schedules"):
+                kwargs["upcoming_schedules"] = upcoming_schedules
+            if _accepts_keyword(self._post_turn_processor.process, "active_goals"):
+                kwargs["active_goals"] = active_goals
             if _accepts_keyword(self._post_turn_processor.process, "content_mode"):
                 kwargs["content_mode"] = content_mode
             if _accepts_keyword(self._post_turn_processor.process, "peer_context_lines"):
@@ -6560,6 +6572,7 @@ class ChatService:
                 "emotion_event_count": len(result.emotion_events or ()),
                 "schedule_adjustment_count": len(result.schedule_adjustments or ()),
                 "arc_adjustment_count": len(result.arc_adjustments or ()),
+                "goal_adjustment_count": len(result.goal_adjustments or ()),
                 "peer_meet_intent_count": len(result.peer_meet_intents or ()),
             },
             post_turn_refs={
@@ -6637,9 +6650,18 @@ class ChatService:
         # Apply LLM-proposed schedule mutations (Phase 2.3).
         if result.schedule_adjustments and self._schedule_service is not None:
             try:
-                await self._schedule_service.apply_adjustments(
+                await self._schedule_service.reconcile_commitment_adjustments(
                     character_id=character.id,
                     adjustments=result.schedule_adjustments,
+                    character=character,
+                )
+                legacy_adjustments = [
+                    adjustment for adjustment in result.schedule_adjustments
+                    if not adjustment.commitment_key or adjustment.action == "add"
+                ]
+                await self._schedule_service.apply_adjustments(
+                    character_id=character.id,
+                    adjustments=legacy_adjustments,
                     character=character,
                 )
             except Exception:
@@ -6686,9 +6708,20 @@ class ChatService:
                             tension=sig.tension,
                             reason=sig.reason,
                             narrative=sig.narrative,
+                            commitment_key=sig.commitment_key,
+                            is_first_meeting=sig.is_first_meeting,
                         ),
                     )
                 if translated:
+                    await self._story_arc_service.reconcile_commitment_adjustments(
+                        character_id=character.id,
+                        adjustments=translated,
+                    )
+                    translated = [
+                        adjustment for adjustment in translated
+                        if not adjustment.commitment_key
+                        or adjustment.action == "insert_beat"
+                    ]
                     await self._story_arc_service.apply_adjustments(
                         character_id=character.id,
                         adjustments=translated,
@@ -6708,6 +6741,11 @@ class ChatService:
             and self._pending_follow_up_repository is not None
         ):
             try:
+                await self._reconcile_message_promises(
+                    character_id=character.id,
+                    promises=result.message_promises,
+                    operator=operator,
+                )
                 await self._persist_message_promises(
                     character_id=character.id,
                     conversation_id=conversation_id,
@@ -6720,6 +6758,15 @@ class ChatService:
                     "Failed to persist message promises character=%s",
                     character.id,
                 )
+
+        if result.goal_adjustments and self._goal_service is not None:
+            try:
+                await self._reconcile_goal_adjustments(
+                    character_id=character.id,
+                    adjustments=result.goal_adjustments,
+                )
+            except Exception:
+                _LOGGER.exception("Failed to reconcile goal adjustments")
 
         if (
             result.peer_meet_intents
@@ -6768,6 +6815,61 @@ class ChatService:
             "emotion_event_ids": emotion_event_ids,
             "state_suggestion_applied": result.state_suggestion is not None,
         }
+
+    async def _reconcile_goal_adjustments(
+        self, *, character_id: str, adjustments: list,
+    ) -> None:
+        await self._goal_service.reconcile_commitment_adjustments(
+            character_id=character_id,
+            adjustments=adjustments,
+        )
+
+    async def _reconcile_message_promises(
+        self, *, character_id: str, promises: list, operator: OperatorProfile | None,
+    ) -> None:
+        repo = self._pending_follow_up_repository
+        if repo is None:
+            return
+        keyed = [p for p in promises if getattr(p, "commitment_key", None)]
+        if not keyed:
+            return
+        open_rows = await repo.list_open_for_character(character_id)
+        by_key: dict[str, list] = {}
+        for row in open_rows:
+            if row.kind.value == "scheduled_promise" and row.commitment_key:
+                by_key.setdefault(row.commitment_key, []).append(row)
+        from dataclasses import replace
+        from kokoro_link.domain.entities.pending_follow_up import (
+            scheduled_promise_dedupe_key,
+            scheduled_promise_delivery_slot_key,
+        )
+        now = self._resolve_now()
+        local_tz = _operator_timezone(operator)
+        for promise in keyed:
+            rows = by_key.get(promise.commitment_key or "", [])
+            if len(rows) != 1:
+                continue
+            parsed = _parse_promise_datetime(promise.scheduled_for_iso, local_tz=local_tz)
+            if parsed is None or parsed <= now:
+                continue
+            row = rows[0]
+            updated = replace(
+                row,
+                scheduled_for=parsed,
+                promise_intent=promise.intent.strip() or row.promise_intent,
+                commitment_key=promise.commitment_key,
+                dedupe_key=scheduled_promise_dedupe_key(
+                    character_id=character_id,
+                    promise_intent=(promise.intent.strip() or row.promise_intent),
+                    scheduled_for=parsed,
+                ),
+                delivery_slot_key=scheduled_promise_delivery_slot_key(
+                    character_id=character_id, scheduled_for=parsed,
+                ),
+                updated_at=now,
+            )
+            if updated != row:
+                await repo.save(updated)
 
     async def _run_persona_extraction(
         self,
@@ -6988,6 +7090,7 @@ class ChatService:
                 source_message_content=promise.source_text,
                 source_content_mode=content_mode,
                 now=now,
+                commitment_key=promise.commitment_key,
             )
             try:
                 canonical_row = await repo.add(row)

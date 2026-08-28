@@ -2,9 +2,10 @@
 
 ## Status
 
-In implementation. Source and an additive, unexecuted migration are being
-prepared; runtime, database, schedule, story, goal, pending-follow-up, and
-user data remain untouched.
+Source implementation complete and committed on `local/customizations`.
+The additive migration is present but has not been executed; runtime,
+database, schedule, story, goal, pending-follow-up, and user data remain
+untouched.
 
 This document is the durable implementation reference for the post-turn
 commitment reconciliation repair. Read and update it before making any code,
@@ -171,7 +172,9 @@ be treated as ambiguous and left unchanged. This preserves distinct 16:30 and
    reference if implementation reveals an approved design change.
 10. Append the completed result to UPDATE_PROGRESS_LOG.md, then create a
     narrowly scoped local: commit. Do not deploy without a separate user
-    request and the workflow's required backup and verification.
+    request and the workflow's required backup and verification. **Complete**
+    for this source-only change; commits `2e61b45`, `a73584d`, `e73f7dd`,
+    `838cacf`, and `a339c4e` record the checkpoints.
 
 ## Required Regression Coverage
 

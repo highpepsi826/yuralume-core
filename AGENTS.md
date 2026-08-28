@@ -66,6 +66,11 @@ local Yuralume deployment.
   COMMITMENT_RECONCILIATION_IMPLEMENTATION_REFERENCE.md. Read it before
   changing that behavior, and do not replace it with a large
   context-dependent patch.
+- For the current repair's execution state, read `待修.md` and
+  `.codex-round.md` after checking `git status` and the latest commit. Update
+  `.codex-round.md` after each verified small step with the exact next action,
+  test result, changed files, and any blocker. Do not restart completed
+  inventory after context compaction.
 
 ## Safety Checks
 

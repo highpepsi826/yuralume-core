@@ -526,3 +526,19 @@ database rows.
   `status: ok`. The corrected future beat is pending, the preceding day has
   no venue activity, and the event-day schedule contains venue activities.
 - Follow-up: `none`
+
+### 2026-08-28 - Reconcile revised commitments across live projections
+
+- Status: source implementation complete; deployment not performed.
+- Type: post-turn commitment reconciliation and concurrency safety.
+- Git result: checkpoint commits `2e61b45`, `a73584d`, `e73f7dd`, `838cacf`,
+  and `a339c4e` on `local/customizations`.
+- Scope: exact-key synchronization for schedules, story beats, active goals,
+  and queued promises; nullable persistence fields, snapshot/backup round-trip,
+  and additive Alembic migration. Historical records stay immutable; the
+  30-minute proactive cooldown and distinct 16:30/18:00 activities remain.
+- Verification: focused post-turn/schedule/story/promise suite passed 122
+  tests; story/service/routes concurrency suite passed 58 tests; compile and
+  `git diff --check` passed.
+- Deployment: none. Migration: present but not executed.
+- Follow-up: separately approve backup, migration rehearsal, and deployment.
