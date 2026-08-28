@@ -137,6 +137,32 @@ class InMemoryStoryArcRepository(StoryArcRepositoryPort):
             self._arcs[arc_id] = arc.with_status(ARC_COMPLETED)
         return True
 
+    async def update_live_beat_commitment(
+        self, arc_id: str, beat_id: str, *, scheduled_date=None,
+        title=None, summary=None, tension=None, commitment_key=None,
+        is_first_meeting=False,
+    ) -> bool:
+        with self._lock:
+            arc = self._arcs.get(arc_id)
+            if arc is None:
+                return False
+            target = next((b for b in arc.beats if b.id == beat_id), None)
+            if target is None or target.status not in {"pending", "active"}:
+                return False
+            replacement = target.with_fields(
+                scheduled_date=scheduled_date, title=title, summary=summary,
+                tension=tension, is_first_meeting=is_first_meeting,
+                commitment_key=commitment_key,
+            )
+            beats = [
+                (b.with_fields(is_first_meeting=False)
+                 if is_first_meeting and b.id != beat_id and b.status in {"pending", "active"}
+                 else replacement if b.id == beat_id else b)
+                for b in arc.beats
+            ]
+            self._arcs[arc_id] = arc.with_beats(beats)
+        return True
+
     async def delete(self, arc_id: str) -> None:
         with self._lock:
             self._arcs.pop(arc_id, None)

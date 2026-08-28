@@ -121,6 +121,50 @@ async def test_story_reconciliation_updates_only_live_unique_key() -> None:
 
 
 @pytest.mark.asyncio
+async def test_story_reconciliation_does_not_overwrite_new_terminal_status() -> None:
+    repo = InMemoryStoryArcRepository()
+    arc = StoryArc.create(
+        character_id="c1", title="arc", premise="p", theme="custom",
+        start_date=date(2026, 8, 1), end_date=date(2026, 9, 1),
+    )
+    beat = StoryArcBeat.create(
+        arc_id=arc.id, sequence=0, scheduled_date=date(2026, 8, 30),
+        title="old", summary="old", commitment_key="meet",
+    )
+    await repo.add(arc.with_beats([beat]))
+
+    class _RaceRepo:
+        def __init__(self) -> None:
+            self.fired = False
+
+        async def get_active_for_character(self, character_id):
+            current = await repo.get_active_for_character(character_id)
+            if current is not None and not self.fired:
+                self.fired = True
+                await StoryArcService(repository=repo, planner=_Planner()).realize_beat(
+                    beat_id=beat.id, event_id="evt",
+                )
+            return current
+
+        async def update_live_beat_commitment(self, *args, **kwargs):
+            return await repo.update_live_beat_commitment(*args, **kwargs)
+
+    service = StoryArcService(repository=_RaceRepo(), planner=_Planner())
+    updated = await service.reconcile_commitment_adjustments(
+        character_id="c1",
+        adjustments=[ArcAdjustment(
+            action="modify_beat", commitment_key="meet",
+            title="must not land", summary="must not land",
+        )],
+    )
+    assert updated is None
+    stored = await repo.get(arc.id)
+    assert stored is not None
+    assert stored.beats[0].status == BEAT_REALIZED
+    assert stored.beats[0].title == "old"
+
+
+@pytest.mark.asyncio
 async def test_goal_reconciliation_requires_one_active_key() -> None:
     repo = InMemoryGoalRepository()
     service = GoalService(repo)

@@ -43,6 +43,7 @@ from kokoro_link.domain.entities.story_arc import (
     ARC_ACTIVE,
     ARC_COMPLETED,
     BEAT_PENDING,
+    BEAT_ACTIVE,
     BEAT_REALIZED,
     BEAT_SKIPPED,
     SCENE_ENCOUNTER,
@@ -265,6 +266,52 @@ class SAStoryArcRepository(StoryArcRepositoryPort):
             await session.commit()
         return bool(result.rowcount)
 
+    async def update_live_beat_commitment(
+        self, arc_id: str, beat_id: str, *, scheduled_date=None,
+        title=None, summary=None, tension=None, commitment_key=None,
+        is_first_meeting=False,
+    ) -> bool:
+        values = {
+            "is_first_meeting": bool(is_first_meeting),
+            "commitment_key": commitment_key,
+        }
+        if scheduled_date is not None:
+            values["scheduled_date"] = scheduled_date.isoformat()
+        if title is not None:
+            values["title"] = title
+        if summary is not None:
+            values["summary"] = summary
+        if tension is not None:
+            values["tension"] = tension
+        async with self._session_factory() as session:
+            stmt = (
+                update(StoryArcBeatRow)
+                .where(
+                    StoryArcBeatRow.arc_id == arc_id,
+                    StoryArcBeatRow.id == beat_id,
+                    StoryArcBeatRow.status.in_((BEAT_PENDING, BEAT_ACTIVE)),
+                )
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            )
+            result = await session.execute(stmt)
+            if not result.rowcount:
+                await session.rollback()
+                return False
+            if is_first_meeting:
+                await session.execute(
+                    update(StoryArcBeatRow)
+                    .where(
+                        StoryArcBeatRow.arc_id == arc_id,
+                        StoryArcBeatRow.id != beat_id,
+                        StoryArcBeatRow.status.in_((BEAT_PENDING, BEAT_ACTIVE)),
+                    )
+                    .values(is_first_meeting=False)
+                    .execution_options(synchronize_session=False),
+                )
+            await session.commit()
+        return True
+
     async def delete(self, arc_id: str) -> None:
         async with self._session_factory() as session:
             row = await session.get(StoryArcRow, arc_id)
@@ -369,6 +416,8 @@ def _beat_to_row(arc_id: str, beat: StoryArcBeat) -> StoryArcBeatRow:
         required=beat.required,
         operator_position=beat.operator_position,
         operator_note=beat.operator_note,
+        commitment_key=beat.commitment_key,
+        is_first_meeting=bool(beat.is_first_meeting),
     )
 
 
@@ -433,6 +482,8 @@ def _row_to_beat(row: StoryArcBeatRow) -> StoryArcBeat:
             getattr(row, "operator_position", None),
         ),
         operator_note=getattr(row, "operator_note", None),
+        commitment_key=getattr(row, "commitment_key", None),
+        is_first_meeting=bool(getattr(row, "is_first_meeting", False)),
     )
 
 

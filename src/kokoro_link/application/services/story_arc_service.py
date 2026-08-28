@@ -155,6 +155,8 @@ class ArcAdjustment:
 
     action: str
     beat_id: str | None = None
+    commitment_key: str | None = None
+    is_first_meeting: bool = False
     days: int | None = None
     scheduled_date: date_type | None = None
     title: str | None = None
@@ -1655,6 +1657,40 @@ the everyday gacha never draws
             updated = updated.with_status(ARC_COMPLETED)
         await self._repository.save(updated)
         return updated
+
+    async def reconcile_commitment_adjustments(
+        self,
+        *,
+        character_id: str,
+        adjustments: Iterable[ArcAdjustment],
+    ) -> StoryArc | None:
+        """Reconcile exact-key edits on live beats only."""
+        changed = False
+        for adj in adjustments:
+            if not adj.commitment_key:
+                continue
+            arc = await self._repository.get_active_for_character(character_id)
+            if arc is None:
+                continue
+            live = [b for b in arc.beats if b.status in {BEAT_PENDING, "active"}]
+            target = next((b for b in live if b.id == adj.beat_id), None) if adj.beat_id else None
+            if target is None:
+                candidates = [b for b in live if b.commitment_key == adj.commitment_key]
+                if len(candidates) != 1:
+                    continue
+                target = candidates[0]
+            target_date = adj.scheduled_date
+            if target_date is None and adj.days is not None:
+                target_date = target.scheduled_date + timedelta(days=adj.days)
+            changed = await self._repository.update_live_beat_commitment(
+                arc.id, target.id, scheduled_date=target_date,
+                title=adj.title, summary=adj.summary, tension=adj.tension,
+                commitment_key=adj.commitment_key,
+                is_first_meeting=bool(adj.is_first_meeting),
+            ) or changed
+        if not changed:
+            return None
+        return await self._repository.get_active_for_character(character_id)
 
     # ---- UI helpers (not part of chat hot path) ----------------------
 

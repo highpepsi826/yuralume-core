@@ -130,6 +130,15 @@ class StoryArcRepositoryPort(ABC):
         is already terminal, still has a ``pending`` / ``active`` beat, has
         no beats at all, or does not exist returns ``False``."""
 
+    async def update_live_beat_commitment(
+        self, arc_id: str, beat_id: str, *, scheduled_date: date | None = None,
+        title: str | None = None, summary: str | None = None,
+        tension: str | None = None, commitment_key: str | None = None,
+        is_first_meeting: bool = False,
+    ) -> bool:
+        """Optional narrow update; legacy adapters may decline it."""
+        return False
+
     @abstractmethod
     async def delete(self, arc_id: str) -> None: ...
 
@@ -213,7 +222,6 @@ class StoryArcPlannerPort(ABC):
         service layer treats a missing arc and an empty arc equally
         (both skip arc-driven event selection for the day).
         """
-
 
 @dataclass(frozen=True, slots=True)
 class StoryArcSeasonContext:
