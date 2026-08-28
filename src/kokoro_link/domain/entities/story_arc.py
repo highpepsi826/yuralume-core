@@ -30,6 +30,8 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
+from kokoro_link.domain.value_objects.commitment import normalize_commitment_key
+
 # --- Tension levels ---------------------------------------------------
 # Free strings rather than an enum so the LLM planner can introduce
 # intermediate shades ("rising_2") if it wants, and the prompt builder
@@ -283,6 +285,8 @@ class StoryArcBeat:
     """One of ``VALID_OPERATOR_POSITIONS``, or ``None`` = unjudged.
     Structural — consumers branch on it, and it is never translated."""
     operator_note: str | None = None
+    commitment_key: str | None = None
+    is_first_meeting: bool = False
     """Optional one-line prose about *how* the player figures in this
     scene ("她要向你坦白"). Player-visible natural language: material for
     writer prompts, and a translation candidate."""
@@ -349,6 +353,8 @@ class StoryArcBeat:
             "operator_note",
             normalise_operator_note(self.operator_note),
         )
+        object.__setattr__(self, "commitment_key", normalize_commitment_key(self.commitment_key))
+        object.__setattr__(self, "is_first_meeting", bool(self.is_first_meeting))
 
     @classmethod
     def create(
@@ -376,6 +382,8 @@ class StoryArcBeat:
         last_play_failure_at: datetime | None = None,
         operator_position: str | None = None,
         operator_note: str | None = None,
+        commitment_key: object = None,
+        is_first_meeting: bool = False,
         id: str | None = None,
     ) -> StoryArcBeat:
         resolved_tension = tension.strip() or TENSION_SETUP
@@ -425,6 +433,8 @@ class StoryArcBeat:
             # cannot disagree about what a legal position is.
             operator_position=operator_position,
             operator_note=operator_note,
+            commitment_key=commitment_key,
+            is_first_meeting=is_first_meeting,
         )
 
     def with_status(
@@ -494,6 +504,8 @@ class StoryArcBeat:
         required: bool | None = None,
         operator_position: str | None = None,
         operator_note: str | None = None,
+        commitment_key: object = None,
+        is_first_meeting: bool | None = None,
     ) -> StoryArcBeat:
         """Patch scene fields. ``None`` means *leave unchanged*.
 
@@ -551,6 +563,16 @@ class StoryArcBeat:
             required=self.required if required is None else bool(required),
             operator_position=next_position,
             operator_note=next_note,
+            commitment_key=(
+                self.commitment_key
+                if commitment_key is None
+                else commitment_key
+            ),
+            is_first_meeting=(
+                self.is_first_meeting
+                if is_first_meeting is None
+                else bool(is_first_meeting)
+            ),
         )
 
 
