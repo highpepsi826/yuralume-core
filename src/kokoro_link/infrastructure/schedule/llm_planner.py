@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import logging
-import re
+from dataclasses import dataclass, replace as dataclass_replace
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any
 
@@ -47,7 +47,10 @@ from kokoro_link.domain.services.recent_activity_digest import (
     RecentDayActivities,
 )
 from kokoro_link.domain.value_objects.actor import ParticipantRef
-from kokoro_link.domain.entities.story_arc import StoryArcBeat
+from kokoro_link.domain.entities.story_arc import (
+    OPERATOR_POSITION_ABSENT,
+    StoryArcBeat,
+)
 from kokoro_link.domain.entities.story_event import StoryEvent
 from kokoro_link.infrastructure.prompt.character_identity import (
     render_character_identity_lines,
@@ -155,6 +158,10 @@ _FUTURE_EVENT_ATTENDANCE_ACTIONS = re.compile(
 _MAX_STORY_EVENTS = 8
 _MAX_STORY_EVENT_NARRATIVE_CHARS = 160
 
+# Beat summaries are LLM-written prose re-read verbatim; clamp so one
+# runaway summary can't crowd out the rest of the planner prompt.
+_MAX_BEAT_SUMMARY_CHARS = 200
+
 _WEEKDAY_LABELS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
 
@@ -261,22 +268,8 @@ class LLMSchedulePlanner(SchedulePlannerPort):
             entries,
             date_=date_,
             local_tz=local_tz,
-            operator_primary_language=operator_primary_language,
+            beat_slot_id=_beat_slot_id(today_beat, target_date=date_),
         )
-        if future_beats:
-            # A future beat is useful preparation context, but it is not
-            # permission to materialise either the player scene or the
-            # physical event venue early. Keep solo preparation; remove only
-            # direct player co-presence and premature venue attendance.
-            activities = _drop_unconfirmed_future_operator_events(
-                activities,
-                operator_reference_names=operator_reference_names,
-                pre_committed_activities=pre_committed_activities,
-            )
-            activities = _drop_early_future_event_venue_activities(
-                activities,
-                future_beats=future_beats,
-            )
         # Defensive merge: if the LLM ignored the commitment directive
         # and didn't emit one of the pre-commitments, splice them back
         # in. ``_resolve_overlaps`` style logic isn't needed here because
@@ -764,6 +757,158 @@ def _render_companions_block(character: "Character") -> str:
     return "\n".join(lines)
 
 
+def _clamp_beat_summary(summary: str) -> str:
+    """Flatten and length-clamp a beat summary for prompt injection."""
+    text = summary.strip().replace("\n", " ")
+    if len(text) > _MAX_BEAT_SUMMARY_CHARS:
+        return text[:_MAX_BEAT_SUMMARY_CHARS] + "…"
+    return text
+
+
+def _render_beat_date_stamp(beat: StoryArcBeat) -> str:
+    """KB4 — code-stamped scheduled date for one beat's material.
+
+    The arc planner writes absolute dates and frozen relative words
+    ("明天") into ``summary``; ``delay_beat`` moves ``scheduled_date``
+    without rewriting that prose. Any surface handing the summary to a
+    model therefore has to say, in code, which date is authoritative —
+    otherwise a beat moved from 8/23 to 8/25 reads as an event that
+    already happened two days ago.
+    """
+    return (
+        f"  * 本場戲排定日＝{beat.scheduled_date.isoformat()}；"
+        "內文若出現其他日期或「今天／明天」等相對詞，"
+        "一律以排定日為準換算，不要照唸。"
+    )
+
+
+def _render_beat_slot_marking_lines() -> list[str]:
+    """KB2 — ask the planner to point at the block that *is* the scene.
+
+    A boolean, never an id: the model marks which block the beat occupies
+    and code stamps ``ScheduleActivity.source_beat_id`` from the day's
+    beat, so a hallucinated identifier can never reach the column. The
+    distinction the wording has to carry is scene vs. preparation —
+    preparation is a real hour the character lived and should keep
+    becoming memory; the reserved scene block must not, because the
+    scene's own record is written when the beat is realized.
+    """
+    return [
+        "  * 對應這場戲的那一段時段，請在該活動物件裡多給一個欄位 "
+        '"beat_ref": true（整份行程最多一段）；其餘時段不要加這個欄位，'
+        "或給 false。",
+        "  * beat_ref 只是布林標記，用來指出哪一段是這場戲；"
+        "不要自己編任何編號或 id 填進去。",
+        "  * 只標這場戲本身（或為它保留的時段）。為它做的準備、採買、"
+        "移動、事後休息等時段**不要**標記——那些是角色真的過完的時間。",
+    ]
+
+
+def _render_staged_beat_lines(beat: StoryArcBeat) -> list[str]:
+    """The scene is the character's alone — stage it into today."""
+    lines = [
+        "本日劇情骨架（**必須**反映在行程中）：",
+        f"- 今天有一場戲叫《{beat.title}》，"
+        "請在當天行程中安排一個**對應這場戲**的時段（時間自訂、合理即可）。",
+    ]
+    if beat.location:
+        lines.append(f"  * 場景地點：{beat.location}（行程的 location 欄位請填這個）")
+    if beat.scene_characters:
+        who = "、".join(beat.scene_characters)
+        lines.append(f"  * 出場人物：{who}（請在 description 裡帶到這些人）")
+    if beat.dramatic_question:
+        lines.append(f"  * 戲劇問題：{beat.dramatic_question}")
+    if beat.summary:
+        lines.append(f"  * 場景脈絡：{_clamp_beat_summary(beat.summary)}")
+    lines.append(_render_beat_date_stamp(beat))
+    if not beat.required:
+        lines.append("  * （此 beat 標為可選；若與性格／既有行程嚴重衝突可弱化處理）")
+    lines.append(
+        "  * 當天的行程要圍繞這場戲鋪陳：之前可有準備／路上的時段，"
+        "之後可有結束後的反應／休息／回家路上等。不要讓這場戲變成憑空插入。",
+    )
+    lines.extend(_render_beat_slot_marking_lines())
+    return lines
+
+
+def _render_awaiting_player_beat_lines(beat: StoryArcBeat) -> list[str]:
+    """KB1 — the scene is scheduled for today but needs the player.
+
+    Same anticipation skeleton the gap-day branch uses, re-aimed at a
+    beat whose date *is* today: the day may reserve a slot, prepare,
+    scout the location and build the mood, but the scene itself does
+    not happen until the player is there. Staging it anyway is how a
+    ``central`` beat became a solo day the character then remembered
+    living through — the schedule memorializer has no beat lineage to
+    filter on, so a staged scene turns into episodic memory of an
+    event the player never took part in.
+    """
+    lines = [
+        "今日排定的劇情骨架（**這場戲要等玩家在場才會發生**；今天只做鋪陳／準備）：",
+        f"- 今天排定了一場戲《{beat.title}》，但它需要玩家在場才能發生。"
+        "今天的行程可以為它預留時段、做準備、醞釀情緒、勘景，"
+        "並圍繞它鋪陳；但**不得**把這場戲演出來，"
+        "也**不得**把其中的人物互動、對話或結果寫成已經發生。",
+    ]
+    if beat.location:
+        lines.append(
+            f"  * 這場戲的地點是：{beat.location}"
+            "（今天可以路過、勘景、準備場地，但不要在那裡演出這場戲）",
+        )
+    if beat.scene_characters:
+        who = "、".join(beat.scene_characters)
+        lines.append(
+            f"  * 這場戲的出場人物：{who}"
+            "（今天可以提及、聯絡、期待，但不要寫成已經碰面談過）",
+        )
+    if beat.dramatic_question:
+        lines.append(
+            f"  * 這場戲的戲劇問題：{beat.dramatic_question}"
+            "（今天可以醞釀情緒，但不要給出答案）",
+        )
+    if beat.summary:
+        lines.append(
+            f"  * 這場戲的脈絡：{_clamp_beat_summary(beat.summary)}"
+            "（這是還沒發生的戲，供你知道在準備什麼，不是已發生的事）",
+        )
+    lines.append(_render_beat_date_stamp(beat))
+    lines.extend(_render_beat_slot_marking_lines())
+    return lines
+
+
+def _render_gap_day_beat_lines(
+    beat: StoryArcBeat, *, target_date: date,
+) -> list[str]:
+    """The next beat is still ahead — prepare, don't play."""
+    day_diff = (beat.scheduled_date - target_date).days
+    when_text = (
+        f"再 {day_diff} 天（{beat.scheduled_date.isoformat()}）"
+        if day_diff > 0
+        else beat.scheduled_date.isoformat()
+    )
+    lines = [
+        "劇情骨架（今天沒有指定場景，請為下一場戲鋪陳／準備）：",
+        f"- 下一場戲是《{beat.title}》，預計在 {when_text} 發生。"
+        "今天的行程**不要**把這場戲演出來，但可以安排一些為它做準備、"
+        "心理鋪陳、或相關的日常時段（例如：練習、查資料、整理裝備、"
+        "與相關人物碰面、獨處沉澱）。",
+    ]
+    if beat.location:
+        lines.append(
+            f"  * 那場戲的地點是：{beat.location}"
+            "（今天可以路過、勘景，但不要在那裡演出主場景）",
+        )
+    if beat.scene_characters:
+        who = "、".join(beat.scene_characters)
+        lines.append(f"  * 那場戲的出場人物：{who}（今天可以提及或聯絡，不一定要碰面）")
+    if beat.dramatic_question:
+        lines.append(f"  * 那場戲的戲劇問題：{beat.dramatic_question}（今天可以醞釀情緒）")
+    if beat.summary:
+        lines.append(f"  * 那場戲的脈絡：{_clamp_beat_summary(beat.summary)}")
+    lines.append(_render_beat_date_stamp(beat))
+    return lines
+
+
 def _render_arc_block(
     *,
     target_date: date,
@@ -772,13 +917,26 @@ def _render_arc_block(
 ) -> str:
     """Inject the active arc's scene beats into the planner prompt.
 
-    All beats dated ``target_date`` are hard requirements.  The schedule
-    service keeps the first in ``today_beat`` and passes remaining same-day
-    beats ahead of future context in ``upcoming_beats`` for port
-    compatibility.  Beats after ``target_date`` remain softer preparation
-    context.  When the supplied ``today_beat`` is actually scheduled for a
-    future day (the gap-day fallback), we render an
-    "anticipation/preparation" block instead of staging it early.
+    Three framings, picked from *when* the beat sits and *where the
+    player stands in it* (KB1):
+
+    - scheduled today and ``operator_position == absent`` — a scene the
+      character can play alone, so a hard "**必須**" directive embeds it
+      into the day;
+    - scheduled today but ``central`` / ``present`` / unjudged — the
+      scene waits for the player, so the day only prepares for it;
+    - scheduled later (the schedule service falls back to the next
+      forward beat on gap days) — anticipation, with the date said out
+      loud so the planner doesn't stage it today.
+
+    ``None`` (unjudged) joins the waiting group deliberately. It is the
+    opposite call from the autonomous realize path, and for a different
+    reason: staging a scene wrongly writes an experience the player
+    never had into long-term memory, so on this axis the unknown case
+    fails safe toward *not* playing.
+
+    Upcoming beats are surfaced as softer context so the planner can
+    leave space (rest, prep, rehearsal) for what's coming.
     """
     all_beats = tuple(
         beat for beat in (today_beat, *upcoming_beats) if beat is not None
@@ -792,72 +950,20 @@ def _render_arc_block(
     if not same_day_beats and not future_beats:
         return ""
     lines: list[str] = [""]
-    if same_day_beats:
-        lines.append("本日劇情骨架（以下每一場都**必須**反映在行程中）：")
-        for index, beat in enumerate(same_day_beats, start=1):
-            lines.append(
-                f"- 今天第 {index} 場戲《{beat.title}》，"
-                "請在當天行程中安排一個**對應這場戲**的時段（時間自訂、合理即可）。",
-            )
-            if beat.location:
-                lines.append(
-                    f"  * 場景地點：{beat.location}（行程的 location 欄位請填這個）",
-                )
-            if beat.scene_characters:
-                who = "、".join(beat.scene_characters)
-                lines.append(f"  * 出場人物：{who}（請在 description 裡帶到這些人）")
-            if beat.dramatic_question:
-                lines.append(f"  * 戲劇問題：{beat.dramatic_question}")
-            if beat.summary:
-                summary = beat.summary.strip().replace("\n", " ")
-                if len(summary) > 200:
-                    summary = summary[:200] + "…"
-                lines.append(f"  * 場景脈絡：{summary}")
-            if not beat.required:
-                lines.append("  * （此 beat 標為可選；若與性格／既有行程嚴重衝突可弱化處理）")
-        lines.append(
-            "  * 當天的行程要依上述每一場戲鋪陳：之前可有準備／路上的時段，"
-            "之後可有結束後的反應／休息／回家路上等。不要遺漏其中任何一場，"
-            "也不要把不同地點或不同階段的戲硬合併成一個模糊時段。",
-        )
+    is_today = (
+        today_beat is not None
+        and today_beat.scheduled_date == target_date
+    )
+    if today_beat is not None and is_today:
+        if today_beat.operator_position == OPERATOR_POSITION_ABSENT:
+            lines.extend(_render_staged_beat_lines(today_beat))
+        else:
+            lines.extend(_render_awaiting_player_beat_lines(today_beat))
     elif today_beat is not None:
-        # today_beat is from the future — gap-day fallback. Don't stage
-        # the scene today; have the day prepare/anticipate instead.
-        day_diff = (today_beat.scheduled_date - target_date).days
-        when_text = (
-            f"再 {day_diff} 天（{today_beat.scheduled_date.isoformat()}）"
-            if day_diff > 0
-            else today_beat.scheduled_date.isoformat()
+        lines.extend(
+            _render_gap_day_beat_lines(today_beat, target_date=target_date),
         )
-        lines.append("劇情骨架（今天沒有指定場景，請為下一場戲鋪陳／準備）：")
-        lines.append(
-            f"- 下一場戲是《{today_beat.title}》，預計在 {when_text} 發生。"
-            "今天的行程**不要**把這場戲演出來，但可以安排一些為它做準備、"
-            "心理鋪陳、或相關的日常時段（例如：練習、查資料、整理裝備、"
-            "與相關人物碰面、獨處沉澱）。",
-        )
-        if today_beat.location:
-            lines.append(
-                f"  * 那場戲的地點是：{today_beat.location}"
-                "（在該日期前不得前往、等待、進入、使用或勘景；"
-                "準備請安排在其他地方）",
-            )
-        if today_beat.scene_characters:
-            who = "、".join(today_beat.scene_characters)
-            lines.append(f"  * 那場戲的出場人物：{who}（今天可以提及或聯絡；只有非使用者 NPC 才可安排碰面）")
-        if today_beat.dramatic_question:
-            lines.append(f"  * 那場戲的戲劇問題：{today_beat.dramatic_question}（今天可以醞釀情緒）")
-        if today_beat.summary:
-            summary = today_beat.summary.strip().replace("\n", " ")
-            if len(summary) > 200:
-                summary = summary[:200] + "…"
-            lines.append(f"  * 那場戲的脈絡：{summary}")
-        lines.append(
-            "  * 若下一場戲牽涉使用者／玩家，使用者今天尚未到場、尚未參與；"
-            "除非上方「已既定的承諾時段」明確列出今天的共同活動，否則不可把"
-            "見面、約會、同行、牽手、共同出席等寫進今天的行程。"
-        )
-    if future_beats:
+    if upcoming_beats:
         lines.append("- 接下來幾天即將發生（僅供參考，今天不需強行帶到，但行程可預留鋪陳空間）：")
         for beat in future_beats[:2]:
             day_diff = (beat.scheduled_date - target_date).days
@@ -872,30 +978,64 @@ def _render_arc_block(
     return "\n".join(lines)
 
 
+def _beat_slot_id(
+    beat: StoryArcBeat | None, *, target_date: date,
+) -> str | None:
+    """KB2 — the beat whose slot this day's schedule may reserve.
+
+    Only a beat scheduled *for this day* has a slot in it. On a gap day
+    the schedule service promotes the next forward beat into the same
+    argument so the planner can build anticipation, but nothing that day
+    is that scene — the preparation it plans is a real experience the
+    character should go on remembering, so no lineage is stamped.
+    """
+    if beat is None or beat.scheduled_date != target_date:
+        return None
+    return (beat.id or "").strip() or None
+
+
+@dataclass(frozen=True, slots=True)
+class _PlannedBlock:
+    """One coerced planner entry, before overlap trimming.
+
+    A named record rather than a positional tuple: the planner's activity
+    shape keeps growing (companions, operator involvement, scene access,
+    beat lineage) and every new axis used to have to be threaded through
+    three parallel ten-slot type annotations.
+    """
+
+    start: datetime
+    end: datetime
+    description: str
+    category: str
+    location: str | None
+    busy_score: float | None
+    companion_names: tuple[str, ...]
+    operator_involvement: str | None
+    scene_privacy: ScenePrivacy | None
+    meeting_affordance: MeetingAffordance | None
+    is_beat_slot: bool
+
+
 def _build_activities(
     entries: list[dict[str, Any]],
     *,
     date_: date,
     local_tz: tzinfo,
-    operator_primary_language: str = "zh-TW",
+    beat_slot_id: str | None = None,
 ) -> list[ScheduleActivity]:
+    """Coerce planner entries into activities for ``date_``.
+
+    ``beat_slot_id`` is the day's beat (see :func:`_beat_slot_id`). Blocks
+    the model marked as that beat's slot are stamped with it, so the
+    memorializer can keep a planned scene out of episodic memory. The id
+    comes from here, never from the model's output — the model's only say
+    is *which* block, as a boolean.
+    """
     day_start = datetime.combine(date_, time(0, 0), tzinfo=local_tz)
     day_end = day_start + timedelta(days=1)
 
-    parsed: list[
-        tuple[
-            datetime,
-            datetime,
-            str,
-            str,
-            str | None,
-            float | None,
-            tuple[str, ...],
-            str | None,
-            ScenePrivacy | None,
-            MeetingAffordance | None,
-        ]
-    ] = []
+    parsed: list[_PlannedBlock] = []
     for entry in entries[: _MAX_ACTIVITIES * 2]:  # allow a little slack before hard trim
         start = _coerce_local_time(entry.get("start"), date_=date_, local_tz=local_tz)
         end = _coerce_local_time(entry.get("end"), date_=date_, local_tz=local_tz)
@@ -930,98 +1070,75 @@ def _build_activities(
             entry.get("meeting_affordance"),
         )
         parsed.append(
-            (
-                start,
-                end,
-                description,
-                category,
-                location or None,
-                busy,
-                companions,
-                operator_involvement,
-                scene_privacy,
-                meeting_affordance,
+            _PlannedBlock(
+                start=start,
+                end=end,
+                description=description,
+                category=category,
+                location=location or None,
+                busy_score=busy,
+                companion_names=companions,
+                operator_involvement=operator_involvement,
+                scene_privacy=scene_privacy,
+                meeting_affordance=meeting_affordance,
+                is_beat_slot=_coerce_beat_ref(entry.get("beat_ref")),
             ),
         )
 
-    parsed.sort(key=lambda t: t[0])
+    parsed.sort(key=lambda block: block.start)
 
-    trimmed: list[
-        tuple[
-            datetime,
-            datetime,
-            str,
-            str,
-            str | None,
-            float | None,
-            tuple[str, ...],
-            str | None,
-            ScenePrivacy | None,
-            MeetingAffordance | None,
-        ]
-    ] = []
+    trimmed: list[_PlannedBlock] = []
     last_end: datetime | None = None
-    for (
-        start,
-        end,
-        description,
-        category,
-        location,
-        busy,
-        companions,
-        operator_involvement,
-        scene_privacy,
-        meeting_affordance,
-    ) in parsed:
-        if last_end is not None and start < last_end:
+    for block in parsed:
+        if last_end is not None and block.start < last_end:
             # overlap: push start forward; drop if it collapses to zero.
-            start = last_end
-            if end <= start:
+            if block.end <= last_end:
                 continue
-        trimmed.append(
-            (
-                start,
-                end,
-                description,
-                category,
-                location,
-                busy,
-                companions,
-                operator_involvement,
-                scene_privacy,
-                meeting_affordance,
-            ),
-        )
-        last_end = end
+            block = dataclass_replace(block, start=last_end)
+        trimmed.append(block)
+        last_end = block.end
         if len(trimmed) >= _MAX_ACTIVITIES:
             break
 
-    return [
-        ScheduleActivity.create(
-            start_at=start,
-            end_at=end,
-            description=description,
-            category=category,
-            location=location,
-            busy_score=busy,
-            companion_names=companions,
-            participant_refs=_operator_participant_refs(operator_involvement),
-            scene_privacy=scene_privacy,
-            meeting_affordance=meeting_affordance,
+    beat_slot_claimed = False
+    activities: list[ScheduleActivity] = []
+    for block in trimmed:
+        stamp = block.is_beat_slot and beat_slot_id is not None and not beat_slot_claimed
+        if stamp:
+            beat_slot_claimed = True
+        activities.append(
+            ScheduleActivity.create(
+                start_at=block.start,
+                end_at=block.end,
+                description=block.description,
+                category=block.category,
+                location=block.location,
+                busy_score=block.busy_score,
+                companion_names=block.companion_names,
+                participant_refs=_operator_participant_refs(
+                    block.operator_involvement,
+                ),
+                scene_privacy=block.scene_privacy,
+                meeting_affordance=block.meeting_affordance,
+                source_beat_id=beat_slot_id if stamp else None,
+            ),
         )
-        for (
-            start,
-            end,
-            description,
-            category,
-            location,
-            busy,
-            companions,
-            operator_involvement,
-            scene_privacy,
-            meeting_affordance,
-        ) in trimmed
-    ]
+    return activities
+
+
+def _coerce_beat_ref(raw: Any) -> bool:
+    """Read the planner's "this block is the scene" mark.
+
+    Strictly a boolean signal — a string is accepted only because models
+    emit ``"true"`` for JSON booleans often enough to be worth tolerating.
+    Anything else, including an id the model tried to supply itself, is
+    not a mark.
+    """
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() == "true"
+    return False
 
 
 def _coerce_scene_privacy(raw: Any) -> ScenePrivacy | None:
@@ -1482,10 +1599,10 @@ def _trim_to_make_room(
             # commitment fully inside act → drop act (preserve commitment)
             continue
         if act.start_at < cstart:
-            out.append(replace(act, end_at=cstart))
+            out.append(dataclass_replace(act, end_at=cstart))
             continue
         if act.end_at > cend:
-            out.append(replace(act, start_at=cend))
+            out.append(dataclass_replace(act, start_at=cend))
             continue
         # commitment fully covers act → drop
     return out

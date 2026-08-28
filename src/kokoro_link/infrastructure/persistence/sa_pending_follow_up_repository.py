@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import asc, delete, desc, select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy import asc, delete, desc, select, update
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kokoro_link.contracts.pending_follow_up import (
     PendingFollowUpRepositoryPort,
@@ -49,6 +48,30 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
             row = await session.get(PendingFollowUpRow, follow_up_id)
             return _row_to_domain(row) if row else None
 
+    async def coalesce_promise_intent(
+        self,
+        follow_up_id: str,
+        *,
+        expected_intent: str,
+        new_intent: str,
+        now: datetime,
+    ) -> bool:
+        """One conditional UPDATE — see the port for why every predicate
+        is in the statement rather than in a read before it."""
+        async with self._session_factory() as session, session.begin():
+            result = await session.execute(
+                update(PendingFollowUpRow)
+                .where(PendingFollowUpRow.id == follow_up_id)
+                .where(
+                    PendingFollowUpRow.status
+                    == PendingFollowUpStatus.QUEUED.value,
+                )
+                .where(PendingFollowUpRow.scheduled_for > now)
+                .where(PendingFollowUpRow.promise_intent == expected_intent)
+                .values(promise_intent=new_intent, updated_at=now),
+            )
+            return bool(result.rowcount)
+
     async def find_open_for_conversation(
         self, conversation_id: str,
     ) -> PendingFollowUp | None:
@@ -62,6 +85,19 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
             )
             row = (await session.execute(stmt)).scalar_one_or_none()
             return _row_to_domain(row) if row else None
+
+    async def list_open_for_conversation(
+        self, conversation_id: str,
+    ) -> list[PendingFollowUp]:
+        async with self._session_factory() as session:
+            stmt = (
+                select(PendingFollowUpRow)
+                .where(PendingFollowUpRow.conversation_id == conversation_id)
+                .where(PendingFollowUpRow.status.in_(_OPEN_STATUSES))
+                .order_by(asc(PendingFollowUpRow.queued_at))
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            return [_row_to_domain(r) for r in rows]
 
     async def list_due(
         self,
@@ -118,24 +154,47 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
             rows = (await session.execute(stmt)).scalars().all()
             return [_row_to_domain(r) for r in rows]
 
-    async def list_open_scheduled_promises(self) -> list[PendingFollowUp]:
-        """Read-only source for legacy duplicate reporting."""
+    async def list_created_since(
+        self, conversation_id: str, since: datetime,
+    ) -> list[PendingFollowUp]:
         async with self._session_factory() as session:
             stmt = (
                 select(PendingFollowUpRow)
                 .where(
-                    PendingFollowUpRow.kind
-                    == PendingFollowUpKind.SCHEDULED_PROMISE.value,
+                    PendingFollowUpRow.conversation_id == conversation_id,
                 )
-                .where(PendingFollowUpRow.status.in_(_OPEN_STATUSES))
-                .order_by(
-                    asc(PendingFollowUpRow.scheduled_for),
-                    asc(PendingFollowUpRow.queued_at),
-                    asc(PendingFollowUpRow.id),
-                )
+                # Inclusive: the turn stamps the journal's start instant
+                # and the row it defers from one clock read, so ``>`` would
+                # skip the very row turn-undo came for.
+                .where(PendingFollowUpRow.queued_at >= since)
+                .order_by(asc(PendingFollowUpRow.queued_at))
             )
             rows = (await session.execute(stmt)).scalars().all()
-            return [_row_to_domain(row) for row in rows]
+            return [_row_to_domain(r) for r in rows]
+
+    async def list_created_by_turn(
+        self, conversation_id: str, turn_record_id: str,
+    ) -> list[PendingFollowUp]:
+        async with self._session_factory() as session:
+            stmt = (
+                select(PendingFollowUpRow)
+                .where(
+                    PendingFollowUpRow.conversation_id == conversation_id,
+                )
+                .where(PendingFollowUpRow.turn_record_id == turn_record_id)
+                .order_by(asc(PendingFollowUpRow.queued_at))
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            return [_row_to_domain(r) for r in rows]
+
+    async def delete(self, follow_up_id: str) -> bool:
+        async with self._session_factory() as session, session.begin():
+            result = await session.execute(
+                delete(PendingFollowUpRow).where(
+                    PendingFollowUpRow.id == follow_up_id,
+                ),
+            )
+            return bool(result.rowcount)
 
     async def delete_for_conversation(self, conversation_id: str) -> int:
         async with self._session_factory() as session, session.begin():
@@ -180,10 +239,8 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
                     last_error=follow_up.last_error,
                     kind=follow_up.kind.value,
                     promise_intent=follow_up.promise_intent,
-                    dedupe_key=follow_up.dedupe_key,
-                    delivery_slot_key=follow_up.delivery_slot_key,
-                    source_turn_key=follow_up.source_turn_key,
-                    obligations_json=_obligations_to_json(follow_up.obligations),
+                    turn_record_id=follow_up.turn_record_id,
+                    honesty_park_attempts=follow_up.honesty_park_attempts,
                 ))
             else:
                 existing.character_id = follow_up.character_id
@@ -201,130 +258,10 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
                 existing.last_error = follow_up.last_error
                 existing.kind = follow_up.kind.value
                 existing.promise_intent = follow_up.promise_intent
-                existing.dedupe_key = follow_up.dedupe_key
-                existing.delivery_slot_key = follow_up.delivery_slot_key
-                existing.source_turn_key = follow_up.source_turn_key
-                existing.obligations_json = _obligations_to_json(
-                    follow_up.obligations,
+                existing.turn_record_id = follow_up.turn_record_id
+                existing.honesty_park_attempts = (
+                    follow_up.honesty_park_attempts
                 )
-
-    async def _add_scheduled_promise(
-        self, follow_up: PendingFollowUp,
-    ) -> PendingFollowUp:
-        """Insert an open promise or return the concurrent canonical row.
-
-        The lookup avoids the usual retry path.  The partial unique index is
-        still required: two post-turn workers can both observe no existing row
-        before either commits.  In that race PostgreSQL rejects one insert, then
-        this method re-reads the winner after rolling back its failed session.
-        """
-        async with self._session_factory() as session:
-            existing = await _find_open_by_delivery_slot_key(
-                session, follow_up.delivery_slot_key,
-            )
-            if existing is not None:
-                return await _merge_scheduled_promise_context(
-                    session, existing, follow_up,
-                )
-            session.add(_domain_to_row(follow_up))
-            try:
-                await session.commit()
-            except IntegrityError:
-                await session.rollback()
-                existing = await _find_open_by_delivery_slot_key(
-                    session, follow_up.delivery_slot_key,
-                )
-                if existing is not None:
-                    return await _merge_scheduled_promise_context(
-                        session, existing, follow_up,
-                    )
-                raise
-        return follow_up
-
-
-async def _find_open_by_delivery_slot_key(
-    session: AsyncSession,
-    delivery_slot_key: str,
-) -> PendingFollowUpRow | None:
-    stmt = (
-        select(PendingFollowUpRow)
-        .where(PendingFollowUpRow.kind == PendingFollowUpKind.SCHEDULED_PROMISE.value)
-        .where(PendingFollowUpRow.delivery_slot_key == delivery_slot_key)
-        .where(PendingFollowUpRow.status.in_(_OPEN_STATUSES))
-        .order_by(asc(PendingFollowUpRow.queued_at), asc(PendingFollowUpRow.id))
-        .limit(1)
-    )
-    return (await session.execute(stmt)).scalar_one_or_none()
-
-
-async def _merge_scheduled_promise_context(
-    session: AsyncSession,
-    existing: PendingFollowUpRow,
-    incoming: PendingFollowUp,
-) -> PendingFollowUp:
-    canonical = _row_to_domain(existing)
-    merged = canonical.merged_scheduled_promise_context(incoming)
-    if merged == canonical:
-        return canonical
-    _copy_domain_to_row(existing, merged)
-    await session.commit()
-    return merged
-
-
-def _domain_to_row(follow_up: PendingFollowUp) -> PendingFollowUpRow:
-    messages_payload = json.dumps(
-        [_message_to_payload(m) for m in follow_up.messages],
-        ensure_ascii=False,
-    )
-    return PendingFollowUpRow(
-        id=follow_up.id,
-        character_id=follow_up.character_id,
-        conversation_id=follow_up.conversation_id,
-        status=follow_up.status.value,
-        activity_id=follow_up.activity_id,
-        brief_reply=follow_up.brief_reply,
-        defer_reason=follow_up.defer_reason,
-        messages_json=messages_payload,
-        scheduled_for=follow_up.scheduled_for,
-        queued_at=follow_up.queued_at,
-        updated_at=follow_up.updated_at,
-        resolved_at=follow_up.resolved_at,
-        resolved_message=follow_up.resolved_message,
-        last_error=follow_up.last_error,
-        kind=follow_up.kind.value,
-        promise_intent=follow_up.promise_intent,
-        dedupe_key=follow_up.dedupe_key,
-        delivery_slot_key=follow_up.delivery_slot_key,
-        source_turn_key=follow_up.source_turn_key,
-        obligations_json=_obligations_to_json(follow_up.obligations),
-        commitment_key=follow_up.commitment_key,
-    )
-
-
-def _copy_domain_to_row(row: PendingFollowUpRow, follow_up: PendingFollowUp) -> None:
-    row.character_id = follow_up.character_id
-    row.conversation_id = follow_up.conversation_id
-    row.status = follow_up.status.value
-    row.activity_id = follow_up.activity_id
-    row.brief_reply = follow_up.brief_reply
-    row.defer_reason = follow_up.defer_reason
-    row.messages_json = json.dumps(
-        [_message_to_payload(message) for message in follow_up.messages],
-        ensure_ascii=False,
-    )
-    row.scheduled_for = follow_up.scheduled_for
-    row.queued_at = follow_up.queued_at
-    row.updated_at = follow_up.updated_at
-    row.resolved_at = follow_up.resolved_at
-    row.resolved_message = follow_up.resolved_message
-    row.last_error = follow_up.last_error
-    row.kind = follow_up.kind.value
-    row.promise_intent = follow_up.promise_intent
-    row.dedupe_key = follow_up.dedupe_key
-    row.delivery_slot_key = follow_up.delivery_slot_key
-    row.source_turn_key = follow_up.source_turn_key
-    row.obligations_json = _obligations_to_json(follow_up.obligations)
-    row.commitment_key = follow_up.commitment_key
 
 
 def _message_to_payload(message: PendingFollowUpMessage) -> dict:
@@ -427,13 +364,16 @@ def _row_to_domain(row: PendingFollowUpRow) -> PendingFollowUp:
         last_error=row.last_error,
         kind=PendingFollowUpKind(kind_raw),
         promise_intent=getattr(row, "promise_intent", "") or "",
-        dedupe_key=getattr(row, "dedupe_key", "") or "",
-        delivery_slot_key=getattr(row, "delivery_slot_key", "") or "",
-        source_turn_key=getattr(row, "source_turn_key", "") or "",
-        obligations=_obligations_from_json(
-            getattr(row, "obligations_json", "[]"),
+        # ``getattr`` for the same reason ``kind`` uses it: a row read
+        # through a build that predates migration ``t0h6b3e10045`` has no
+        # such attribute, and "no anchor" is the correct answer there.
+        turn_record_id=getattr(row, "turn_record_id", None) or None,
+        # Same ``getattr`` tolerance as the two above: a row read through a
+        # build predating migration ``w3k9e6h10048`` has no such attribute,
+        # and "no honesty park has happened yet" is the correct reading.
+        honesty_park_attempts=int(
+            getattr(row, "honesty_park_attempts", 0) or 0
         ),
-        commitment_key=getattr(row, "commitment_key", None),
     )
 
 
