@@ -2,10 +2,10 @@
 
 ## Status
 
-Approved for source implementation on `local/customizations`.
+Approved and deployed from `local/customizations`.
 This is a small operational tool, not a replacement for automatic
-cross-surface commitment reconciliation.  The current turn is source-only:
-do not edit live rows, run migrations, or deploy until a separate approval.
+cross-surface commitment reconciliation. The approved deployment reuses the
+existing pending-follow-up schema and does not edit live queue rows.
 
 ## Problem
 
@@ -174,15 +174,18 @@ not change that policy or the cooldown implementation.
 3. Add admin DTOs/routes and container wiring; run backend route/service tests. **Complete**
 4. Add API client and admin panel controls; run frontend tests/typecheck/build. **Complete**
 5. Run focused regression suites and `git diff --check`. **Complete**
-6. Update `.codex-round.md` and `UPDATE_PROGRESS_LOG.md`, then create a narrow
-   local commit. Deployment remains a separate approval.
+6. Update `.codex-round.md` and `UPDATE_PROGRESS_LOG.md`, create a narrow
+   local commit, and deploy after separate approval. **Complete**
 
 ## Current State
 
 - Repository: `C:\Entertainment\yuralume-src`
 - Branch: `local/customizations`
-- Source implementation, verification, and local checkpoint commit: complete
+- Source implementation, verification, local checkpoint commit, and deployment:
+  complete (`6340238`)
 - Migration: not needed/planned
-- Live data/deployment: untouched for this feature
-- Next action: await separate approval before building or deploying the app.
+- Live data/deployment: local app image built; `migrate` exited 0 and only the
+  app container was recreated. No feature-specific data repair was run.
+- Next action: monitor the admin queue controls in normal use; do not rerun
+  deployment unless source changes.
 - Blocked reason: none

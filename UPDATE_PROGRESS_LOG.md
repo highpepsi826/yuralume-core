@@ -5,6 +5,23 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-30 - Deploy queued scheduled-promise admin controls
+
+- Status: completed
+- Type: approved local source deployment
+- Git result: deployed source commit `6340238` on `local/customizations`.
+- Backup: `pre-pending-follow-up-admin-crud-20260830-033122.dump`, verified
+  as a PostgreSQL custom-format archive before deployment.
+- Deployment: built `yuralume-local/app:custom`, ran the existing `migrate`
+  service successfully, then recreated only `app`. PostgreSQL, storage, and
+  WhatsApp sidecar containers and volumes were retained.
+- Verification: all services healthy; `http://127.0.0.1:8012/health` returned
+  `status: ok`; Alembic is `u2c6m8p10046 (head)`; runtime version reports
+  `local-customizations` and commit `6340238`; OpenAPI exposes the queued
+  scheduled-promise admin CRUD endpoints.
+- Follow-up: monitor normal queue operations; no data repair or cooldown
+  policy change was part of this deployment.
+
 ### 2026-08-29 - Repair legacy meeting and festival projections
 
 - Status: completed
