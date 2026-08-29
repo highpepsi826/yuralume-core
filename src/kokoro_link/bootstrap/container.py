@@ -966,6 +966,9 @@ from kokoro_link.infrastructure.busy.llm_scheduled_promise_composer import (
 from kokoro_link.application.services.pending_follow_up_dispatcher import (
     PendingFollowUpDispatcher,
 )
+from kokoro_link.application.services.pending_follow_up_admin_service import (
+    PendingFollowUpAdminService,
+)
 from kokoro_link.contracts.tts_catalog import TTSVoiceCatalogPort
 from kokoro_link.infrastructure.tts.external_api import (
     ExternalTTSAdapter,
@@ -1381,6 +1384,7 @@ class ServiceContainer:
     rss_source_sync_service: RssSourceSyncService | None = None
     pending_follow_up_repository: "PendingFollowUpRepositoryPort | None" = None
     pending_follow_up_dispatcher: "PendingFollowUpDispatcher | None" = None
+    pending_follow_up_admin_service: "PendingFollowUpAdminService | None" = None
     operator_persona_service: OperatorPersonaService | None = None
     operator_persona_projection_service: OperatorPersonaProjectionService | None = None
     persona_extraction_service: PersonaExtractionService | None = None
@@ -2941,6 +2945,12 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             InMemoryPendingFollowUpRepository,
         )
         pending_follow_up_repository = InMemoryPendingFollowUpRepository()
+
+    # Admin queue maintenance shares the same repository as the dispatcher.
+    # Release-job hooks are filled in below when the distributed queue is
+    # enabled; embedded/self-host keeps them as no-ops.
+    pending_follow_up_release_enqueuer = None
+    pending_follow_up_release_withdrawer = None
 
     # External-event pipeline repos (RSS pool + per-character inbox).
     # Same isolated-engine pattern as fusion_story / branching_drama —
@@ -5776,6 +5786,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         from kokoro_link.application.services.pending_follow_up_release import (
             PendingFollowUpReleaseEnqueuer,
             PendingFollowUpReleaseReconciler,
+            PendingFollowUpReleaseWithdrawer,
         )
         from kokoro_link.application.services.post_turn_runner import (
             PostTurnEnqueuer,
@@ -5790,6 +5801,10 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             queue=background_job_queue,
             coordinator_lease=background_coordinator_lease,
             clock=clock,
+        )
+        pending_follow_up_release_enqueuer = _release_enqueuer
+        pending_follow_up_release_withdrawer = PendingFollowUpReleaseWithdrawer(
+            queue=background_job_queue,
         )
         chat_service.set_pending_follow_up_release_enqueuer(_release_enqueuer)
         # PF3 — the SAME enqueuer is how a fulfilment hands its GPU half to the
@@ -5877,6 +5892,15 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
                 _env_int("YURALUME_DUE_RECONCILE_INTERVAL", 900),
             ),
         )
+
+    pending_follow_up_admin_service = PendingFollowUpAdminService(
+        repository=pending_follow_up_repository,
+        character_repository=character_repository,
+        conversation_repository=conversation_repository,
+        clock=clock,
+        release_enqueuer=pending_follow_up_release_enqueuer,
+        release_withdrawer=pending_follow_up_release_withdrawer,
+    )
 
     # P3-C: upgrade the shadow worker from dry-run to mode-aware execution on the
     # hosted opt-in (background_backend=='postgres' AND DB AND this role runs the
@@ -6889,6 +6913,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         rss_source_sync_service=rss_source_sync_service,
         pending_follow_up_repository=pending_follow_up_repository,
         pending_follow_up_dispatcher=pending_follow_up_dispatcher,
+        pending_follow_up_admin_service=pending_follow_up_admin_service,
         operator_persona_service=operator_persona_service,
         operator_persona_projection_service=operator_persona_projection_service,
         relationship_seed_repository=relationship_seed_repository,

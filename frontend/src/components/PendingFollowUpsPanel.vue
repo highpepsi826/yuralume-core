@@ -2,8 +2,12 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  listOpenPendingFollowUps,
+  createScheduledPromise,
+  deleteScheduledPromise,
+  listAdminPendingFollowUps,
   triggerPendingFollowUpTick,
+  updateScheduledPromise,
+  type AdminPendingFollowUp,
   type PendingFollowUp,
 } from '@/utils/api/pendingFollowUps'
 import { useTimezone } from '@/composables/useTimezone'
@@ -17,11 +21,48 @@ const props = defineProps<{
 const { locale, t } = useI18n()
 const { timeZone } = useTimezone()
 
-const rows = ref<PendingFollowUp[]>([])
+const rows = ref<AdminPendingFollowUp[]>([])
 const loading = ref(false)
 const errorMsg = ref<string | null>(null)
 const tickBusy = ref(false)
 const tickMsg = ref<string | null>(null)
+const createOpen = ref(false)
+const createBusy = ref(false)
+const createError = ref<string | null>(null)
+const createScheduledFor = ref('')
+const createIntent = ref('')
+const editingId = ref<string | null>(null)
+const editBusy = ref(false)
+const editError = ref<string | null>(null)
+const editScheduledFor = ref('')
+const editIntent = ref('')
+
+function errorReason(err: unknown): string {
+  const response = (err as {
+    response?: { data?: { detail?: unknown } }
+  })?.response
+  const detail = response?.data?.detail
+  if (typeof detail === 'string' && detail.trim()) return detail
+  return err instanceof Error ? err.message : t('pendingFollowUpsPanel.errors.unknown')
+}
+
+function localDateTimeInput(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function defaultScheduledFor(): string {
+  const next = new Date(Date.now() + 60 * 60 * 1000)
+  next.setSeconds(0, 0)
+  return localDateTimeInput(next)
+}
+
+function toIso(value: string): string | null {
+  const parsed = new Date(value)
+  if (!value || Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString()
+}
 
 async function reload() {
   if (!props.characterId) {
@@ -31,12 +72,105 @@ async function reload() {
   loading.value = true
   errorMsg.value = null
   try {
-    rows.value = await listOpenPendingFollowUps(props.characterId)
+    rows.value = await listAdminPendingFollowUps(props.characterId)
   } catch (err) {
-    errorMsg.value = err instanceof Error ? err.message : t('pendingFollowUpsPanel.errors.loadFailed')
+    errorMsg.value = errorReason(err)
     rows.value = []
   } finally {
     loading.value = false
+  }
+}
+
+function isEditable(row: AdminPendingFollowUp): boolean {
+  return row.kind === 'scheduled_promise' && row.status === 'queued'
+}
+
+function openCreate() {
+  createError.value = null
+  createScheduledFor.value = defaultScheduledFor()
+  createIntent.value = ''
+  createOpen.value = true
+}
+
+function closeCreate() {
+  if (!createBusy.value) createOpen.value = false
+}
+
+async function submitCreate() {
+  if (createBusy.value || !props.characterId) return
+  const scheduled = toIso(createScheduledFor.value)
+  const intent = createIntent.value.trim()
+  if (!scheduled || !intent) {
+    createError.value = t('pendingFollowUpsPanel.errors.createFieldsRequired')
+    return
+  }
+  createBusy.value = true
+  createError.value = null
+  try {
+    await createScheduledPromise({
+      character_id: props.characterId,
+      scheduled_for: scheduled,
+      promise_intent: intent,
+    })
+    createOpen.value = false
+    await reload()
+  } catch (err) {
+    createError.value = errorReason(err)
+  } finally {
+    createBusy.value = false
+  }
+}
+
+function beginEdit(row: AdminPendingFollowUp) {
+  if (!isEditable(row)) return
+  editingId.value = row.id
+  editError.value = null
+  editScheduledFor.value = localDateTimeInput(new Date(row.scheduled_for))
+  editIntent.value = row.promise_intent
+}
+
+function cancelEdit() {
+  if (!editBusy.value) {
+    editingId.value = null
+    editError.value = null
+  }
+}
+
+async function submitEdit(row: AdminPendingFollowUp) {
+  if (editBusy.value || !isEditable(row)) return
+  const scheduled = toIso(editScheduledFor.value)
+  const intent = editIntent.value.trim()
+  if (!scheduled || !intent) {
+    editError.value = t('pendingFollowUpsPanel.errors.editFieldsRequired')
+    return
+  }
+  editBusy.value = true
+  editError.value = null
+  try {
+    await updateScheduledPromise(row.id, {
+      scheduled_for: scheduled,
+      promise_intent: intent,
+    })
+    editingId.value = null
+    await reload()
+  } catch (err) {
+    editError.value = errorReason(err)
+  } finally {
+    editBusy.value = false
+  }
+}
+
+async function removeRow(row: AdminPendingFollowUp) {
+  if (
+    !isEditable(row)
+    || !window.confirm(t('pendingFollowUpsPanel.actions.deleteConfirm'))
+  ) return
+  try {
+    await deleteScheduledPromise(row.id)
+    if (editingId.value === row.id) editingId.value = null
+    await reload()
+  } catch (err) {
+    errorMsg.value = errorReason(err)
   }
 }
 
@@ -51,9 +185,9 @@ async function handleTickNow() {
       : t('pendingFollowUpsPanel.tick.none')
     await reload()
   } catch (err) {
-    tickMsg.value = err instanceof Error
-      ? t('pendingFollowUpsPanel.tick.failedWithReason', { reason: err.message })
-      : t('pendingFollowUpsPanel.tick.failed')
+    tickMsg.value = t('pendingFollowUpsPanel.tick.failedWithReason', {
+      reason: errorReason(err),
+    })
   } finally {
     tickBusy.value = false
     // Auto-clear the toast after a few seconds so it doesn't linger.
@@ -97,7 +231,12 @@ function statusLabel(status: PendingFollowUp['status']): string {
   return t(`pendingFollowUpsPanel.status.${status}`)
 }
 
-watch(() => props.characterId, () => { void reload() }, { immediate: true })
+watch(() => props.characterId, () => {
+  editingId.value = null
+  editError.value = null
+  createOpen.value = false
+  void reload()
+}, { immediate: true })
 
 // Light polling so the user sees status flip from queued → resolved
 // without a manual refresh.
@@ -134,6 +273,14 @@ onBeforeUnmount(() => {
         >{{ t('pendingFollowUpsPanel.actions.refresh') }}</UiButton>
         <UiButton
           size="sm"
+          variant="primary"
+          :disabled="!characterId || createBusy"
+          @click="createOpen ? closeCreate() : openCreate()"
+        >{{ createOpen
+          ? t('pendingFollowUpsPanel.actions.cancelCreate')
+          : t('pendingFollowUpsPanel.actions.addPromise') }}</UiButton>
+        <UiButton
+          size="sm"
           :loading="tickBusy"
           :title="t('pendingFollowUpsPanel.actions.tickTitle')"
           @click="handleTickNow"
@@ -143,6 +290,44 @@ onBeforeUnmount(() => {
 
     <div v-if="tickMsg" class="panel-toast">{{ tickMsg }}</div>
     <div v-if="errorMsg" class="panel-error">{{ errorMsg }}</div>
+
+    <form v-if="createOpen" class="promise-form create-form" @submit.prevent="submitCreate">
+      <div class="form-title">{{ t('pendingFollowUpsPanel.create.title') }}</div>
+      <div class="form-grid">
+        <label class="field-small">
+          <span class="field-label">{{ t('pendingFollowUpsPanel.create.timeLabel') }}</span>
+          <input
+            v-model="createScheduledFor"
+            class="field-input"
+            type="datetime-local"
+            required
+            :disabled="createBusy"
+          />
+        </label>
+        <label class="field-small field-wide">
+          <span class="field-label">{{ t('pendingFollowUpsPanel.create.intentLabel') }}</span>
+          <textarea
+            v-model="createIntent"
+            class="field-textarea"
+            rows="2"
+            maxlength="500"
+            required
+            :placeholder="t('pendingFollowUpsPanel.create.intentPlaceholder')"
+            :disabled="createBusy"
+          />
+        </label>
+      </div>
+      <p class="form-hint">{{ t('pendingFollowUpsPanel.create.hint') }}</p>
+      <div v-if="createError" class="form-error" role="alert">{{ createError }}</div>
+      <div class="form-actions">
+        <UiButton type="button" size="sm" :disabled="createBusy" @click="closeCreate">
+          {{ t('common.actions.cancel') }}
+        </UiButton>
+        <UiButton type="submit" size="sm" variant="primary" :loading="createBusy">
+          {{ t('pendingFollowUpsPanel.actions.save') }}
+        </UiButton>
+      </div>
+    </form>
 
     <div v-if="!characterId" class="panel-empty">{{ t('pendingFollowUpsPanel.empty.selectCharacter') }}</div>
     <div v-else-if="loading && !hasRows" class="panel-empty">{{ t('common.state.loading') }}</div>
@@ -167,6 +352,17 @@ onBeforeUnmount(() => {
           <span class="time-pill" :title="formatAbsolute(row.scheduled_for)">
             {{ t('pendingFollowUpsPanel.scheduledFor', { relative: formatRelative(row.scheduled_for) }) }}
           </span>
+          <span v-if="row.kind === 'scheduled_promise'" class="kind-pill">
+            {{ t('pendingFollowUpsPanel.kind.scheduledPromise') }}
+          </span>
+          <span v-else class="kind-pill">
+            {{ t('pendingFollowUpsPanel.kind.busyDefer') }}
+          </span>
+        </div>
+
+        <div v-if="row.kind === 'scheduled_promise'" class="promise-intent">
+          <div class="brief-label">{{ t('pendingFollowUpsPanel.promiseIntentLabel') }}</div>
+          <div class="brief-text">{{ row.promise_intent }}</div>
         </div>
 
         <div class="brief">
@@ -192,6 +388,54 @@ onBeforeUnmount(() => {
         <div v-if="row.last_error" class="row-error">
           {{ t('pendingFollowUpsPanel.lastError', { error: row.last_error }) }}
         </div>
+
+        <div v-if="isEditable(row)" class="row-actions">
+          <UiButton size="sm" @click="beginEdit(row)">
+            {{ t('pendingFollowUpsPanel.actions.edit') }}
+          </UiButton>
+          <UiButton size="sm" variant="danger" @click="removeRow(row)">
+            {{ t('pendingFollowUpsPanel.actions.delete') }}
+          </UiButton>
+        </div>
+
+        <form
+          v-if="editingId === row.id"
+          class="promise-form edit-form"
+          @submit.prevent="submitEdit(row)"
+        >
+          <div class="form-title">{{ t('pendingFollowUpsPanel.edit.title') }}</div>
+          <label class="field-small">
+            <span class="field-label">{{ t('pendingFollowUpsPanel.edit.timeLabel') }}</span>
+            <input
+              v-model="editScheduledFor"
+              class="field-input"
+              type="datetime-local"
+              required
+              :disabled="editBusy"
+            />
+          </label>
+          <label class="field-small">
+            <span class="field-label">{{ t('pendingFollowUpsPanel.edit.intentLabel') }}</span>
+            <textarea
+              v-model="editIntent"
+              class="field-textarea"
+              rows="2"
+              maxlength="500"
+              required
+              :disabled="editBusy"
+            />
+          </label>
+          <p class="form-hint">{{ t('pendingFollowUpsPanel.edit.hint') }}</p>
+          <div v-if="editError" class="form-error" role="alert">{{ editError }}</div>
+          <div class="form-actions">
+            <UiButton type="button" size="sm" :disabled="editBusy" @click="cancelEdit">
+              {{ t('common.actions.cancel') }}
+            </UiButton>
+            <UiButton type="submit" size="sm" variant="primary" :loading="editBusy">
+              {{ t('pendingFollowUpsPanel.actions.save') }}
+            </UiButton>
+          </div>
+        </form>
       </li>
     </ul>
   </section>
@@ -246,6 +490,86 @@ onBeforeUnmount(() => {
   background: rgba(245, 108, 108, 0.08);
   color: #c0392b;
   border-radius: 6px;
+}
+
+.promise-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-border, #e5e5e5);
+  border-radius: 8px;
+  background: var(--color-bg-secondary, #fafafa);
+}
+
+.create-form {
+  border-color: rgba(64, 158, 255, 0.35);
+}
+
+.form-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.75fr) minmax(220px, 1.25fr);
+  gap: 10px;
+}
+
+.field-small {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field-wide {
+  min-width: 0;
+}
+
+.field-label {
+  font-size: 11px;
+  color: var(--color-text-secondary, #888);
+}
+
+.field-input,
+.field-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--color-border, #d9d9d9);
+  border-radius: 5px;
+  padding: 7px 8px;
+  color: var(--color-text, #222);
+  background: var(--color-bg, #fff);
+  font: inherit;
+  font-size: 13px;
+}
+
+.field-textarea {
+  resize: vertical;
+  min-height: 58px;
+}
+
+.form-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-secondary, #888);
+}
+
+.form-error {
+  color: #c0392b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.form-actions,
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 .panel-empty {
@@ -309,6 +633,7 @@ onBeforeUnmount(() => {
 
 .reason-pill { background: rgba(0, 0, 0, 0.05); color: #555; }
 .time-pill { background: rgba(0, 0, 0, 0.05); color: #555; }
+.kind-pill { background: rgba(183, 93, 63, 0.12); color: #8d4935; }
 
 .brief { display: flex; flex-direction: column; gap: 2px; }
 .brief-label,
@@ -323,6 +648,16 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.promise-intent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.edit-form {
+  margin-top: 2px;
 }
 
 .queued-messages {
@@ -358,5 +693,21 @@ onBeforeUnmount(() => {
   background: rgba(245, 108, 108, 0.08);
   color: #c0392b;
   border-radius: 4px;
+}
+
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-actions,
+  .row-actions {
+    justify-content: stretch;
+  }
+
+  .form-actions :deep(button),
+  .row-actions :deep(button) {
+    flex: 1 1 auto;
+  }
 }
 </style>

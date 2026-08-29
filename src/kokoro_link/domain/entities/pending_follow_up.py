@@ -542,6 +542,86 @@ class PendingFollowUp:
             commitment_key=commitment_key,
         )
 
+    def with_admin_edit(
+        self,
+        *,
+        scheduled_for: datetime,
+        promise_intent: str | None = None,
+        now: datetime | None = None,
+    ) -> "PendingFollowUp":
+        """Return a safely rebuilt queued scheduled-promise edit.
+
+        This helper is intentionally narrower than a general ``replace``:
+        the admin surface may correct the future release time and the
+        composer-facing intent, but it must not accidentally carry an old
+        delivery hash or stale merged obligation into the next release.
+        Lifecycle and future-time checks belong to the application service,
+        which has the current clock and repository context.
+        """
+        if self.kind != PendingFollowUpKind.SCHEDULED_PROMISE:
+            raise ValueError("only scheduled promises can be admin-edited")
+        if self.status != PendingFollowUpStatus.QUEUED:
+            raise ValueError("only queued promises can be admin-edited")
+        if scheduled_for.tzinfo is None or scheduled_for.utcoffset() is None:
+            raise ValueError("scheduled_for must be timezone-aware")
+
+        intent = (
+            self.promise_intent
+            if promise_intent is None
+            else (promise_intent or "").strip()
+        )
+        if not intent:
+            raise ValueError("scheduled-promise intent must be non-empty")
+        intent = intent[:500]
+
+        obligations = self.obligations
+        source_turn_key = self.source_turn_key
+        if promise_intent is not None and intent != self.promise_intent:
+            # A manual intent edit replaces the scalar promise meaning. Keep
+            # the original source provenance, but do not leave older merged
+            # obligations for the composer to fulfil as well.
+            existing = self.scheduled_promise_obligations
+            source = existing[0] if existing else None
+            source_turn_key = (
+                source_turn_key
+                or (source.source_turn_key if source is not None else "")
+            )
+            source_text = (
+                source.source_text
+                if source is not None and source.source_text
+                else (self.messages[0].content if self.messages else intent)
+            )
+            if not source_turn_key:
+                source_turn_key = scheduled_promise_source_turn_key(
+                    source_text=source_text,
+                )
+            obligations = (
+                ScheduledPromiseObligation(
+                    intent=intent,
+                    source_turn_key=source_turn_key,
+                    source_text=source_text,
+                ),
+            )
+
+        timestamp = now or _utcnow()
+        return replace(
+            self,
+            scheduled_for=scheduled_for,
+            promise_intent=intent,
+            dedupe_key=scheduled_promise_dedupe_key(
+                character_id=self.character_id,
+                promise_intent=intent,
+                scheduled_for=scheduled_for,
+            ),
+            delivery_slot_key=scheduled_promise_delivery_slot_key(
+                character_id=self.character_id,
+                scheduled_for=scheduled_for,
+            ),
+            source_turn_key=source_turn_key,
+            obligations=obligations,
+            updated_at=timestamp,
+        )
+
     @property
     def is_at_cap(self) -> bool:
         return len(self.messages) >= MAX_QUEUED_MESSAGES

@@ -1430,6 +1430,12 @@ export const messages = {
       refresh: '↻ 重新整理',
       tickNow: '⚡ 立刻檢查',
       tickTitle: '不想等下一個 5 分鐘 tick，手動觸發一次釋放檢查',
+      addPromise: '＋新增承諾',
+      cancelCreate: '取消新增',
+      edit: '編輯',
+      delete: '刪除',
+      deleteConfirm: '確定刪除此筆排程承諾？已排入的送出工作也會撤回。',
+      save: '儲存',
     },
     tick: {
       released: '已釋放 {count} 則待回覆',
@@ -1461,9 +1467,30 @@ export const messages = {
     scheduledFor: '預計：{relative}',
     briefLabel: '短回覆（使用者已看到）',
     queuedMessages: '累積使用者訊息（{count} 則）',
+    kind: {
+      scheduledPromise: '排程承諾',
+      busyDefer: '忙碌延後',
+    },
+    promiseIntentLabel: '承諾內容',
+    create: {
+      title: '新增排程承諾',
+      timeLabel: '預定送出時間',
+      intentLabel: '角色要做的事',
+      intentPlaceholder: '例如：明晚提醒玩家帶卡',
+      hint: '只會建立佇列項目，不會修改日程、劇情、目標或記憶；必須選擇未來時間。',
+    },
+    edit: {
+      title: '編輯排程承諾',
+      timeLabel: '預定送出時間',
+      intentLabel: '承諾內容',
+      hint: '這只修正待回覆佇列。若後續聊天再次使用相同 commitment key，自動流程仍可能更新此列。',
+    },
     lastError: '上一輪重試錯誤：{error}',
     errors: {
       loadFailed: '載入失敗',
+      unknown: '發生未知錯誤',
+      createFieldsRequired: '請填寫未來的送出時間與承諾內容。',
+      editFieldsRequired: '請填寫未來的送出時間與承諾內容。',
     },
   },
   imageStage: {

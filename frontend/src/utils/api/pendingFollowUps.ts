@@ -20,6 +20,24 @@ export interface PendingFollowUp {
   messages: PendingFollowUpMessage[]
 }
 
+export interface AdminPendingFollowUp extends PendingFollowUp {
+  kind: 'busy_defer' | 'scheduled_promise' | string
+  promise_intent: string
+  commitment_key: string | null
+}
+
+export interface CreateScheduledPromiseInput {
+  character_id: string
+  conversation_id?: string | null
+  scheduled_for: string
+  promise_intent: string
+}
+
+export interface UpdateScheduledPromiseInput {
+  scheduled_for?: string
+  promise_intent?: string
+}
+
 export interface PendingFollowUpTickResult {
   resolved: number
 }
@@ -40,6 +58,40 @@ export async function listDuePendingFollowUps(): Promise<PendingFollowUp[]> {
     `${BASE}/admin/pending-follow-ups`,
   )
   return data
+}
+
+export async function listAdminPendingFollowUps(
+  characterId: string,
+): Promise<AdminPendingFollowUp[]> {
+  const { data } = await axios.get<AdminPendingFollowUp[]>(
+    `${BASE}/admin/pending-follow-ups/characters/${characterId}`,
+  )
+  return data
+}
+
+export async function createScheduledPromise(
+  input: CreateScheduledPromiseInput,
+): Promise<AdminPendingFollowUp> {
+  const { data } = await axios.post<AdminPendingFollowUp>(
+    `${BASE}/admin/pending-follow-ups`,
+    input,
+  )
+  return data
+}
+
+export async function updateScheduledPromise(
+  followUpId: string,
+  input: UpdateScheduledPromiseInput,
+): Promise<AdminPendingFollowUp> {
+  const { data } = await axios.patch<AdminPendingFollowUp>(
+    `${BASE}/admin/pending-follow-ups/${followUpId}`,
+    input,
+  )
+  return data
+}
+
+export async function deleteScheduledPromise(followUpId: string): Promise<void> {
+  await axios.delete(`${BASE}/admin/pending-follow-ups/${followUpId}`)
 }
 
 export async function triggerPendingFollowUpTick(): Promise<PendingFollowUpTickResult> {

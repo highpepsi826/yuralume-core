@@ -42,8 +42,65 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
         await self._upsert(follow_up)
         return follow_up
 
+    async def add_admin_scheduled_promise(
+        self, follow_up: PendingFollowUp,
+    ) -> bool:
+        if follow_up.kind != PendingFollowUpKind.SCHEDULED_PROMISE:
+            raise ValueError("admin insert requires a scheduled promise")
+        async with self._session_factory() as session:
+            session.add(_domain_to_row(follow_up))
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                existing = await _find_open_by_delivery_slot_key(
+                    session, follow_up.delivery_slot_key,
+                )
+                if existing is not None:
+                    return False
+                raise
+        return True
+
     async def save(self, follow_up: PendingFollowUp) -> None:
         await self._upsert(follow_up)
+
+    async def save_admin_edit(
+        self,
+        follow_up: PendingFollowUp,
+        *,
+        expected_updated_at: datetime,
+    ) -> bool:
+        async with self._session_factory() as session:
+            try:
+                async with session.begin():
+                    result = await session.execute(
+                        update(PendingFollowUpRow)
+                        .where(PendingFollowUpRow.id == follow_up.id)
+                        .where(
+                            PendingFollowUpRow.kind
+                            == PendingFollowUpKind.SCHEDULED_PROMISE.value,
+                        )
+                        .where(
+                            PendingFollowUpRow.status
+                            == PendingFollowUpStatus.QUEUED.value,
+                        )
+                        .where(PendingFollowUpRow.updated_at == expected_updated_at)
+                        .values(
+                            scheduled_for=follow_up.scheduled_for,
+                            promise_intent=follow_up.promise_intent,
+                            dedupe_key=follow_up.dedupe_key,
+                            delivery_slot_key=follow_up.delivery_slot_key,
+                            source_turn_key=follow_up.source_turn_key,
+                            obligations_json=_obligations_to_json(
+                                follow_up.obligations,
+                            ),
+                            updated_at=follow_up.updated_at,
+                        ),
+                    )
+                    return bool(result.rowcount)
+            except IntegrityError:
+                await session.rollback()
+                return False
 
     async def get(self, follow_up_id: str) -> PendingFollowUp | None:
         async with self._session_factory() as session:
@@ -156,6 +213,24 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
             rows = (await session.execute(stmt)).scalars().all()
             return [_row_to_domain(r) for r in rows]
 
+    async def list_open_scheduled_promises(self) -> list[PendingFollowUp]:
+        async with self._session_factory() as session:
+            stmt = (
+                select(PendingFollowUpRow)
+                .where(
+                    PendingFollowUpRow.kind
+                    == PendingFollowUpKind.SCHEDULED_PROMISE.value,
+                )
+                .where(PendingFollowUpRow.status.in_(_OPEN_STATUSES))
+                .order_by(
+                    asc(PendingFollowUpRow.scheduled_for),
+                    asc(PendingFollowUpRow.queued_at),
+                    asc(PendingFollowUpRow.id),
+                )
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            return [_row_to_domain(r) for r in rows]
+
     async def list_created_since(
         self, conversation_id: str, since: datetime,
     ) -> list[PendingFollowUp]:
@@ -196,6 +271,32 @@ class SaPendingFollowUpRepository(PendingFollowUpRepositoryPort):
                     PendingFollowUpRow.id == follow_up_id,
                 ),
             )
+            return bool(result.rowcount)
+
+    async def delete_admin_queued_scheduled_promise(
+        self,
+        follow_up_id: str,
+        *,
+        expected_updated_at: datetime | None = None,
+    ) -> bool:
+        async with self._session_factory() as session, session.begin():
+            stmt = (
+                delete(PendingFollowUpRow)
+                .where(PendingFollowUpRow.id == follow_up_id)
+                .where(
+                    PendingFollowUpRow.kind
+                    == PendingFollowUpKind.SCHEDULED_PROMISE.value,
+                )
+                .where(
+                    PendingFollowUpRow.status
+                    == PendingFollowUpStatus.QUEUED.value,
+                )
+            )
+            if expected_updated_at is not None:
+                stmt = stmt.where(
+                    PendingFollowUpRow.updated_at == expected_updated_at,
+                )
+            result = await session.execute(stmt)
             return bool(result.rowcount)
 
     async def delete_for_conversation(self, conversation_id: str) -> int:

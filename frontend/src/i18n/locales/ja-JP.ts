@@ -1429,6 +1429,12 @@ export const messages: MessageSchema = {
       refresh: '更新',
       tickNow: '⚡ 今すぐ確認',
       tickTitle: '次の5分ごとのtickを待たず、手動でリリースチェックを一度実行します',
+      addPromise: '＋約束を追加',
+      cancelCreate: '追加をキャンセル',
+      edit: '編集',
+      delete: '削除',
+      deleteConfirm: 'この予定された約束を削除しますか？キュー済みの送信ジョブも取り下げます。',
+      save: '保存',
     },
     tick: {
       released: '{count} 件の返信待ちを解放しました',
@@ -1460,9 +1466,30 @@ export const messages: MessageSchema = {
     scheduledFor: '予定：{relative}',
     briefLabel: '短い返信（ユーザーに表示済み）',
     queuedMessages: 'キュー済みメッセージ（{count}）',
+    kind: {
+      scheduledPromise: '予定された約束',
+      busyDefer: '多忙で延期',
+    },
+    promiseIntentLabel: '約束の内容',
+    create: {
+      title: '予定された約束を追加',
+      timeLabel: '送信予定時刻',
+      intentLabel: 'キャラクターがすること',
+      intentPlaceholder: '例：明日の夜、プレイヤーにカードを持つよう思い出させる',
+      hint: 'キュー項目だけを作成します。予定・ストーリー・目標・記憶は変更しません。未来の時刻を選んでください。',
+    },
+    edit: {
+      title: '予定された約束を編集',
+      timeLabel: '送信予定時刻',
+      intentLabel: '約束の内容',
+      hint: '返信待ちキューだけを修正します。後のチャットで同じ commitment key が使われると、自動処理がこの行を更新する場合があります。',
+    },
     lastError: '前回のリトライエラー：{error}',
     errors: {
       loadFailed: '読み込みに失敗しました',
+      unknown: '不明なエラーが発生しました',
+      createFieldsRequired: '未来の送信時刻と約束の内容を入力してください。',
+      editFieldsRequired: '未来の送信時刻と約束の内容を入力してください。',
     },
   },
   imageStage: {

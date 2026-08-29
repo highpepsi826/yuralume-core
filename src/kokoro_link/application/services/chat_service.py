@@ -4675,6 +4675,20 @@ class ChatService:
                 novelty_verdict = review.first_verdict
                 novelty_retry_count = 1 if review.regen_attempted else 0
                 novelty_outcome = review.outcome
+            image_claim_without_tools = is_image_commitment(text)
+            forced_without_tools = bool(force_image)
+            if forced_without_tools or image_claim_without_tools:
+                _LOGGER.warning(
+                    "image request/commitment could not enter tool cycle: "
+                    "registry=%s orchestrator=%s character=%s",
+                    self._tool_registry is not None,
+                    self._tool_orchestrator is not None,
+                    character.id,
+                )
+                text = localized_fallback_text(
+                    "chat.image_tool_unavailable",
+                    operator_primary_language,
+                )
             return ChatGenerationResult(
                 text=text,
                 attachments=[],
@@ -7981,7 +7995,7 @@ class ChatService:
                 source_content_mode=content_mode,
                 turn_record_id=turn_record_id,
                 now=now,
-                commitment_key=promise.commitment_key,
+                commitment_key=getattr(promise, "commitment_key", None),
             )
             try:
                 canonical_row = await repo.add(row)

@@ -27,6 +27,13 @@ def admin_auth_app(
     monkeypatch.setenv("KOKORO_AUTH_ENABLED", "true")
     monkeypatch.setenv("KOKORO_DATABASE_URL", "")
     monkeypatch.setenv("KOKORO_DEFAULT_PROVIDER_ID", "fake")
+    # Keep this app fixture independent from a workstation's container
+    # storage settings.  It uses in-memory repositories and never needs an
+    # object-store endpoint.
+    monkeypatch.setenv("DEPLOYMENT_MODE", "local")
+    monkeypatch.setenv("KOKORO_DEPLOYMENT_MODE", "local")
+    monkeypatch.setenv("STORAGE_PROVIDER", "memory")
+    monkeypatch.setenv("KOKORO_STORAGE_PROVIDER", "memory")
     monkeypatch.setenv("CONFIG_ENCRYPTION_KEY", "admin-auth-provider-secret-key")
     for key in (
         "KOKORO_OPENAI_API_KEY",
@@ -125,6 +132,51 @@ def test_admin_can_list_due_pending_follow_ups(
     )
     assert response.status_code == 200
     assert response.json() == []
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        (
+            "GET",
+            "/api/v1/admin/pending-follow-ups/characters/character-1",
+            None,
+        ),
+        (
+            "POST",
+            "/api/v1/admin/pending-follow-ups",
+            {
+                "character_id": "character-1",
+                "scheduled_for": "2030-01-01T12:00:00+00:00",
+                "promise_intent": "提醒玩家帶卡",
+            },
+        ),
+        (
+            "PATCH",
+            "/api/v1/admin/pending-follow-ups/follow-up-1",
+            {"promise_intent": "更新提醒"},
+        ),
+        (
+            "DELETE",
+            "/api/v1/admin/pending-follow-ups/follow-up-1",
+            None,
+        ),
+    ],
+)
+def test_non_admin_blocked_from_pending_follow_up_crud(
+    admin_auth_app: tuple[TestClient, str, str],
+    method: str,
+    path: str,
+    payload: dict[str, object] | None,
+) -> None:
+    client, _admin, member_token = admin_auth_app
+    response = client.request(
+        method,
+        path,
+        headers=_auth(member_token),
+        json=payload,
+    )
+    assert response.status_code == 403
 
 
 def test_admin_can_read_scheduled_promise_duplicate_report(

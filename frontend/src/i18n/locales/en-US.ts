@@ -1431,6 +1431,12 @@ export const messages: MessageSchema = {
       refresh: '↻ Refresh',
       tickNow: '⚡ Check now',
       tickTitle: 'Manually trigger one release check instead of waiting for the next 5-minute tick',
+      addPromise: '+ Add promise',
+      cancelCreate: 'Cancel add',
+      edit: 'Edit',
+      delete: 'Delete',
+      deleteConfirm: 'Delete this scheduled promise? Its queued release jobs will also be withdrawn.',
+      save: 'Save',
     },
     tick: {
       released: 'Released {count} pending reply/replies',
@@ -1462,9 +1468,30 @@ export const messages: MessageSchema = {
     scheduledFor: 'Due: {relative}',
     briefLabel: 'Short reply (already shown to user)',
     queuedMessages: 'Queued user messages ({count})',
+    kind: {
+      scheduledPromise: 'Scheduled promise',
+      busyDefer: 'Busy defer',
+    },
+    promiseIntentLabel: 'Promise intent',
+    create: {
+      title: 'Add scheduled promise',
+      timeLabel: 'Scheduled send time',
+      intentLabel: 'What the character should do',
+      intentPlaceholder: 'For example: remind the player to bring the card tomorrow evening',
+      hint: 'This only creates a queue item. It does not change schedules, story, goals, or memories; choose a future time.',
+    },
+    edit: {
+      title: 'Edit scheduled promise',
+      timeLabel: 'Scheduled send time',
+      intentLabel: 'Promise intent',
+      hint: 'This only corrects the pending queue. A later chat turn using the same commitment key may still update this row.',
+    },
     lastError: 'Last retry error: {error}',
     errors: {
       loadFailed: 'Failed to load',
+      unknown: 'An unknown error occurred',
+      createFieldsRequired: 'Enter a future send time and a promise intent.',
+      editFieldsRequired: 'Enter a future send time and a promise intent.',
     },
   },
   imageStage: {

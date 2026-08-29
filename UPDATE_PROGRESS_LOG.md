@@ -562,3 +562,24 @@ database rows.
   `git diff --check` passed.
 - Deployment: none. Migration: present but not executed.
 - Follow-up: separately approve backup, migration rehearsal, and deployment.
+
+### 2026-08-30 - Add admin CRUD for queued scheduled promises
+
+- Status: source implementation committed; deployment not performed.
+- Type: local admin queue maintenance and compatibility repair.
+- Git result: local source commit adds admin-only list/create/edit/delete for queued
+  `scheduled_promise` rows, with delivery-slot validation, conditional SQL
+  writes, and optional distributed release-job withdrawal/re-enqueue. Player
+  follow-up responses remain read-only and backward-compatible.
+- Data safety: no migration, live-row edit, schedule/story/goal/memory change,
+  or proactive cooldown change. Manual rows require an existing conversation
+  and carry no commitment key by default.
+- Verification: 11 focused admin/service/route/SQL tests, 17 admin-auth
+  integration tests, 179 pending/release/dispatcher/post-turn/snapshot tests,
+  and 31 ChatService tests passed. One known separate out-of-order audit/undo
+  test still fails: undoing turn N+1 also removes turn N's distinct repair
+  row. Frontend typecheck, API tests, and i18n checks passed; a prior
+  production-assets build completed, but PWA build completion remains blocked
+  by the host's Windows temp-directory `EPERM`.
+- Follow-up: review the source commit, then separately approve deployment if
+  the new admin controls should be exposed in the running app.

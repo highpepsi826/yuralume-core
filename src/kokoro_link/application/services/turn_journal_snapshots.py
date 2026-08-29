@@ -37,6 +37,7 @@ from kokoro_link.domain.entities.pending_follow_up import (
     PendingFollowUpKind,
     PendingFollowUpMessage,
     PendingFollowUpStatus,
+    ScheduledPromiseObligation,
 )
 from kokoro_link.domain.entities.story_scene_session import (
     SCENE_OPEN,
@@ -120,6 +121,21 @@ def follow_up_to_dict(follow_up: PendingFollowUp) -> dict[str, Any]:
         "last_error": follow_up.last_error,
         "kind": follow_up.kind.value,
         "promise_intent": follow_up.promise_intent,
+        # Preserve the delivery identity and the individual obligations on a
+        # restore.  Older snapshots omit these keys and decode to the entity's
+        # safe empty defaults below.
+        "dedupe_key": follow_up.dedupe_key,
+        "delivery_slot_key": follow_up.delivery_slot_key,
+        "source_turn_key": follow_up.source_turn_key,
+        "obligations": [
+            {
+                "intent": obligation.intent,
+                "source_turn_key": obligation.source_turn_key,
+                "source_text": obligation.source_text,
+            }
+            for obligation in follow_up.obligations
+        ],
+        "commitment_key": follow_up.commitment_key,
         # Carried so a restore does not blank the anchor of a row an
         # *earlier* turn wrote: the snapshot is written back verbatim,
         # and a row that lost its anchor would fall back to being
@@ -134,6 +150,20 @@ def follow_up_to_dict(follow_up: PendingFollowUp) -> dict[str, Any]:
 
 
 def follow_up_from_dict(payload: dict[str, Any]) -> PendingFollowUp:
+    obligations: list[ScheduledPromiseObligation] = []
+    for item in payload.get("obligations") or ():
+        if not isinstance(item, dict):
+            continue
+        try:
+            obligations.append(ScheduledPromiseObligation(
+                intent=str(item.get("intent") or ""),
+                source_turn_key=str(item.get("source_turn_key") or ""),
+                source_text=str(item.get("source_text") or ""),
+            ))
+        except ValueError:
+            # A malformed optional obligation must not make the whole turn
+            # journal impossible to undo.
+            continue
     return PendingFollowUp(
         id=str(payload["id"]),
         character_id=str(payload["character_id"]),
@@ -160,6 +190,11 @@ def follow_up_from_dict(payload: dict[str, Any]) -> PendingFollowUp:
             str(payload.get("kind") or PendingFollowUpKind.BUSY_DEFER.value),
         ),
         promise_intent=str(payload.get("promise_intent") or ""),
+        dedupe_key=str(payload.get("dedupe_key") or ""),
+        delivery_slot_key=str(payload.get("delivery_slot_key") or ""),
+        source_turn_key=str(payload.get("source_turn_key") or ""),
+        obligations=tuple(obligations),
+        commitment_key=payload.get("commitment_key"),
         turn_record_id=(
             str(payload["turn_record_id"])
             if payload.get("turn_record_id") else None

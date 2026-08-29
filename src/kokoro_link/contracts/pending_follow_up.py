@@ -35,8 +35,31 @@ class PendingFollowUpRepositoryPort(Protocol):
         returns that existing row rather than creating another release target.
         """
 
+    async def add_admin_scheduled_promise(
+        self, follow_up: PendingFollowUp,
+    ) -> bool:
+        """Insert one manual scheduled promise without coalescing.
+
+        ``False`` means another open row already occupies the delivery slot.
+        Automatic post-turn writes keep using :meth:`add`, whose merge policy is
+        intentionally different.
+        """
+
     async def save(self, follow_up: PendingFollowUp) -> None:
         """Upsert. Used when status / messages mutate."""
+
+    async def save_admin_edit(
+        self,
+        follow_up: PendingFollowUp,
+        *,
+        expected_updated_at: datetime,
+    ) -> bool:
+        """Conditionally apply an admin edit to a still-queued promise.
+
+        Implementations must check kind, queued status, and the read-time
+        ``updated_at`` in the same write. ``False`` means the row changed or a
+        delivery-slot constraint rejected the update.
+        """
 
     async def get(self, follow_up_id: str) -> PendingFollowUp | None:
         """Fetch a single row by id."""
@@ -167,6 +190,14 @@ class PendingFollowUpRepositoryPort(Protocol):
         """All open rows belonging to ``character_id``. Used by tests
         and by the cascading delete flow."""
 
+    async def list_open_scheduled_promises(self) -> list[PendingFollowUp]:
+        """Return every open scheduled-promise row, oldest first.
+
+        Admin queue maintenance uses this census to reject two manual rows
+        occupying the same delivery slot.  Keeping the query on the port also
+        gives the duplicate-report route the same SQL/in-memory behaviour.
+        """
+
     async def list_created_since(
         self, conversation_id: str, since: datetime,
     ) -> list[PendingFollowUp]:
@@ -215,6 +246,18 @@ class PendingFollowUpRepositoryPort(Protocol):
         turn-undo, whose claim is that the turn never happened, and a
         cancelled row would keep telling the dispatcher — and the audit
         trail — about a deferred reply that was never owed.
+        """
+
+    async def delete_admin_queued_scheduled_promise(
+        self,
+        follow_up_id: str,
+        *,
+        expected_updated_at: datetime | None = None,
+    ) -> bool:
+        """Delete iff the row is still the queued promise that was read.
+
+        ``expected_updated_at`` is optional for compatibility with small
+        maintenance callers; the admin service always supplies it.
         """
 
     async def delete_for_conversation(self, conversation_id: str) -> int:
