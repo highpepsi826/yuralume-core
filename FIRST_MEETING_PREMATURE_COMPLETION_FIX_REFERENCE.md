@@ -133,3 +133,13 @@ commit, live backup, exact data repair, and deployment verification remain.
 - `tools/first_meeting_premature_completion_repair_live.sql` contains the
   exact-ID `SERIALIZABLE` transaction and pre/postconditions approved above.
 - The script is committed with the source checkpoint before any live write.
+
+## Backup Checkpoint (2026-08-30)
+
+- Only `yuralume-app` was stopped; PostgreSQL, storage, and WhatsApp remained
+  running and healthy.
+- Verified dump: `pre-first-meeting-premature-completion-20260830-1517.dump`
+  (PostgreSQL custom format, 640 TOC entries).
+- SHA-256: `995A3448EB573137BAD80EC74C1A4B2395EF2EEB7CB1429A4AE0921F19B35B22`.
+- The exact repair transaction is the next live action; no row has been
+  changed yet.
