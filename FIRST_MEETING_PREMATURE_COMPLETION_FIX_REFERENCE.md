@@ -102,8 +102,8 @@ never broaden the target set or fuzzy-match rows.
 
 ## Status
 
-Source guard and focused regression coverage are complete and verified; source
-commit, live backup, exact data repair, and deployment verification remain.
+Source guard, exact data repair, and deployment verification are complete.
+The 30-minute cooldown and unrelated projections remain unchanged.
 
 ## Verification So Far
 
@@ -126,7 +126,7 @@ commit, live backup, exact data repair, and deployment verification remain.
 - The live 17:30 HK activity is an unmemorialized first-meeting activity at
   `09:30 UTC`; the separate festival activity starts at `10:00 UTC` and is not
   a first meeting.
-- No live row has been changed yet. App stop and backup are the next actions.
+- This preflight was read-only; the subsequent repair is recorded below.
 
 ## Repair Script
 
@@ -141,8 +141,7 @@ commit, live backup, exact data repair, and deployment verification remain.
 - Verified dump: `pre-first-meeting-premature-completion-20260830-1517.dump`
   (PostgreSQL custom format, 640 TOC entries).
 - SHA-256: `995A3448EB573137BAD80EC74C1A4B2395EF2EEB7CB1429A4AE0921F19B35B22`.
-- The exact repair transaction is the next live action; no row has been
-  changed yet.
+- The exact repair transaction and postcheck are recorded below.
 
 ## Repair Result (2026-08-30)
 
@@ -160,3 +159,26 @@ commit, live backup, exact data repair, and deployment verification remain.
   293, story arcs 4, story beats 31, story events 30, memory items 1444,
   character goals 20, pending follow-ups 53. (Schedule counts include normal
   runtime-generated days before the app was stopped.)
+
+## Deployment Verification (2026-08-30)
+
+- Built `yuralume-local/app:custom` from source commit `173b66c`; image digest
+  was `sha256:535a0dc518a49b31a7b7bd56e61eb701abbbd5e16aa31e92e24510692a503706`.
+- The existing `migrate` service exited 0 with Alembic at
+  `u2c6m8p10046 (head)`; no schema migration was introduced by this repair.
+- Only `app` was recreated. PostgreSQL, storage, WhatsApp sidecar, and their
+  volumes were retained. All Compose services are healthy and `/health`
+  returns `status: ok`; runtime version reports commit `173b66c`.
+- The first natural scheduler tick after restart completed successfully. It
+  did not create a first-meeting event or increment the repaired beat's
+  attempt count; the beat remains `pending` before 17:30 HK.
+- Active-story API returns the target arc with the pending first-meeting beat.
+- An unrelated existing proactive intention-judge crash was observed in the
+  same tick's logs; the scheduler contained it and completed the tick. It is
+  outside this repair's approved scope and is recorded as a separate follow-up.
+
+## Final Status
+
+Complete. Source commits: `81312f3` (guard), `f36c796` (repair script),
+`173b66c` (live repair record). Backup:
+`pre-first-meeting-premature-completion-20260830-1517.dump`.

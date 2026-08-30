@@ -5,6 +5,31 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-30 - Prevent premature first-meeting story completion
+
+- Status: completed
+- Type: approved local behavior repair and exact live-data correction
+- Git result: guard committed as `81312f3`; repair transaction/script and
+  deployment records committed through `173b66c` on `local/customizations`.
+- Fix: first-meeting beats now require player presence and the exact live
+  schedule start; unattended simulation, raw status shortcuts, and memorialized
+  schedule rows cannot complete the meeting. The real-message 30-minute
+  proactive cooldown is unchanged.
+- Data repair: removed only the known false autonomous realization artifacts,
+  restored the affected arc/beat to active/pending, and preserved the separate
+  pre-meeting and festival activities plus unrelated projections.
+- Backup: `pre-first-meeting-premature-completion-20260830-1517.dump` (verified
+  PostgreSQL custom format; SHA-256 is recorded in the scoped reference).
+- Deployment: built the local app image, ran the existing migrate service
+  successfully, and recreated only `app`; PostgreSQL, storage, WhatsApp
+  sidecar, and volumes were retained.
+- Verification: all Compose services healthy; `/health` returned `status: ok`;
+  Alembic remained at `u2c6m8p10046 (head)`; active-story API shows the pending
+  first-meeting beat; the first natural post-restart tick completed without
+  simulating that meeting.
+- Follow-up: an unrelated proactive intention-judge crash was contained by the
+  scheduler during the verification tick and remains outside this repair.
+
 ### 2026-08-30 - Restore proactive audit recording after image-guard merge
 
 - Status: completed
