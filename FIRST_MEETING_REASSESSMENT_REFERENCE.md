@@ -99,6 +99,28 @@ completion writes the existing StoryEvent and beat fields through established
 services. Existing `memorialized=true, has_memory=false` rows remain readable
 and become eligible only when they are the unique linked first-meeting anchor.
 
+## Post-Deployment Mapping Repair
+
+The first live reassessment returned `anchor_error` with `matches=0`.
+Read-only database inspection confirmed that the pending beat and its
+2026-08-30 17:30 Hong Kong activity share `REVIEW-MEET-20260830`, that the
+activity is `is_first_meeting=true`, `memorialized=true`, and
+`has_memory=false`, and that its exact start time has passed. The data is
+valid.
+
+The defect is in `sa_schedule_mapping.py`: `_row_to_activity()` omits both
+`commitment_key` and `is_first_meeting` when it reconstructs a domain activity,
+so the exact-anchor filter receives `None` / `False`. The symmetric writer
+`_activity_to_row()` also omits these values, so later schedule saves could
+erase them from otherwise valid rows.
+
+The repair must restore both fields in both directions, use tolerant reads for
+legacy rows, and add a persistence round-trip regression test. It must not
+change any live schedule row, beat, memory, promise, goal, or cooldown. No
+migration is required. After verification, rebuild only `app`, run the normal
+`migrate` gate, recreate only `app`, and repeat the read-only anchor inspection
+plus health checks.
+
 ## Implementation Decision
 
 The manual path must use a cross-channel recent-message window. The existing
@@ -142,6 +164,12 @@ and `skip_beat` are reported as pending and never mutate the arc.
 6. [x] Run focused backend/frontend tests and record results.
 7. [x] Commit the verified source change with a narrow `local:` commit.
 8. [x] Create a backup, deploy, verify runtime health, and record deployment.
+9. [x] Diagnose the post-deployment anchor error with read-only source, log,
+       and database inspection.
+10. [x] Restore schedule commitment identity in ORM mapping and add regression
+        coverage.
+11. [ ] Verify, commit, back up, deploy app-only, and retry the read-only
+        anchor inspection.
 
 ## Current Facts
 
@@ -149,13 +177,15 @@ and `skip_beat` are reported as pending and never mutate the arc.
 - Its commitment key is `REVIEW-MEET-20260830`; the linked schedule start is
   17:30 Hong Kong time.
 - The activity is `memorialized=true`, `has_memory=false`; app logs report
-  zero valid first-meeting anchors during attended post-turn attempts.
+  zero valid first-meeting anchors during reassessment because the deployed
+  schedule ORM mapper drops its commitment identity on read.
 - The source worktree was clean immediately before this reference was added.
 
 ## Checkpoint
 
-- Current implementation step: source implementation, focused verification,
-  backup, app-only deployment, and runtime verification are complete.
+- Current implementation step: deployed reassessment control is under a
+  narrow schedule-ORM mapping repair; source fix and focused verification are
+  complete, with no live-data correction required.
 - Last verified source commit: `ae7259e local: add story beat reassessment controls`.
 - Deployment backup: `pre-story-beat-reassessment-20260830-233223.dump`,
   PostgreSQL custom format verified by `pg_restore --list`, SHA-256
@@ -173,6 +203,9 @@ and `skip_beat` are reported as pending and never mutate the arc.
 - Test stability note: the unrelated commitment reconciliation fixture now
   injects its declared 2026-08-28 clock instead of consulting the wall clock;
   its six focused tests pass and no product behavior changed.
+- Mapping repair verification: 87 focused schedule-mapping, commitment,
+  first-meeting, recheck, reassessment, service, and route tests passed;
+  source compilation and `git diff --check` passed.
 - Deployment: built only `yuralume-local/app:custom` from source commit
   `ae7259e`, ran the existing `migrate` service successfully, and recreated
   only `app`. Image ID is
@@ -185,5 +218,6 @@ and `skip_beat` are reported as pending and never mutate the arc.
   `ERROR`, or `CRITICAL` entry. Existing external RSS fetch warnings are
   unrelated and fail soft.
 - Next action: use the deployed Story Arc panel's reassessment control when an
-  eligible pending beat needs an operator-reviewed decision.
+  eligible pending beat needs an operator-reviewed decision, after the mapping
+  repair is committed and deployed through a fresh backup and app-only restart.
 - Blocked reason: none.

@@ -31,6 +31,7 @@ UTC = timezone.utc
 
 _DAY = date(2026, 4, 18)
 _BEAT_ID = "beat-silver-ring"
+_COMMITMENT_KEY = "commitment-silver-ring"
 
 
 def _slot() -> ScheduleActivity:
@@ -40,14 +41,21 @@ def _slot() -> ScheduleActivity:
         description="後山林道那場戲的時段",
         category="story",
         source_beat_id=_BEAT_ID,
+        commitment_key=_COMMITMENT_KEY,
+        is_first_meeting=True,
     )
 
 
-def test_persistence_round_trip_keeps_the_lineage() -> None:
+def test_persistence_round_trip_keeps_lineage_and_commitment_identity() -> None:
     row = _activity_to_row(_slot(), schedule_id="s1", position=0)
 
     assert row.source_beat_id == _BEAT_ID
-    assert _row_to_activity(row).source_beat_id == _BEAT_ID
+    assert row.commitment_key == _COMMITMENT_KEY
+    assert row.is_first_meeting is True
+    restored = _row_to_activity(row)
+    assert restored.source_beat_id == _BEAT_ID
+    assert restored.commitment_key == _COMMITMENT_KEY
+    assert restored.is_first_meeting is True
 
 
 def test_a_legacy_row_without_the_column_reads_as_ordinary() -> None:
@@ -57,6 +65,17 @@ def test_a_legacy_row_without_the_column_reads_as_ordinary() -> None:
     del row.source_beat_id
 
     assert _row_to_activity(row).source_beat_id is None
+
+
+def test_a_legacy_row_without_commitment_fields_reads_without_identity() -> None:
+    row = _activity_to_row(_slot(), schedule_id="s1", position=0)
+    del row.commitment_key
+    del row.is_first_meeting
+
+    restored = _row_to_activity(row)
+
+    assert restored.commitment_key is None
+    assert restored.is_first_meeting is False
 
 
 def test_turn_snapshot_round_trip_keeps_the_lineage() -> None:

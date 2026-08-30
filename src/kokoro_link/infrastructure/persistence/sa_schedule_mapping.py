@@ -74,6 +74,8 @@ def _activity_to_row(
             if activity.meeting_affordance is not None else None
         ),
         source_beat_id=activity.source_beat_id,
+        commitment_key=activity.commitment_key,
+        is_first_meeting=bool(activity.is_first_meeting),
         memorialized=bool(activity.memorialized),
         has_memory=bool(activity.has_memory),
         companion_names_json=json.dumps(
@@ -137,6 +139,8 @@ def _row_to_activity(row: ScheduleActivityRow) -> ScheduleActivity:
         # Rows written before the KB2 migration have no lineage recorded;
         # absence reads as "an ordinary activity", the same as NULL.
         source_beat_id=getattr(row, "source_beat_id", None),
+        commitment_key=getattr(row, "commitment_key", None),
+        is_first_meeting=bool(getattr(row, "is_first_meeting", False)),
     )
 
 
