@@ -127,3 +127,9 @@ commit, live backup, exact data repair, and deployment verification remain.
   `09:30 UTC`; the separate festival activity starts at `10:00 UTC` and is not
   a first meeting.
 - No live row has been changed yet. App stop and backup are the next actions.
+
+## Repair Script
+
+- `tools/first_meeting_premature_completion_repair_live.sql` contains the
+  exact-ID `SERIALIZABLE` transaction and pre/postconditions approved above.
+- The script is committed with the source checkpoint before any live write.
