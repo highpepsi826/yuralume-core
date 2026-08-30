@@ -66,6 +66,18 @@ class StoryBeatSceneService:
         beat = arc.find_beat(beat_id)
         if beat is None or beat.status != "pending":
             return None
+        if beat.is_first_meeting:
+            # The explicit simulate route may play ordinary central beats,
+            # but a genuine first meeting is never a character-only scene.
+            # Leave it for an attended interaction instead of spending a
+            # writer call that can only produce a false memory.
+            _LOGGER.info(
+                "first-meeting beat waits for an attended interaction "
+                "beat=%s character=%s",
+                beat_id,
+                character.id,
+            )
+            return None
 
         today = await self._today_for_character(character, now)
         language = await self._resolve_operator_language(character)

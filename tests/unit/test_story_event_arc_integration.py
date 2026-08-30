@@ -51,6 +51,10 @@ from kokoro_link.domain.entities.story_arc import (
     TENSION_SETUP,
 )
 from kokoro_link.domain.entities.story_seed import StorySeed
+from kokoro_link.domain.entities.schedule import (
+    DailySchedule,
+    ScheduleActivity,
+)
 from kokoro_link.domain.value_objects.character_state import CharacterState
 from kokoro_link.domain.value_objects.memory_kind import MemoryKind
 from kokoro_link.infrastructure.repositories.in_memory_stories import (
@@ -59,6 +63,9 @@ from kokoro_link.infrastructure.repositories.in_memory_stories import (
 )
 from kokoro_link.infrastructure.repositories.in_memory_story_arcs import (
     InMemoryStoryArcRepository,
+)
+from kokoro_link.infrastructure.repositories.in_memory_schedules import (
+    InMemoryScheduleRepository,
 )
 from kokoro_link.infrastructure.memory.in_memory import InMemoryMemoryRepository
 
@@ -88,10 +95,14 @@ class _FixedBeatPlanner(StoryArcPlannerPort):
         *,
         tension: str = TENSION_SETUP,
         operator_position: str | None = None,
+        commitment_key: str | None = None,
+        is_first_meeting: bool = False,
     ) -> None:
         self._today = today
         self._tension = tension
         self._operator_position = operator_position
+        self._commitment_key = commitment_key
+        self._is_first_meeting = is_first_meeting
 
     async def plan_arc(
         self,
@@ -117,6 +128,8 @@ class _FixedBeatPlanner(StoryArcPlannerPort):
             title="today beat", summary="今天要發生的事",
             tension=self._tension,
             operator_position=self._operator_position,
+            commitment_key=self._commitment_key,
+            is_first_meeting=self._is_first_meeting,
         )
         return arc.with_beats([beat])
 
@@ -162,6 +175,9 @@ def _services(
     rechecker: StoryBeatRecheckerPort | None = None,
     completion_writer: ArcCompletionMemoryWriterPort | None = None,
     operator_position: str | None = None,
+    commitment_key: str | None = None,
+    is_first_meeting: bool = False,
+    schedule_repository: InMemoryScheduleRepository | None = None,
 ):
     seed_repo = InMemoryStorySeedRepository()
     event_repo = InMemoryStoryEventRepository()
@@ -171,6 +187,8 @@ def _services(
         repository=arc_repo,
         planner=_FixedBeatPlanner(
             today, tension=tension, operator_position=operator_position,
+            commitment_key=commitment_key,
+            is_first_meeting=is_first_meeting,
         ),
         beat_rechecker=rechecker,
     )
@@ -187,6 +205,7 @@ def _services(
         local_tz=timezone.utc,
         arc_service=arc_service,
         arc_completion_memory_writer=completion_writer,
+        schedule_repository=schedule_repository,
     )
     return (
         event_service,
@@ -357,6 +376,113 @@ async def test_record_arc_beat_realization_rejects_future_central_beat() -> None
     assert pending.status == BEAT_PENDING
     assert pending.realized_event_id is None
     assert await memory_repo.query(character.id) == []
+
+
+@pytest.mark.asyncio
+async def test_first_meeting_realization_requires_player_and_exact_start() -> None:
+    """A same-day pre-event chat cannot complete the first meeting.
+
+    The flag is deliberately sufficient to protect a legacy beat with an
+    unjudged player position, but its time comes only from the exact matching
+    first-meeting schedule activity, never from the beat's prose.
+    """
+    today = date(2026, 8, 30)
+    before_start = datetime(2026, 8, 30, 17, 29, tzinfo=timezone.utc)
+    at_start = datetime(2026, 8, 30, 17, 30, tzinfo=timezone.utc)
+    key = "meeting-20260830"
+    schedule_repo = InMemoryScheduleRepository()
+    event_service, arc_service, arc_repo, _, event_repo, _, memory_repo = (
+        _services(
+            today,
+            commitment_key=key,
+            is_first_meeting=True,
+            schedule_repository=schedule_repo,
+        )
+    )
+    character = _character()
+    arc = await arc_service.start_new_arc(character, today=today)
+    beat = arc.beats[0]
+
+    # No exact schedule anchor is fail-closed.
+    assert await event_service.record_arc_beat_realization(
+        character,
+        beat_id=beat.id,
+        narrative="我們在入口見面了。",
+        now=before_start,
+        player_present=True,
+    ) is None
+
+    # A historical/memorialized activity is not a live meeting anchor.
+    memorialized_activity = ScheduleActivity.create(
+        start_at=at_start,
+        end_at=at_start + timedelta(minutes=30),
+        description="已封存的舊見面紀錄",
+        category="meeting",
+        commitment_key=key,
+        is_first_meeting=True,
+        memorialized=True,
+    )
+    await schedule_repo.save(DailySchedule.create(
+        character_id=character.id,
+        date_=today,
+        activities=(memorialized_activity,),
+    ))
+    assert await event_service.record_arc_beat_realization(
+        character,
+        beat_id=beat.id,
+        narrative="我們在入口見面了。",
+        now=at_start,
+        player_present=True,
+    ) is None
+
+    activity = ScheduleActivity.create(
+        start_at=at_start,
+        end_at=at_start + timedelta(minutes=30),
+        description="和玩家見面並交付卡片",
+        category="meeting",
+        commitment_key=key,
+        is_first_meeting=True,
+    )
+    await schedule_repo.save(DailySchedule.create(
+        character_id=character.id,
+        date_=today,
+        activities=(activity,),
+    ))
+
+    # The player is present in chat, but the event has not started yet.
+    assert await event_service.record_arc_beat_realization(
+        character,
+        beat_id=beat.id,
+        narrative="我們在入口見面了。",
+        now=before_start,
+        player_present=True,
+    ) is None
+    # An autonomous path remains forbidden even after the start time.
+    assert await event_service.record_arc_beat_realization(
+        character,
+        beat_id=beat.id,
+        narrative="我們在入口見面了。",
+        now=at_start,
+        player_present=False,
+    ) is None
+
+    event = await event_service.record_arc_beat_realization(
+        character,
+        beat_id=beat.id,
+        narrative="我們在入口見面了。",
+        now=at_start,
+        player_present=True,
+    )
+
+    assert event is not None
+    assert event.arc_beat_id == beat.id
+    updated = await arc_repo.get(arc.id)
+    assert updated is not None
+    realized = updated.find_beat(beat.id)
+    assert realized is not None
+    assert realized.status == BEAT_REALIZED
+    assert len(await event_repo.get_for_day(character.id, today.isoformat())) == 1
+    assert len(await memory_repo.query(character.id)) == 2
 
 
 @pytest.mark.asyncio
@@ -563,6 +689,36 @@ async def test_unattended_ensure_today_leaves_central_beat_waiting() -> None:
     assert waiting.play_attempt_count == 0
     assert waiting.last_play_attempt_source is None
     assert waiting.realized_event_id is None
+
+
+@pytest.mark.asyncio
+async def test_unattended_ensure_today_leaves_unjudged_first_meeting_waiting() -> None:
+    """The first-meeting flag protects legacy beats without OP framing."""
+    today = date(2026, 5, 10)
+    now = datetime(2026, 5, 10, 10, 0, tzinfo=timezone.utc)
+    event_service, arc_service, arc_repo, _, event_repo, _, _ = _services(
+        today,
+        commitment_key="first-meeting",
+        is_first_meeting=True,
+    )
+    character = _character()
+    arc = await arc_service.start_new_arc(character, today=today)
+    beat = arc.beats[0]
+
+    report = await event_service.ensure_today(
+        character,
+        now=now,
+        unattended=True,
+    )
+
+    assert report.events == ()
+    assert await event_repo.get_for_day(character.id, today.isoformat()) == []
+    updated = await arc_repo.get(arc.id)
+    assert updated is not None
+    waiting = updated.find_beat(beat.id)
+    assert waiting is not None
+    assert waiting.status == BEAT_PENDING
+    assert waiting.play_attempt_count == 0
 
 
 @pytest.mark.asyncio

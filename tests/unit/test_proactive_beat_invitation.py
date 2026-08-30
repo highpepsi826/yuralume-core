@@ -119,6 +119,7 @@ def _beat(
     tension: str = TENSION_SETUP,
     operator_position: str | None = None,
     operator_note: str | None = None,
+    is_first_meeting: bool = False,
     status: str | None = None,
 ) -> StoryArcBeat:
     beat = StoryArcBeat.create(
@@ -130,6 +131,7 @@ def _beat(
         tension=tension,
         operator_position=operator_position,
         operator_note=operator_note,
+        is_first_meeting=is_first_meeting,
     )
     return beat if status is None else beat.with_status(status)
 
@@ -663,6 +665,22 @@ async def test_unjudged_and_non_central_beats_never_wait() -> None:
     _, decider = await _evaluate_with(_arc(unjudged, absent, present))
 
     assert decider.contexts[0].beat_awaiting_player is None
+
+
+async def test_due_first_meeting_waits_even_when_its_position_is_unjudged() -> None:
+    """The proactive invite sees a first meeting as player-required."""
+    waiting = _beat(
+        sequence=0,
+        scheduled=TODAY,
+        title="第一次在入口見面",
+        summary="把準備好的卡片交給你。",
+        is_first_meeting=True,
+    )
+
+    _, decider = await _evaluate_with(_arc(waiting))
+
+    assert decider.contexts[0].beat_awaiting_player is not None
+    assert decider.contexts[0].beat_awaiting_player.id == waiting.id
 
 
 async def test_no_arc_service_leaves_the_field_empty() -> None:

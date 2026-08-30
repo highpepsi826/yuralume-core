@@ -1565,6 +1565,18 @@ the everyday gacha never draws
         arc = await self._find_arc_by_beat(beat_id)
         if arc is None:
             return None
+        target = arc.find_beat(beat_id)
+        if target is None:
+            return None
+        if target.is_first_meeting and not event_id:
+            # A first meeting is canon only through the event-service path.
+            # Requiring its persisted event link prevents low-level callers
+            # from completing the commitment as a bookkeeping shortcut.
+            _LOGGER.warning(
+                "first-meeting realize without event ignored beat=%s",
+                beat_id,
+            )
+            return None
         new_beats: list[StoryArcBeat] = []
         for beat in arc.beats:
             if beat.id == beat_id:
@@ -1635,6 +1647,22 @@ the everyday gacha never draws
                 changed = True
 
             elif action == "mark_realized":
+                target = next(
+                    (beat for beat in beats if beat.id == adj.beat_id),
+                    None,
+                )
+                if target is not None and target.is_first_meeting:
+                    # First meetings have an exact live schedule anchor and
+                    # require an attended StoryEvent.  This low-level
+                    # adjustment has neither, so it must not bypass the
+                    # event-service guard.
+                    _LOGGER.warning(
+                        "first-meeting raw mark_realized ignored "
+                        "character=%s beat=%s",
+                        character_id,
+                        target.id,
+                    )
+                    continue
                 new_beats, did = _mark_realized(
                     beats, beat_id=adj.beat_id,
                 )
@@ -1853,7 +1881,7 @@ def _awaits_the_player(beat: StoryArcBeat) -> bool:
     player is essential" would freeze every existing arc's autonomous
     progress on the day this shipped.
     """
-    return beat.operator_position == OPERATOR_POSITION_CENTRAL
+    return beat.requires_player_presence
 
 
 def _all_terminal(beats: Iterable[StoryArcBeat]) -> bool:

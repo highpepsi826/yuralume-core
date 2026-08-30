@@ -44,6 +44,7 @@ from kokoro_link.application.services.studio_execution_lease import (
 )
 from kokoro_link.contracts.embedder import EmbedderPort
 from kokoro_link.contracts.memory import MemoryRepositoryPort
+from kokoro_link.contracts.schedule_repository import ScheduleRepositoryPort
 from kokoro_link.contracts.story import (
     SceneContext,
     StoryEventExpanderPort,
@@ -142,6 +143,7 @@ class StoryEventService:
         operator_profile_service=None,  # noqa: ANN001 - optional; resolves primary_language
         execution_lease: StudioExecutionLease | None = None,
         lease_heartbeat_interval_seconds: float | None = None,
+        schedule_repository: ScheduleRepositoryPort | None = None,
     ) -> None:
         self._gacha = gacha
         self._expander = expander
@@ -153,6 +155,10 @@ class StoryEventService:
         self._arc_service = arc_service
         self._arc_completion_memory_writer = arc_completion_memory_writer
         self._operator_profile_service = operator_profile_service
+        # First-meeting beats are allowed to become canon only after the
+        # exact live schedule activity starts. Optional keeps old in-memory
+        # callers compatible; production wiring supplies the SQL repository.
+        self._schedule_repository = schedule_repository
         # Cross-replica claim on the day's roll. ``None`` → the historical
         # single-process behaviour (self-host, lease-less test rigs).
         self._execution_lease = execution_lease
@@ -272,7 +278,7 @@ class StoryEventService:
                 _arc, beat = due
                 if (
                     unattended
-                    and beat.operator_position == OPERATOR_POSITION_CENTRAL
+                    and beat.requires_player_presence
                 ):
                     # The scene is about the player and has no content
                     # without them, and nobody is here to receive it. Do
@@ -445,6 +451,23 @@ class StoryEventService:
         if beat is None or beat.status != "pending":
             return None
         today = await self._today_for_character(character, now)
+        if beat.is_first_meeting:
+            # A first meeting is a player-present event, never an unattended
+            # simulation. The exact schedule start is the only accepted time
+            # anchor; do not infer one from the beat prose or civil date.
+            if not player_present:
+                _LOGGER.info(
+                    "first-meeting beat realization rejected without "
+                    "player present beat=%s",
+                    beat_id,
+                )
+                return None
+            if not await self._first_meeting_start_has_passed(
+                character_id=character.id,
+                beat=beat,
+                now=now,
+            ):
+                return None
         if (
             beat.operator_position == OPERATOR_POSITION_CENTRAL
             and beat.scheduled_date > today
@@ -512,6 +535,85 @@ class StoryEventService:
                 "arc beat realize_beat failed beat=%s", beat_id,
             )
         return event
+
+    async def _first_meeting_start_has_passed(
+        self,
+        *,
+        character_id: str,
+        beat: StoryArcBeat,
+        now: datetime | None,
+    ) -> bool:
+        """Check the exact linked schedule start for a first meeting.
+
+        A missing repository, key, or unique live activity is a fail-closed
+        result. This prevents legacy prose/date-only guesses from turning a
+        first-meeting promise into canon.
+        """
+        key = (beat.commitment_key or "").strip()
+        repository = self._schedule_repository
+        if not key or repository is None:
+            _LOGGER.warning(
+                "first-meeting beat has no exact schedule anchor; keeping "
+                "pending character=%s beat=%s key=%r",
+                character_id,
+                beat.id,
+                key or None,
+            )
+            return False
+        try:
+            schedule = await repository.get(
+                character_id,
+                beat.scheduled_date,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "first-meeting schedule lookup failed character=%s beat=%s",
+                character_id,
+                beat.id,
+            )
+            return False
+        if schedule is None:
+            _LOGGER.warning(
+                "first-meeting schedule anchor is missing; keeping pending "
+                "character=%s beat=%s date=%s",
+                character_id,
+                beat.id,
+                beat.scheduled_date,
+            )
+            return False
+        candidates = [
+            activity
+            for activity in schedule.activities
+            if activity.commitment_key == key
+            and activity.is_first_meeting
+            and not activity.memorialized
+        ]
+        if len(candidates) != 1:
+            _LOGGER.warning(
+                "first-meeting schedule anchor is not unique; keeping "
+                "pending character=%s beat=%s matches=%d",
+                character_id,
+                beat.id,
+                len(candidates),
+            )
+            return False
+        start_at = candidates[0].start_at
+        if start_at.tzinfo is None:
+            start_at = start_at.replace(tzinfo=timezone.utc)
+        moment = now or datetime.now(timezone.utc)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        moment = moment.astimezone(timezone.utc)
+        if moment < start_at.astimezone(timezone.utc):
+            _LOGGER.info(
+                "first-meeting beat is before exact schedule start; keeping "
+                "pending beat=%s start=%s now=%s",
+                beat.id,
+                start_at,
+                moment,
+            )
+            return False
+        return True
 
     async def _build_and_persist_from_beat(
         self,

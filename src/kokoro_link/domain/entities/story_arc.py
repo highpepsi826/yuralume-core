@@ -575,6 +575,20 @@ class StoryArcBeat:
             ),
         )
 
+    @property
+    def requires_player_presence(self) -> bool:
+        """Whether an unattended scene must leave this beat waiting.
+
+        ``central`` is the authored scene framing. ``is_first_meeting`` is
+        the stronger commitment invariant: older or hand-edited rows may
+        carry the flag while their framing is still unjudged, but a first
+        meeting can never be completed by a background simulation.
+        """
+        return (
+            self.is_first_meeting
+            or self.operator_position == OPERATOR_POSITION_CENTRAL
+        )
+
 
 DEFAULT_ARC_TONE = "daily"
 """Tonal register surfaced to the expander; mirrors

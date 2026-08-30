@@ -3694,7 +3694,7 @@ def _beat_awaiting_the_player(
         for beat in arc.beats
         if beat.status == BEAT_PENDING
         and beat.scheduled_date <= today
-        and beat.operator_position == OPERATOR_POSITION_CENTRAL
+        and beat.requires_player_presence
     ]
     if not due:
         return None

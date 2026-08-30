@@ -4104,6 +4104,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         arc_completion_memory_writer=arc_completion_memory_writer,
         operator_profile_service=operator_profile_service,
         execution_lease=studio_execution_lease,
+        schedule_repository=schedule_repository,
     )
     story_beat_scene_service = StoryBeatSceneService(
         story_arc_service=story_arc_service,

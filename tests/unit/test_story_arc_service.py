@@ -589,6 +589,35 @@ async def test_realize_beat_sets_event_id_and_maybe_completes_arc() -> None:
     assert all(b.realized_event_id == f"event-{b.id}" for b in final.beats)
 
 
+@pytest.mark.asyncio
+async def test_realize_beat_requires_event_for_first_meeting() -> None:
+    svc, repo, _ = _service()
+    character = _character()
+    arc = await svc.start_new_arc(character, today=date(2026, 5, 1))
+    original = arc.beats[0]
+    first_meeting = StoryArcBeat.create(
+        arc_id=arc.id,
+        sequence=original.sequence,
+        scheduled_date=original.scheduled_date,
+        title=original.title,
+        summary=original.summary,
+        tension=original.tension,
+        commitment_key="first-meeting",
+        is_first_meeting=True,
+    )
+    await repo.save(arc.with_beats([first_meeting, *arc.beats[1:]]))
+
+    assert await svc.realize_beat(
+        beat_id=first_meeting.id,
+        event_id=None,
+    ) is None
+    updated = await repo.get(arc.id)
+    assert updated is not None
+    waiting = updated.find_beat(first_meeting.id)
+    assert waiting is not None
+    assert waiting.status == BEAT_PENDING
+
+
 # ---- apply_adjustments ------------------------------------------------
 
 
@@ -690,6 +719,41 @@ async def test_apply_adjustments_mark_realized_skips_events() -> None:
     assert realized.status == BEAT_REALIZED
     assert realized.realized_event_id is None
     assert realized.last_play_attempt_result == "realized"
+
+
+@pytest.mark.asyncio
+async def test_apply_adjustments_cannot_mark_first_meeting_realized_without_event() -> None:
+    """Only StoryEventService may canonize an attended first meeting."""
+    svc, repo, _ = _service()
+    character = _character()
+    arc = await svc.start_new_arc(character, today=date(2026, 5, 1))
+    original = arc.beats[0]
+    first_meeting = StoryArcBeat.create(
+        arc_id=arc.id,
+        sequence=original.sequence,
+        scheduled_date=original.scheduled_date,
+        title=original.title,
+        summary=original.summary,
+        tension=original.tension,
+        commitment_key="first-meeting",
+        is_first_meeting=True,
+    )
+    await repo.save(arc.with_beats([first_meeting, *arc.beats[1:]]))
+
+    result = await svc.apply_adjustments(
+        character_id=character.id,
+        adjustments=[
+            ArcAdjustment(action="mark_realized", beat_id=first_meeting.id),
+        ],
+    )
+
+    assert result is None
+    updated = await repo.get(arc.id)
+    assert updated is not None
+    waiting = updated.find_beat(first_meeting.id)
+    assert waiting is not None
+    assert waiting.status == BEAT_PENDING
+    assert waiting.realized_event_id is None
 
 
 @pytest.mark.asyncio

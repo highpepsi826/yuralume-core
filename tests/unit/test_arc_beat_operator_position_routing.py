@@ -215,7 +215,11 @@ class _BothPaths:
             local_tz=UTC,
         )
 
-    async def stage(self, *positions: str | None) -> StoryArc:
+    async def stage(
+        self,
+        *positions: str | None,
+        first_meeting: bool = False,
+    ) -> StoryArc:
         """One arc, one beat per position, all due today, in order."""
         arc = StoryArc.create(
             character_id=self.character.id,
@@ -234,6 +238,7 @@ class _BothPaths:
                 summary=f"第 {index} 顆的內容。",
                 tension=TENSION_SETUP,
                 operator_position=position,
+                is_first_meeting=first_meeting and index == 0,
             )
             for index, position in enumerate(positions)
         ])
@@ -418,6 +423,49 @@ async def test_unattended_walks_past_central_even_with_no_retry_policy(
 
     assert due is not None
     assert due[1].id == arc.beats[1].id
+
+
+@pytest.mark.asyncio
+async def test_first_meeting_flag_is_passed_over_when_position_is_unjudged(
+    character: Character,
+) -> None:
+    """The identity flag is a player-presence guard of its own.
+
+    Commitment reconciliation can set ``is_first_meeting`` on a legacy beat
+    whose ``operator_position`` is still NULL. That beat must not fall into
+    the old "unjudged is safe to simulate" branch.
+    """
+    fx = await _both_paths(character)
+    arc = await fx.stage(None, first_meeting=True)
+    first_meeting = arc.beats[0]
+
+    scan = await fx.checker.scan(character, now=NOW)
+
+    assert scan.attempted_beat_id is None
+    assert scan.realized_event_id is None
+    assert fx.writer.played_beat_ids == []
+    waiting = await fx.reload(first_meeting.id)
+    assert waiting.status == BEAT_PENDING
+    assert waiting.play_attempt_count == 0
+
+
+@pytest.mark.asyncio
+async def test_explicit_simulate_rejects_first_meeting_before_writer(
+    character: Character,
+) -> None:
+    """An operator cannot accidentally create a first meeting off-screen."""
+    fx = await _both_paths(character)
+    arc = await fx.stage(None, first_meeting=True)
+
+    event = await fx.checker._scene_service.play_beat(  # noqa: SLF001
+        character,
+        beat_id=arc.beats[0].id,
+        now=NOW,
+    )
+
+    assert event is None
+    assert fx.writer.played_beat_ids == []
+    assert (await fx.reload(arc.beats[0].id)).status == BEAT_PENDING
 
 
 @pytest.mark.asyncio
