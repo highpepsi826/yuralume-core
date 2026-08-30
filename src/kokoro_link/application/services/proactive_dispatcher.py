@@ -173,6 +173,10 @@ from kokoro_link.application.services.memory_disclosure_service import (
     MemoryDisclosureService,
     select_private_candidates,
 )
+from kokoro_link.application.services.image_intent import (
+    IMAGE_TOOL_NAME,
+    is_image_commitment,
+)
 from kokoro_link.infrastructure.prompt.outcome_claim_honesty import (
     CORRECTION_ZERO_CALL,
     render_honesty_correction,
@@ -1262,6 +1266,21 @@ class ProactiveDispatcher:
             decision=decision,
             conversation_id=tool_conversation_id,
         )
+        if image_commitment_requires_attachment and not any(
+            attachment.kind.casefold() == "image" for attachment in run.attachments
+        ):
+            _LOGGER.warning(
+                "proactive image commitment completed without a deliverable "
+                "attachment character=%s",
+                character.id,
+            )
+            decision = replace(
+                decision,
+                message=localized_fallback_text(
+                    "proactive.image_tool_generation_failed",
+                    operator_primary_language,
+                ),
+            )
         # HV2 — the last gate before anything reaches a player. The proactive
         # decider writes its message in the *same* JSON that requests the
         # tool, so the prose is composed before the tool has run and cannot
