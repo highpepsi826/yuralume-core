@@ -5,6 +5,29 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-30 - Restore proactive audit recording after image-guard merge
+
+- Status: completed
+- Type: approved local source hotfix and deployment
+- Git result: committed `5dc8672` on `local/customizations`.
+- Fix: restored the `image_intent` imports used by proactive dispatch and the
+  existing truthful fallback when an image commitment has no deliverable
+  attachment. The 30-minute real-message cooldown and all data were preserved.
+- Backup: `pre-proactive-audit-hotfix-20260830-140137.dump`, verified as a
+  PostgreSQL custom-format archive; SHA-256 recorded locally as
+  `9C7FE88EB531C83A5521B7EAA43C0C3F8DD773338F5D3580BED6FC6835940C38`.
+- Deployment: built `yuralume-local/app:custom` from `5dc8672`, ran the
+  existing `migrate` service successfully, and recreated only `app`.
+  PostgreSQL, storage, WhatsApp sidecar, and their volumes were retained.
+- Verification: all four Compose services healthy; `/health` returned
+  `status: ok`; Alembic remained `u2c6m8p10046 (head)`; the next normal
+  scheduler tick completed successfully and wrote a new proactive audit row
+  at `2026-08-30 14:09:47` HK with no image-guard exception.
+- Tests: image-tool suite 15 passed; proactive dispatcher/scheduler/tick suite
+  321 passed; source compilation and `git diff --check` passed.
+- Follow-up: monitor normal proactive evaluations; no data repair or policy
+  change was part of this deployment.
+
 ### 2026-08-30 - Deploy queued scheduled-promise admin controls
 
 - Status: completed

@@ -39,5 +39,20 @@ sent when the renderer fails.
 
 ## Status
 
-Source fix implemented and focused tests passed; approved for deployment on
-`local/customizations`.
+Source fix implemented, deployed, and verified on `local/customizations`.
+
+## Deployment Record
+
+- Commit: `5dc8672`
+- Backup: `pre-proactive-audit-hotfix-20260830-140137.dump` (custom format,
+  verified before deployment)
+- Image: `yuralume-local/app:custom`, running container/image digest matched
+- Migration: existing `migrate` service exited successfully; database stayed
+  at `u2c6m8p10046 (head)`
+- Runtime: only `app` was recreated; all support services and volumes retained;
+  `/health` returned `status: ok`
+- Natural tick: the first post-deploy scheduler tick completed successfully
+  and wrote a new `gate_blocked` proactive audit row at 14:09:47 HK; no
+  `is_image_commitment` exception appeared in its logs.
+- Tests: 15 image-tool tests and 321 proactive/scheduler/tick tests passed;
+  compilation and diff checks passed.
