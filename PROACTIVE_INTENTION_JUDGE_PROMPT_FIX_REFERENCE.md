@@ -40,8 +40,8 @@ reported as `intention judge raised` and prevents the judge's LLM call.
 
 ## Status
 
-Source fix and focused regression verification are complete; source commit,
-backup, and app-only deployment remain.
+Source fix and focused regression verification are complete; source commit
+`c574ddb` is recorded. Backup and app-only deployment remain.
 
 ## Verification So Far
 
@@ -50,3 +50,10 @@ backup, and app-only deployment remain.
 - `python -m compileall -q src`: passed.
 - `git diff --check`: passed.
 - No live data or database schema change is part of this fix.
+
+## Deployment Checkpoint
+
+- The running stack remains on the previous app image until the backup is
+  verified.
+- Next action: create a fresh PostgreSQL custom-format dump, then rebuild and
+  recreate only `app` with `c574ddb`.
