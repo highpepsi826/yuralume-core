@@ -1533,6 +1533,62 @@ the everyday gacha never draws
             return adjustment if updated is not None else None
         return adjustment
 
+    async def reassess_pending_beat(
+        self,
+        character: Character,
+        *,
+        beat_id: str,
+        today: date_type | None = None,
+    ) -> StoryBeatRecheckDecision | None:
+        """Return a manual, evidence-only proposal for one pending beat.
+
+        Unlike the retry path, this deliberately bypasses the repeated-attempt
+        threshold and never applies delay/skip mutations. The caller must
+        explicitly confirm a ``mark_realized`` proposal through
+        ``StoryEventService``.
+        """
+        if self._beat_rechecker is None:
+            return None
+        arc = await self._find_arc_by_beat(beat_id)
+        if arc is None or arc.character_id != character.id:
+            return None
+        beat = arc.find_beat(beat_id)
+        if beat is None or beat.status != BEAT_PENDING:
+            return None
+        recent_dialogue_summary = (
+            await self._summarize_recent_dialogue_for_reassessment(character)
+        )
+        if recent_dialogue_summary is None:
+            # A manual review must not let the rechecker infer a completed
+            # shared event when the cross-channel evidence window is
+            # unavailable.
+            return None
+        if not recent_dialogue_summary.strip():
+            return StoryBeatRecheckDecision(
+                action="keep_pending",
+                reason="no_recent_interaction_evidence",
+            )
+        context = StoryBeatRecheckContext(
+            character=character,
+            arc=arc,
+            beat=beat,
+            today=today or self._today(),
+            recent_dialogue_summary=recent_dialogue_summary,
+            operator_primary_language=await self._resolve_operator_language(
+                character,
+            ),
+            manual_reassessment=True,
+        )
+        try:
+            return await self._beat_rechecker.recheck(context)
+        except Exception:
+            _LOGGER.exception(
+                "manual story beat reassessment failed character=%s beat=%s",
+                character.id,
+                beat_id,
+            )
+            return None
+
     async def forward_beats(
         self,
         character_id: str,
@@ -1845,6 +1901,47 @@ the everyday gacha never draws
                 "arc dialogue summarise failed character=%s", character.id,
             )
             return ""
+
+    async def _summarize_recent_dialogue_for_reassessment(
+        self,
+        character: Character,
+    ) -> str | None:
+        """Summarize a bounded cross-channel window for manual review only."""
+        if (
+            self._conversation_repository is None
+            or self._dialogue_summarizer is None
+        ):
+            return None
+        try:
+            messages = await self._conversation_repository.recent_messages_for_character(
+                character.id,
+                limit=_DIALOGUE_CONTEXT_LIMIT,
+                exclude_tool_only=True,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "manual arc dialogue load failed character=%s", character.id,
+            )
+            return None
+        messages = sanitize_messages_for_tolerance(
+            messages,
+            content_tolerance=CONTENT_TOLERANCE_FRONTIER,
+        )
+        if not messages:
+            return ""
+        try:
+            return await self._dialogue_summarizer.summarize(
+                character=character,
+                messages=messages,
+                now=datetime.now(timezone.utc),
+                local_tz=self._local_tz or timezone.utc,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "manual arc dialogue summarise failed character=%s",
+                character.id,
+            )
+            return None
 
     async def _find_arc_by_beat(self, beat_id: str) -> StoryArc | None:
         return await self._repository.find_by_beat_id(beat_id)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -185,3 +186,14 @@ class UpdateStoryArcBeatRequest(BaseModel):
 
 class SimulateStoryArcBeatRequest(BaseModel):
     user_involvement_policy: str | None = None
+
+
+class StoryBeatReassessmentResponse(BaseModel):
+    status: Literal["completed", "pending", "anchor_error"]
+    reason: str
+    narrative: str | None = None
+    can_confirm: bool = False
+
+
+class ConfirmStoryBeatReassessmentRequest(BaseModel):
+    narrative: str = Field(min_length=1, max_length=1200)

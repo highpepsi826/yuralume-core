@@ -2,6 +2,7 @@
 
 任務：
 判斷一個 due story beat 已經被系統多次帶出後，最近互動是否真的完成了這個 beat，或應該延後、略過、繼續等待。
+${manual_reassessment_note}
 
 角色：
 - name: ${character_name}

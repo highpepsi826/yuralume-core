@@ -412,7 +412,8 @@ async def test_first_meeting_realization_requires_player_and_exact_start() -> No
         player_present=True,
     ) is None
 
-    # A historical/memorialized activity is not a live meeting anchor.
+    # An activity with an actual schedule memory is historical and is not a
+    # live meeting anchor. ``memorialized`` alone is only an idempotency latch.
     memorialized_activity = ScheduleActivity.create(
         start_at=at_start,
         end_at=at_start + timedelta(minutes=30),
@@ -421,6 +422,7 @@ async def test_first_meeting_realization_requires_player_and_exact_start() -> No
         commitment_key=key,
         is_first_meeting=True,
         memorialized=True,
+        has_memory=True,
     )
     await schedule_repo.save(DailySchedule.create(
         character_id=character.id,
@@ -483,6 +485,56 @@ async def test_first_meeting_realization_requires_player_and_exact_start() -> No
     assert realized.status == BEAT_REALIZED
     assert len(await event_repo.get_for_day(character.id, today.isoformat())) == 1
     assert len(await memory_repo.query(character.id)) == 2
+
+
+@pytest.mark.asyncio
+async def test_first_meeting_latch_only_activity_remains_exact_anchor() -> None:
+    """A schedule-processing latch must not strand an attended meeting."""
+    today = date(2026, 8, 30)
+    at_start = datetime(2026, 8, 30, 17, 30, tzinfo=timezone.utc)
+    key = "meeting-20260830"
+    schedule_repo = InMemoryScheduleRepository()
+    event_service, arc_service, arc_repo, _, event_repo, _, _ = _services(
+        today,
+        commitment_key=key,
+        is_first_meeting=True,
+        schedule_repository=schedule_repo,
+    )
+    character = _character()
+    arc = await arc_service.start_new_arc(character, today=today)
+    beat = arc.beats[0]
+    latch_only_activity = ScheduleActivity.create(
+        start_at=at_start,
+        end_at=at_start + timedelta(minutes=30),
+        description="和玩家見面並交付卡片",
+        category="meeting",
+        commitment_key=key,
+        is_first_meeting=True,
+        memorialized=True,
+        has_memory=False,
+    )
+    await schedule_repo.save(DailySchedule.create(
+        character_id=character.id,
+        date_=today,
+        activities=(latch_only_activity,),
+    ))
+
+    event = await event_service.record_arc_beat_realization(
+        character,
+        beat_id=beat.id,
+        narrative="我們在入口見面了。",
+        now=at_start,
+        player_present=True,
+    )
+
+    assert event is not None
+    assert event.arc_beat_id == beat.id
+    updated = await arc_repo.get(arc.id)
+    assert updated is not None
+    realized = updated.find_beat(beat.id)
+    assert realized is not None
+    assert realized.status == BEAT_REALIZED
+    assert len(await event_repo.get_for_day(character.id, today.isoformat())) == 1
 
 
 @pytest.mark.asyncio

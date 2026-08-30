@@ -120,6 +120,17 @@ class _BeatAsSeed:
 
 
 @dataclass(frozen=True, slots=True)
+class ArcBeatRealizationReadiness:
+    """Read-only eligibility result for an attended beat realization."""
+
+    allowed: bool
+    reason: str
+    arc: StoryArc | None = None
+    beat: StoryArcBeat | None = None
+    today: date_type | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class EnsureReport:
     events: tuple[StoryEvent, ...]
     newly_rolled: int
@@ -413,6 +424,18 @@ class StoryEventService:
     ) -> list[StoryEvent]:
         return await self._events.list_recent(character_id, limit=limit)
 
+    async def find_arc_beat_event(
+        self,
+        character_id: str,
+        beat_id: str,
+    ) -> StoryEvent | None:
+        """Find a recently persisted realization for idempotent confirmation."""
+        events = await self._events.list_recent(character_id, limit=100)
+        return next(
+            (event for event in events if event.arc_beat_id == beat_id),
+            None,
+        )
+
     async def record_arc_beat_realization(
         self,
         character: Character,
@@ -439,51 +462,23 @@ class StoryEventService:
         — a caller that forgets it falls back to the position
         projection rather than silently claiming the player was there.
         """
-        if self._arc_service is None:
-            return None
         final_narrative = (narrative or "").strip()
         if not final_narrative:
             return None
-        arc = await self._arc_service.get_arc_by_beat(beat_id)
-        if arc is None:
+        readiness = await self.check_arc_beat_realization(
+            character,
+            beat_id=beat_id,
+            now=now,
+            player_present=player_present,
+        )
+        if not readiness.allowed:
             return None
-        beat = arc.find_beat(beat_id)
-        if beat is None or beat.status != "pending":
-            return None
-        today = await self._today_for_character(character, now)
-        if beat.is_first_meeting:
-            # A first meeting is a player-present event, never an unattended
-            # simulation. The exact schedule start is the only accepted time
-            # anchor; do not infer one from the beat prose or civil date.
-            if not player_present:
-                _LOGGER.info(
-                    "first-meeting beat realization rejected without "
-                    "player present beat=%s",
-                    beat_id,
-                )
-                return None
-            if not await self._first_meeting_start_has_passed(
-                character_id=character.id,
-                beat=beat,
-                now=now,
-            ):
-                return None
-        if (
-            beat.operator_position == OPERATOR_POSITION_CENTRAL
-            and beat.scheduled_date > today
-        ):
-            # A player-central scene cannot become canon before its planned
-            # civil date.  The post-turn processor may still reschedule it
-            # explicitly, but it must not turn an unrelated chat into an
-            # early shared event.
-            _LOGGER.info(
-                "arc beat realization rejected before scheduled date "
-                "beat=%s scheduled=%s today=%s",
-                beat_id,
-                beat.scheduled_date,
-                today,
-            )
-            return None
+        assert readiness.arc is not None
+        assert readiness.beat is not None
+        assert readiness.today is not None
+        arc = readiness.arc
+        beat = readiness.beat
+        today = readiness.today
         existing = await self._events.get_for_day(
             character.id, today.isoformat(),
         )
@@ -536,6 +531,100 @@ class StoryEventService:
             )
         return event
 
+    async def check_arc_beat_realization(
+        self,
+        character: Character,
+        *,
+        beat_id: str,
+        now: datetime | None = None,
+        player_present: bool = False,
+    ) -> ArcBeatRealizationReadiness:
+        """Return whether an attended event may safely realize ``beat_id``.
+
+        This is intentionally read-only so the manual reassessment preview and
+        its later confirmation cannot disagree on the calendar/player-presence
+        rules. The confirmation path still re-runs this check to stay safe
+        against a concurrent beat or schedule change.
+        """
+        if self._arc_service is None:
+            return ArcBeatRealizationReadiness(
+                allowed=False,
+                reason="story_arc_unavailable",
+            )
+        arc = await self._arc_service.get_arc_by_beat(beat_id)
+        if arc is None:
+            return ArcBeatRealizationReadiness(
+                allowed=False,
+                reason="beat_not_found",
+            )
+        beat = arc.find_beat(beat_id)
+        if beat is None or beat.status != "pending":
+            return ArcBeatRealizationReadiness(
+                allowed=False,
+                reason="beat_not_pending",
+                arc=arc,
+                beat=beat,
+            )
+        today = await self._today_for_character(character, now)
+        if beat.is_first_meeting:
+            # A first meeting is a player-present event, never an unattended
+            # simulation. The exact schedule start is the only accepted time
+            # anchor; do not infer one from the beat prose or civil date.
+            if not player_present:
+                _LOGGER.info(
+                    "first-meeting beat realization rejected without "
+                    "player present beat=%s",
+                    beat_id,
+                )
+                return ArcBeatRealizationReadiness(
+                    allowed=False,
+                    reason="player_presence_required",
+                    arc=arc,
+                    beat=beat,
+                    today=today,
+                )
+            if not await self._first_meeting_start_has_passed(
+                character_id=character.id,
+                beat=beat,
+                now=now,
+            ):
+                return ArcBeatRealizationReadiness(
+                    allowed=False,
+                    reason="first_meeting_anchor_unavailable",
+                    arc=arc,
+                    beat=beat,
+                    today=today,
+                )
+        if (
+            beat.operator_position == OPERATOR_POSITION_CENTRAL
+            and beat.scheduled_date > today
+        ):
+            # A player-central scene cannot become canon before its planned
+            # civil date. The post-turn processor may still reschedule it
+            # explicitly, but it must not turn an unrelated chat into an
+            # early shared event.
+            _LOGGER.info(
+                "arc beat realization rejected before scheduled date "
+                "beat=%s scheduled=%s today=%s",
+                beat_id,
+                beat.scheduled_date,
+                today,
+            )
+            return ArcBeatRealizationReadiness(
+                allowed=False,
+                reason="before_scheduled_date",
+                arc=arc,
+                beat=beat,
+                today=today,
+            )
+        return ArcBeatRealizationReadiness(
+            allowed=True,
+            reason="ready",
+            arc=arc,
+            beat=beat,
+            today=today,
+        )
+
     async def _first_meeting_start_has_passed(
         self,
         *,
@@ -586,7 +675,11 @@ class StoryEventService:
             for activity in schedule.activities
             if activity.commitment_key == key
             and activity.is_first_meeting
-            and not activity.memorialized
+            # ``memorialized`` is an idempotency latch, not proof that a
+            # meeting became history. A latch-only row is still the exact
+            # schedule anchor for the attended StoryEvent; a real schedule
+            # memory is the historical state that must stay fail-closed.
+            and not activity.has_memory
         ]
         if len(candidates) != 1:
             _LOGGER.warning(

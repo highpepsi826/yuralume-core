@@ -1587,6 +1587,7 @@ export const messages: MessageSchema = {
         adding: 'Adding…',
         addBeat: '+ Add beat',
         addBeatCloud: '+ Add story moment',
+        reassess: 'Reassess',
       },
       fields: {
         title: 'Title',
@@ -1604,6 +1605,24 @@ export const messages: MessageSchema = {
       },
       past: {
         title: 'Past arcs ({count})',
+      },
+      reassessment: {
+        title: 'Reassess story event',
+        summary: 'Event summary',
+        confirm: 'Confirm as completed',
+        status: {
+          completed: 'Completed proposal',
+          pending: 'Keep pending',
+          anchor_error: 'Cannot reassess',
+        },
+        reasons: {
+          anchor: 'No usable meeting schedule anchor was found.',
+          beforeDate: 'This story moment is not due yet.',
+          presence: 'This story moment requires the player to be present.',
+          notPending: 'This story moment is no longer pending.',
+          noEvidence: 'There is not enough recent interaction evidence, so this stays pending.',
+          unavailable: 'A reassessment result is not available right now.',
+        },
       },
       newArc: {
         title: 'Start a new story arc',
@@ -1652,6 +1671,8 @@ export const messages: MessageSchema = {
         deleteBeatFailedCloud: 'Failed to delete the story moment',
         addBeatFailed: 'Failed to add beat',
         addBeatFailedCloud: 'Failed to add a story moment',
+        reassessFailed: 'Failed to reassess story event',
+        confirmReassessFailed: 'Failed to confirm story event',
       },
       tension: {
         setup: 'Opening',

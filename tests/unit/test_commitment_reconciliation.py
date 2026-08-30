@@ -219,7 +219,12 @@ async def test_pending_promise_reconciliation_updates_open_only() -> None:
 
     service = object.__new__(ChatService)
     service._pending_follow_up_repository = repo
-    service._clock = None
+
+    class _FixedClock:
+        def now(self) -> datetime:
+            return now
+
+    service._clock = _FixedClock()
     from kokoro_link.contracts.post_turn import MessagePromise
     await ChatService._reconcile_message_promises(
         service,

@@ -17,6 +17,9 @@ from fastapi.testclient import TestClient
 from kokoro_link.api.dependencies import get_container
 from kokoro_link.api.routes.story_arc import router
 from kokoro_link.application.services.story_arc_service import StoryArcService
+from kokoro_link.application.services.story_beat_reassessment_service import (
+    StoryBeatReassessment,
+)
 from kokoro_link.contracts.story_arc import StoryArcPlannerPort
 from kokoro_link.domain.entities.character import Character
 from kokoro_link.domain.entities.story_arc import (
@@ -84,6 +87,7 @@ class _StubContainer:
     )
     schedule_service: _StubScheduleService | None = None
     story_beat_scene_service: object | None = None
+    story_beat_reassessment_service: object | None = None
 
 
 class _StubBeatSceneService:
@@ -105,6 +109,26 @@ class _StubBeatSceneService:
             arc_beat_id=beat_id,
             narrative="我把這場戲完整演完了。",
             emotional_tone="content",
+        )
+
+
+class _StubReassessmentService:
+    def __init__(self, result: StoryBeatReassessment) -> None:
+        self.result = result
+        self.preview_calls: list[str] = []
+        self.confirm_calls: list[tuple[str, str]] = []
+
+    async def preview(self, character, *, beat_id):  # noqa: ANN001
+        self.preview_calls.append(beat_id)
+        return self.result
+
+    async def confirm(self, character, *, beat_id, narrative):  # noqa: ANN001
+        self.confirm_calls.append((beat_id, narrative))
+        return StoryEvent.create(
+            character_id=character.id,
+            date="2026-06-01",
+            arc_beat_id=beat_id,
+            narrative=narrative,
         )
 
 
@@ -339,6 +363,42 @@ def test_simulate_beat_503_when_scene_service_missing() -> None:
     res = client.post(f"/api/v1/story-arc-beats/{beat_id}/simulate", json={})
 
     assert res.status_code == 503
+
+
+def test_reassess_beat_returns_read_only_preview_and_confirms() -> None:
+    service = _service()
+    char = _make_character()
+    reassessment = _StubReassessmentService(StoryBeatReassessment(
+        status="completed",
+        reason="interaction_evidence_confirmed",
+        narrative="2026-06-01 我們在入口見面。",
+        can_confirm=True,
+    ))
+    client = _build_client(_StubContainer(
+        story_arc_service=service,
+        character_service=_StubCharacterService(char),
+        story_beat_reassessment_service=reassessment,
+    ))
+    started = client.post("/api/v1/characters/c1/story-arcs", json={}).json()
+    beat_id = started["beats"][0]["id"]
+
+    preview = client.post(f"/api/v1/story-arc-beats/{beat_id}/reassess")
+
+    assert preview.status_code == 200
+    assert preview.json()["status"] == "completed"
+    assert preview.json()["can_confirm"] is True
+    assert reassessment.preview_calls == [beat_id]
+
+    confirm = client.post(
+        f"/api/v1/story-arc-beats/{beat_id}/reassess/confirm",
+        json={"narrative": "2026-06-01 我們在入口見面。"},
+    )
+
+    assert confirm.status_code == 200
+    assert confirm.json()["arc_beat_id"] == beat_id
+    assert reassessment.confirm_calls == [
+        (beat_id, "2026-06-01 我們在入口見面。"),
+    ]
 
 
 @pytest.mark.asyncio

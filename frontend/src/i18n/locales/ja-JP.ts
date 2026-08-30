@@ -1585,6 +1585,7 @@ export const messages: MessageSchema = {
         adding: '追加中…',
         addBeat: '+ beat を追加',
         addBeatCloud: '+ ストーリーポイントを追加',
+        reassess: '再判定',
       },
       fields: {
         title: 'タイトル',
@@ -1602,6 +1603,24 @@ export const messages: MessageSchema = {
       },
       past: {
         title: '過去の主軸（{count}）',
+      },
+      reassessment: {
+        title: 'ストーリーイベントを再判定',
+        summary: 'イベント要約',
+        confirm: '完了として確定',
+        status: {
+          completed: '完了の提案',
+          pending: '保留を維持',
+          anchor_error: '再判定できません',
+        },
+        reasons: {
+          anchor: '利用できる待ち合わせ予定のアンカーが見つかりません。',
+          beforeDate: 'このストーリーポイントの日付にはまだ達していません。',
+          presence: 'このストーリーポイントにはプレイヤーの参加が必要です。',
+          notPending: 'このストーリーポイントは保留中ではありません。',
+          noEvidence: '最近のやり取りの根拠が十分でないため、保留のままにします。',
+          unavailable: '現在は再判定結果を取得できません。',
+        },
       },
       newArc: {
         title: '新しいストーリーアークを開始',
@@ -1650,6 +1669,8 @@ export const messages: MessageSchema = {
         deleteBeatFailedCloud: 'ストーリーポイントの削除に失敗しました',
         addBeatFailed: 'beat の追加に失敗しました',
         addBeatFailedCloud: 'ストーリーポイントの追加に失敗しました',
+        reassessFailed: 'ストーリーイベントの再判定に失敗しました',
+        confirmReassessFailed: 'ストーリーイベントの確定に失敗しました',
       },
       tension: {
         setup: '導入',

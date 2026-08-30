@@ -21,9 +21,11 @@ from kokoro_link.api.dependencies import (
 )
 from kokoro_link.application.dto.story_arc import (
     AddStoryArcBeatRequest,
+    ConfirmStoryBeatReassessmentRequest,
     RegenerateStoryArcRequest,
     SimulateStoryArcBeatRequest,
     StartStoryArcRequest,
+    StoryBeatReassessmentResponse,
     StoryArcResponse,
     UpdateStoryArcBeatRequest,
     UpdateStoryArcMetaRequest,
@@ -52,6 +54,16 @@ def _require_scene_service(container: ServiceContainer):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Story beat scene service not configured",
+        )
+    return service
+
+
+def _require_reassessment_service(container: ServiceContainer):
+    service = getattr(container, "story_beat_reassessment_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Story beat reassessment service not configured",
         )
     return service
 
@@ -339,6 +351,61 @@ async def simulate_story_arc_beat(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Beat not found, not pending, or scene could not be written",
+        )
+    return StoryEventResponse.from_domain(event)
+
+
+@router.post(
+    "/story-arc-beats/{beat_id}/reassess",
+    response_model=StoryBeatReassessmentResponse,
+)
+async def reassess_story_arc_beat(
+    beat_id: str,
+    container: ServiceContainer = Depends(get_container),
+    current_user_id: str = Depends(get_current_user_id),
+) -> StoryBeatReassessmentResponse:
+    """Read-only, operator-triggered evidence review for a pending beat."""
+    service = _require_reassessment_service(container)
+    character = await _ensure_beat_owner(
+        beat_id=beat_id,
+        current_user_id=current_user_id,
+        container=container,
+    )
+    result = await service.preview(character, beat_id=beat_id)
+    return StoryBeatReassessmentResponse(
+        status=result.status,
+        reason=result.reason,
+        narrative=result.narrative,
+        can_confirm=result.can_confirm,
+    )
+
+
+@router.post(
+    "/story-arc-beats/{beat_id}/reassess/confirm",
+    response_model=StoryEventResponse,
+)
+async def confirm_story_arc_beat_reassessment(
+    beat_id: str,
+    payload: ConfirmStoryBeatReassessmentRequest,
+    container: ServiceContainer = Depends(get_container),
+    current_user_id: str = Depends(get_current_user_id),
+) -> StoryEventResponse:
+    """Persist an explicit operator confirmation through StoryEventService."""
+    service = _require_reassessment_service(container)
+    character = await _ensure_beat_owner(
+        beat_id=beat_id,
+        current_user_id=current_user_id,
+        container=container,
+    )
+    event = await service.confirm(
+        character,
+        beat_id=beat_id,
+        narrative=payload.narrative,
+    )
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Beat cannot be confirmed in its current state",
         )
     return StoryEventResponse.from_domain(event)
 

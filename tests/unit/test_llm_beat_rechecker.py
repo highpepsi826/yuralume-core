@@ -142,3 +142,25 @@ async def test_recheck_prompt_carries_absolute_date_discipline() -> None:
     assert "- 今天＝2026-06-01（星期一）" in prompt
     assert "- 明天＝2026-06-02（星期二）" in prompt
     assert "時間紀律" in prompt
+
+
+@pytest.mark.asyncio
+async def test_manual_recheck_prompt_forbids_time_only_completion() -> None:
+    model = _ScriptedModel(
+        '{"action":"keep_pending","reason":"evidence is incomplete"}',
+    )
+    rechecker = LLMStoryBeatRechecker(model=model)
+    context = _context()
+    context = StoryBeatRecheckContext(
+        character=context.character,
+        arc=context.arc,
+        beat=context.beat,
+        today=context.today,
+        recent_dialogue_summary=context.recent_dialogue_summary,
+        manual_reassessment=True,
+    )
+
+    await rechecker.recheck(context)
+
+    assert "管理者手動要求重新判定" in model.prompts[0]
+    assert "不要因為行程時間已過就視為完成" in model.prompts[0]

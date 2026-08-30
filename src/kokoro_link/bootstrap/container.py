@@ -530,6 +530,9 @@ from kokoro_link.application.services.story_scene_timeout import (
     StorySceneTimeoutCloser,
 )
 from kokoro_link.application.services.story_event_service import StoryEventService
+from kokoro_link.application.services.story_beat_reassessment_service import (
+    StoryBeatReassessmentService,
+)
 from kokoro_link.application.services.story_gacha import StoryGachaService
 from kokoro_link.application.services.schedule_memorializer import ScheduleMemorializer
 from kokoro_link.application.services.schedule_service import ScheduleService
@@ -1155,6 +1158,7 @@ class ServiceContainer:
     story_seed_repository: StorySeedRepositoryPort | None = None
     story_event_repository: StoryEventRepositoryPort | None = None
     story_event_service: StoryEventService | None = None
+    story_beat_reassessment_service: StoryBeatReassessmentService | None = None
     story_beat_scene_service: StoryBeatSceneService | None = None
     story_arc_repository: StoryArcRepositoryPort | None = None
     story_scene_service: StorySceneService | None = None
@@ -4106,6 +4110,10 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         execution_lease=studio_execution_lease,
         schedule_repository=schedule_repository,
     )
+    story_beat_reassessment_service = StoryBeatReassessmentService(
+        story_arc_service=story_arc_service,
+        story_event_service=story_event_service,
+    )
     story_beat_scene_service = StoryBeatSceneService(
         story_arc_service=story_arc_service,
         story_event_service=story_event_service,
@@ -6853,6 +6861,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         story_seed_repository=story_seed_repository,
         story_event_repository=story_event_repository,
         story_event_service=story_event_service,
+        story_beat_reassessment_service=story_beat_reassessment_service,
         story_beat_scene_service=story_beat_scene_service,
         story_arc_repository=story_arc_repository,
         story_arc_service=story_arc_service,

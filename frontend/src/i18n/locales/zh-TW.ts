@@ -1586,6 +1586,7 @@ export const messages = {
         adding: '新增中…',
         addBeat: '+ 新增 beat',
         addBeatCloud: '+ 新增劇情節點',
+        reassess: '重新判定',
       },
       fields: {
         title: '標題',
@@ -1603,6 +1604,24 @@ export const messages = {
       },
       past: {
         title: '過去的主軸（{count}）',
+      },
+      reassessment: {
+        title: '重新判定劇情事件',
+        summary: '事件摘要',
+        confirm: '確認標記為已完成',
+        status: {
+          completed: '判定為已完成',
+          pending: '維持待推進',
+          anchor_error: '無法重新判定',
+        },
+        reasons: {
+          anchor: '找不到可用的見面行程錨點。',
+          beforeDate: '尚未到達這個劇情節點的日期。',
+          presence: '這個劇情需要玩家在場。',
+          notPending: '這個劇情節點已不再待推進。',
+          noEvidence: '沒有足夠的近期互動證據，暫時維持待推進。',
+          unavailable: '暫時無法取得重新判定結果。',
+        },
       },
       newArc: {
         title: '開始新劇情主軸',
@@ -1651,6 +1670,8 @@ export const messages = {
         deleteBeatFailedCloud: '刪除劇情節點失敗',
         addBeatFailed: '新增 beat 失敗',
         addBeatFailedCloud: '新增劇情節點失敗',
+        reassessFailed: '重新判定失敗',
+        confirmReassessFailed: '確認劇情事件失敗',
       },
       tension: {
         setup: '起',

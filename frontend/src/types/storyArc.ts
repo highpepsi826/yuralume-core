@@ -73,3 +73,15 @@ export interface UpdateStoryArcBeatPayload {
   summary?: string
   tension?: StoryArcTension
 }
+
+export type StoryBeatReassessmentStatus =
+  | 'completed'
+  | 'pending'
+  | 'anchor_error'
+
+export interface StoryBeatReassessment {
+  status: StoryBeatReassessmentStatus
+  reason: string
+  narrative: string | null
+  can_confirm: boolean
+}

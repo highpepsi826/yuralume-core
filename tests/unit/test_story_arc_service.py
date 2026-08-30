@@ -38,6 +38,7 @@ from kokoro_link.contracts.story_arc import (
 from kokoro_link.contracts.arc_template import ArcTemplateRepositoryPort
 from kokoro_link.domain.entities.arc_template import ArcTemplate, ArcTemplateBeat
 from kokoro_link.domain.entities.character import Character
+from kokoro_link.domain.entities.conversation import Message, MessageRole
 from kokoro_link.domain.entities.story_arc import (
     ARC_ABANDONED,
     ARC_ACTIVE,
@@ -130,6 +131,35 @@ class _RecordingBeatRechecker(StoryBeatRecheckerPort):
     ) -> StoryBeatRecheckDecision:
         self.contexts.append(context)
         return self.decision
+
+
+class _CrossSourceConversations:
+    def __init__(self, messages: list[Message]) -> None:
+        self.messages = messages
+        self.calls: list[tuple[str, int, bool]] = []
+
+    async def recent_messages_for_character(
+        self,
+        character_id: str,
+        *,
+        limit: int,
+        exclude_tool_only: bool = False,
+    ) -> list[Message]:
+        self.calls.append((character_id, limit, exclude_tool_only))
+        return list(self.messages)
+
+    async def latest_for_character(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("manual reassessment must use cross-source history")
+
+
+class _RecordingDialogueSummarizer:
+    def __init__(self, summary: str) -> None:
+        self.summary = summary
+        self.calls: list[list[Message]] = []
+
+    async def summarize(self, *, character, messages, now=None, local_tz=None):  # noqa: ANN001
+        self.calls.append(list(messages))
+        return self.summary
 
 
 class _StubTemplateRepo(ArcTemplateRepositoryPort):
@@ -570,6 +600,121 @@ async def test_recheck_mark_realized_returns_narrative_without_mutating_arc() ->
     still_pending = updated.find_beat(beat.id)
     assert still_pending is not None
     assert still_pending.status == BEAT_PENDING
+
+
+@pytest.mark.asyncio
+async def test_manual_reassessment_bypasses_attempt_threshold_without_mutating() -> None:
+    repo = InMemoryStoryArcRepository()
+    rechecker = _RecordingBeatRechecker(
+        StoryBeatRecheckDecision(
+            action="delay_beat",
+            days=2,
+            reason="等待更自然的時機",
+        ),
+    )
+    conversations = _CrossSourceConversations([
+        Message(role=MessageRole.USER, content="我們剛完成這個安排。"),
+    ])
+    summarizer = _RecordingDialogueSummarizer("近期有可供重新判定的互動。")
+    svc = StoryArcService(
+        repository=repo,
+        planner=_CountingPlanner(),
+        beat_rechecker=rechecker,
+        recheck_attempt_threshold=99,
+        conversation_repository=conversations,  # type: ignore[arg-type]
+        dialogue_summarizer=summarizer,  # type: ignore[arg-type]
+    )
+    character = _character()
+    arc = await svc.start_new_arc(character, today=date(2026, 5, 1))
+    beat = arc.beats[0]
+
+    decision = await svc.reassess_pending_beat(
+        character,
+        beat_id=beat.id,
+        today=date(2026, 5, 1),
+    )
+
+    assert decision is not None
+    assert decision.action == "delay_beat"
+    assert len(rechecker.contexts) == 1
+    assert rechecker.contexts[0].manual_reassessment is True
+    updated = await repo.get(arc.id)
+    assert updated is not None
+    unchanged = updated.find_beat(beat.id)
+    assert unchanged is not None
+    assert unchanged.status == BEAT_PENDING
+    assert unchanged.scheduled_date == beat.scheduled_date
+
+
+@pytest.mark.asyncio
+async def test_manual_reassessment_keeps_pending_without_interaction_evidence() -> None:
+    repo = InMemoryStoryArcRepository()
+    rechecker = _RecordingBeatRechecker(StoryBeatRecheckDecision(
+        action="mark_realized",
+        reason="must not run without evidence",
+        narrative="This must not be persisted.",
+    ))
+    conversations = _CrossSourceConversations([
+        Message(role=MessageRole.USER, content="沒有足夠的事件摘要。"),
+    ])
+    summarizer = _RecordingDialogueSummarizer("")
+    svc = StoryArcService(
+        repository=repo,
+        planner=_CountingPlanner(),
+        beat_rechecker=rechecker,
+        conversation_repository=conversations,  # type: ignore[arg-type]
+        dialogue_summarizer=summarizer,  # type: ignore[arg-type]
+    )
+    character = _character()
+    arc = await svc.start_new_arc(character, today=date(2026, 5, 1))
+    beat = arc.beats[0]
+
+    decision = await svc.reassess_pending_beat(
+        character,
+        beat_id=beat.id,
+        today=date(2026, 5, 1),
+    )
+
+    assert decision is not None
+    assert decision.action == "keep_pending"
+    assert decision.reason == "no_recent_interaction_evidence"
+    assert len(rechecker.contexts) == 0
+
+
+@pytest.mark.asyncio
+async def test_manual_reassessment_uses_cross_source_dialogue_summary() -> None:
+    repo = InMemoryStoryArcRepository()
+    rechecker = _RecordingBeatRechecker(
+        StoryBeatRecheckDecision(action="keep_pending", reason="尚需確認"),
+    )
+    conversations = _CrossSourceConversations([
+        Message(role=MessageRole.USER, content="Telegram 的見面內容"),
+        Message(role=MessageRole.ASSISTANT, content="角色的回應"),
+    ])
+    summarizer = _RecordingDialogueSummarizer("跨來源的見面證據")
+    svc = StoryArcService(
+        repository=repo,
+        planner=_CountingPlanner(),
+        beat_rechecker=rechecker,
+        conversation_repository=conversations,  # type: ignore[arg-type]
+        dialogue_summarizer=summarizer,  # type: ignore[arg-type]
+    )
+    character = _character()
+    arc = await svc.start_new_arc(character, today=date(2026, 5, 1))
+    beat = arc.beats[0]
+
+    await svc.reassess_pending_beat(
+        character,
+        beat_id=beat.id,
+        today=date(2026, 5, 1),
+    )
+
+    assert conversations.calls == [(character.id, 40, True)]
+    assert [message.content for message in summarizer.calls[0]] == [
+        "Telegram 的見面內容",
+        "角色的回應",
+    ]
+    assert rechecker.contexts[0].recent_dialogue_summary == "跨來源的見面證據"
 
 
 @pytest.mark.asyncio

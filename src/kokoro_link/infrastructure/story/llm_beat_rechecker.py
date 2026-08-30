@@ -117,6 +117,11 @@ def _build_prompt(context: StoryBeatRecheckContext) -> str:
         recent_dialogue_summary=(
             context.recent_dialogue_summary.strip() or "（無）"
         ),
+        manual_reassessment_note=(
+            "本次由管理者手動要求重新判定。只依近期互動的明確事實判斷；"
+            "不要因為行程時間已過就視為完成，也不要提議直接修改或略過 beat。"
+            if context.manual_reassessment else ""
+        ),
     )
     language_hint = render_operator_language_hint(
         context.operator_primary_language,

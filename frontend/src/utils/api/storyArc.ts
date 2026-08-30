@@ -2,6 +2,7 @@ import type {
   AddStoryArcBeatPayload,
   StartStoryArcPayload,
   StoryArc,
+  StoryBeatReassessment,
   UpdateStoryArcBeatPayload,
   UpdateStoryArcMetaPayload,
 } from '@/types/storyArc'
@@ -97,4 +98,20 @@ export async function updateStoryArcBeat(
 
 export async function deleteStoryArcBeat(beatId: string): Promise<StoryArc> {
   return _req(`/story-arc-beats/${beatId}`, { method: 'DELETE' })
+}
+
+export async function reassessStoryArcBeat(
+  beatId: string,
+): Promise<StoryBeatReassessment> {
+  return _req(`/story-arc-beats/${beatId}/reassess`, { method: 'POST' })
+}
+
+export async function confirmStoryArcBeatReassessment(
+  beatId: string,
+  narrative: string,
+): Promise<{ id: string; arc_beat_id: string | null }> {
+  return _req(`/story-arc-beats/${beatId}/reassess/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ narrative }),
+  })
 }

@@ -284,6 +284,12 @@ class StoryBeatRecheckContext:
     today: date
     recent_dialogue_summary: str = ""
     operator_primary_language: str = "zh-TW"
+    manual_reassessment: bool = False
+    """An operator explicitly requested an evidence-only recheck.
+
+    Manual review may propose realization, but it must never apply delay/skip
+    mutations by itself. The caller owns confirmation and persistence.
+    """
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,16 +22,19 @@ import type {
   AddStoryArcBeatPayload,
   StoryArc,
   StoryArcBeat,
+  StoryBeatReassessment,
   StoryArcTension,
   UpdateStoryArcBeatPayload,
 } from '@/types/storyArc'
 import {
   abandonStoryArc,
   addStoryArcBeat,
+  confirmStoryArcBeatReassessment,
   deleteStoryArcBeat,
   getActiveStoryArc,
   listStoryArcs,
   regenerateStoryArc,
+  reassessStoryArcBeat,
   startStoryArc,
   updateStoryArcBeat,
   updateStoryArcMeta,
@@ -116,6 +119,14 @@ const addBeatOpen = ref(false)
 const addBeatForm = ref<BeatFormState>(blankBeatForm())
 const savingBeat = ref(false)
 
+// 手動重新判定：預覽永遠是唯讀，確認才寫入 StoryEvent。
+const reassessingBeatId = ref<string | null>(null)
+const reassessmentOpen = ref(false)
+const reassessmentBeat = ref<StoryArcBeat | null>(null)
+const reassessmentResult = ref<StoryBeatReassessment | null>(null)
+const reassessmentNarrative = ref('')
+const confirmingReassessment = ref(false)
+
 // regenerate / abandon busy
 const busy = ref(false)
 
@@ -183,6 +194,9 @@ watch(
     editingMeta.value = false
     addBeatOpen.value = false
     newArcOpen.value = false
+    reassessmentOpen.value = false
+    reassessmentBeat.value = null
+    reassessmentResult.value = null
     reload()
   },
   { immediate: true },
@@ -351,6 +365,48 @@ async function handleDeleteBeat(beat: StoryArcBeat) {
   }
 }
 
+async function handleReassessBeat(beat: StoryArcBeat) {
+  reassessingBeatId.value = beat.id
+  errorMsg.value = null
+  try {
+    const result = await reassessStoryArcBeat(beat.id)
+    reassessmentBeat.value = beat
+    reassessmentResult.value = result
+    reassessmentNarrative.value = result.narrative ?? ''
+    reassessmentOpen.value = true
+  } catch (err) {
+    errorMsg.value = extractError(err) ?? t('story.arcPanel.errors.reassessFailed')
+  } finally {
+    reassessingBeatId.value = null
+  }
+}
+
+function closeReassessment(force = false) {
+  if (confirmingReassessment.value && !force) return
+  reassessmentOpen.value = false
+  reassessmentBeat.value = null
+  reassessmentResult.value = null
+  reassessmentNarrative.value = ''
+}
+
+async function confirmReassessment() {
+  const beat = reassessmentBeat.value
+  const result = reassessmentResult.value
+  const narrative = reassessmentNarrative.value.trim()
+  if (!beat || !result?.can_confirm || !narrative) return
+  confirmingReassessment.value = true
+  errorMsg.value = null
+  try {
+    await confirmStoryArcBeatReassessment(beat.id, narrative)
+    closeReassessment(true)
+    await reload()
+  } catch (err) {
+    errorMsg.value = extractError(err) ?? t('story.arcPanel.errors.confirmReassessFailed')
+  } finally {
+    confirmingReassessment.value = false
+  }
+}
+
 function openAddBeat() {
   addBeatForm.value = blankBeatForm()
   addBeatOpen.value = true
@@ -425,6 +481,22 @@ function beatHasSceneStructure(beat: StoryArcBeat): boolean {
     || (beat.scene_characters && beat.scene_characters.length > 0)
     || beat.dramatic_question,
   )
+}
+
+function reassessmentStatusLabel(status: StoryBeatReassessment['status']): string {
+  return t(`story.arcPanel.reassessment.status.${status}`)
+}
+
+function reassessmentReason(reason: string): string {
+  const key = {
+    first_meeting_anchor_unavailable: 'story.arcPanel.reassessment.reasons.anchor',
+    before_scheduled_date: 'story.arcPanel.reassessment.reasons.beforeDate',
+    player_presence_required: 'story.arcPanel.reassessment.reasons.presence',
+    beat_not_pending: 'story.arcPanel.reassessment.reasons.notPending',
+    no_recent_interaction_evidence: 'story.arcPanel.reassessment.reasons.noEvidence',
+    recheck_unavailable: 'story.arcPanel.reassessment.reasons.unavailable',
+  }[reason]
+  return key ? t(key) : reason
 }
 
 // ---- Template picker -------------------------------------------------
@@ -589,6 +661,12 @@ defineExpose({
                   </div>
                 </div>
                 <div class="beat-actions">
+                  <button
+                    v-if="beat.status === 'pending'"
+                    class="chip-btn"
+                    :disabled="savingBeat || reassessingBeatId === beat.id"
+                    @click="handleReassessBeat(beat)"
+                  >{{ reassessingBeatId === beat.id ? t('common.state.loading') : t('story.arcPanel.actions.reassess') }}</button>
                   <button
                     class="chip-btn"
                     :disabled="beat.status === 'realized' || savingBeat"
@@ -787,6 +865,43 @@ defineExpose({
         </div>
       </Teleport>
 
+      <Teleport to="body">
+        <div v-if="reassessmentOpen && reassessmentResult && reassessmentBeat" class="modal-backdrop">
+          <div class="modal" role="dialog" :aria-label="t('story.arcPanel.reassessment.title')">
+            <div class="modal-header">
+              <div class="modal-title">{{ t('story.arcPanel.reassessment.title') }}</div>
+              <div class="modal-hint">{{ reassessmentBeat.title }}</div>
+            </div>
+            <div class="modal-body reassessment-body">
+              <div class="reassessment-outcome" :class="`status-${reassessmentResult.status}`">
+                {{ reassessmentStatusLabel(reassessmentResult.status) }}
+              </div>
+              <div class="reassessment-reason">{{ reassessmentReason(reassessmentResult.reason) }}</div>
+              <label v-if="reassessmentResult.can_confirm" class="field-small">
+                <span class="field-label">{{ t('story.arcPanel.reassessment.summary') }}</span>
+                <textarea
+                  v-model="reassessmentNarrative"
+                  class="field-textarea"
+                  rows="4"
+                  maxlength="1200"
+                />
+              </label>
+            </div>
+            <div class="modal-actions">
+              <button class="chip-btn" :disabled="confirmingReassessment" @click="closeReassessment()">
+                {{ t('common.actions.cancel') }}
+              </button>
+              <button
+                v-if="reassessmentResult.can_confirm"
+                class="chip-btn primary"
+                :disabled="confirmingReassessment || !reassessmentNarrative.trim()"
+                @click="confirmReassessment"
+              >{{ confirmingReassessment ? t('common.state.saving') : t('story.arcPanel.reassessment.confirm') }}</button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
+
       <!-- Arc template picker — opens on demand from the header bar -->
       <ArcTemplatePicker
         v-if="pickerOpen"
@@ -915,6 +1030,41 @@ defineExpose({
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.reassessment-body {
+  gap: 10px;
+}
+
+.reassessment-outcome {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.reassessment-outcome.status-completed {
+  color: #7ab28a;
+  border-color: rgba(122, 178, 138, 0.45);
+}
+
+.reassessment-outcome.status-pending {
+  color: #d4a15a;
+  border-color: rgba(212, 161, 90, 0.45);
+}
+
+.reassessment-outcome.status-anchor_error {
+  color: #ff8a75;
+  border-color: rgba(255, 138, 117, 0.45);
+}
+
+.reassessment-reason {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
 }
 
 .form-actions {
