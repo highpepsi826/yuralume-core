@@ -141,7 +141,7 @@ and `skip_beat` are reported as pending and never mutate the arc.
 5. [x] Add the Story Arc panel control and localized states.
 6. [x] Run focused backend/frontend tests and record results.
 7. [x] Commit the verified source change with a narrow `local:` commit.
-8. [ ] Create a backup, deploy, verify runtime health, and record deployment.
+8. [x] Create a backup, deploy, verify runtime health, and record deployment.
 
 ## Current Facts
 
@@ -155,9 +155,11 @@ and `skip_beat` are reported as pending and never mutate the arc.
 ## Checkpoint
 
 - Current implementation step: source implementation, focused verification,
-  and local commit are complete; no live data or deployment action has run.
+  backup, app-only deployment, and runtime verification are complete.
 - Last verified source commit: `ae7259e local: add story beat reassessment controls`.
-- Working tree: expected documentation checkpoint follow-up only.
+- Deployment backup: `pre-story-beat-reassessment-20260830-233223.dump`,
+  PostgreSQL custom format verified by `pg_restore --list`, SHA-256
+  `277BC513ED1CE12529BB34D8055E3B49DBD995C68CFE713B91BFF346C03FCCE8`.
 - Last backend test: `.venv\\Scripts\\python.exe -m pytest -q
   tests\\unit\\test_story_event_arc_integration.py
   tests\\unit\\test_llm_beat_rechecker.py
@@ -171,6 +173,17 @@ and `skip_beat` are reported as pending and never mutate the arc.
 - Test stability note: the unrelated commitment reconciliation fixture now
   injects its declared 2026-08-28 clock instead of consulting the wall clock;
   its six focused tests pass and no product behavior changed.
-- Next action: await separate deployment approval. Before deployment, follow
-  the backup/build/migrate/health checklist above.
+- Deployment: built only `yuralume-local/app:custom` from source commit
+  `ae7259e`, ran the existing `migrate` service successfully, and recreated
+  only `app`. Image ID is
+  `sha256:79149119d8a04bf0d923e39ea31a2ec2fda7de5800fad3864f0ecd7870ba8187`.
+  PostgreSQL, storage, WhatsApp sidecar, and all volumes were retained.
+- Runtime verification: all four Compose services are healthy;
+  `http://127.0.0.1:8012/health` returned `status=ok`; Alembic is
+  `u2c6m8p10046`; runtime build SHA is `ae7259e`; both reassessment routes are
+  registered in OpenAPI; and the post-start log contains no traceback,
+  `ERROR`, or `CRITICAL` entry. Existing external RSS fetch warnings are
+  unrelated and fail soft.
+- Next action: use the deployed Story Arc panel's reassessment control when an
+  eligible pending beat needs an operator-reviewed decision.
 - Blocked reason: none.

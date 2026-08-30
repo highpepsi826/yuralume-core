@@ -674,7 +674,7 @@ database rows.
 
 ### 2026-08-30 - First-meeting reassessment controls
 
-- Status: source implementation committed; deployment not performed.
+- Status: completed and deployed.
 - Type: local story-arc safety repair and admin workflow.
 - Git result: committed `ae7259e` on `local/customizations`.
 - Scope: a latch-only first-meeting activity (`memorialized=true`,
@@ -682,12 +682,22 @@ database rows.
   reassessment reads a bounded cross-channel dialogue window and remains
   read-only until explicit confirmation writes through the existing
   StoryEvent path. Empty or unavailable evidence fails closed.
-- Data safety: no migration, backup, live row edit, schedule/memory/history
+- Data safety: no schema migration, live row edit, schedule/memory/history
   rewrite, or proactive cooldown change. The real-message 30-minute cooldown
   is unchanged.
+- Backup: `pre-story-beat-reassessment-20260830-233223.dump`, verified as a
+  PostgreSQL custom-format archive with `pg_restore --list`; SHA-256
+  `277BC513ED1CE12529BB34D8055E3B49DBD995C68CFE713B91BFF346C03FCCE8`.
 - Verification: 75 focused story-event/recheck/service/route tests and 6
   commitment reconciliation tests passed; frontend reassessment API test,
   `vue-tsc -b`, i18n checks, and the local-permission Vite/PWA production
   build passed; Python compilation and `git diff --check` passed.
-- Follow-up: separately approve backup and app-only deployment before exposing
-  the new Story Arc panel control in the running app.
+- Deployment: built only `yuralume-local/app:custom`, ran the existing
+  `migrate` service successfully, and recreated only `app`. PostgreSQL,
+  storage, WhatsApp sidecar, and volumes were retained. Runtime image is
+  `sha256:79149119d8a04bf0d923e39ea31a2ec2fda7de5800fad3864f0ecd7870ba8187`.
+- Runtime verification: all Compose services are healthy; `/health` returned
+  `status=ok`; Alembic is `u2c6m8p10046`; build SHA is `ae7259e`; both new
+  routes are registered in OpenAPI; no traceback or error-level startup log
+  appeared.
+- Follow-up: normal use and monitor manual reassessment results.
