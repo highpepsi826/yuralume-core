@@ -701,3 +701,30 @@ database rows.
   routes are registered in OpenAPI; no traceback or error-level startup log
   appeared.
 - Follow-up: normal use and monitor manual reassessment results.
+
+### 2026-08-31 - Preserve schedule commitment identity in reassessment
+
+- Status: completed and deployed.
+- Type: local persistence mapping hotfix.
+- Git result: committed `76a64cd` on `local/customizations`.
+- Discovery: the first live reassessment found `matches=0` because the
+  schedule ORM mapper dropped `commitment_key` and `is_first_meeting` while
+  reading and writing activities. The database row itself was valid.
+- Data safety: no migration, live-row edit, schedule/story/memory rewrite,
+  promise/goal change, or proactive cooldown change.
+- Backup: `pre-schedule-identity-hotfix-20260830-235206.dump`, verified as a
+  PostgreSQL custom-format archive with `pg_restore --list`; SHA-256
+  `56243118F06702584D434FDD8E08D7A6586B882A74AA88859C6B9A82FB6497BC`.
+- Verification: 87 focused mapping/commitment/first-meeting/recheck/service/
+  route tests passed; source compilation and `git diff --check` passed.
+- Deployment: built only `yuralume-local/app:custom`, ran the existing
+  `migrate` gate, and recreated only `app`. Runtime image is
+  `sha256:1a8bacde128cccd95e6846e4a3211a442d2bdb3ca14ad28d35b087e71933f934`;
+  PostgreSQL, storage, WhatsApp sidecar, and volumes were retained.
+- Runtime verification: all Compose services are healthy; `/health` returned
+  `status=ok`; Alembic is `u2c6m8p10046`; build SHA is `76a64cd`; the live
+  SQLAlchemy mapping reconstructs the 17:30 activity with the expected key,
+  first-meeting flag, and memory flags; no traceback or error-level startup
+  log appeared.
+- Follow-up: retry 「重新判定」 in the Story Arc panel; it should now proceed
+  to the evidence review result.

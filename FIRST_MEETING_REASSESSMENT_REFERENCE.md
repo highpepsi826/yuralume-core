@@ -168,7 +168,7 @@ and `skip_beat` are reported as pending and never mutate the arc.
        and database inspection.
 10. [x] Restore schedule commitment identity in ORM mapping and add regression
         coverage.
-11. [ ] Verify, commit, back up, deploy app-only, and retry the read-only
+11. [x] Verify, commit, back up, deploy app-only, and retry the read-only
         anchor inspection.
 
 ## Current Facts
@@ -176,20 +176,18 @@ and `skip_beat` are reported as pending and never mutate the arc.
 - The canonical beat remains pending and has no linked StoryEvent.
 - Its commitment key is `REVIEW-MEET-20260830`; the linked schedule start is
   17:30 Hong Kong time.
-- The activity is `memorialized=true`, `has_memory=false`; app logs report
-  zero valid first-meeting anchors during reassessment because the deployed
-  schedule ORM mapper drops its commitment identity on read.
+- The activity is `memorialized=true`, `has_memory=false`; the hotfix now reads
+  its exact identity and first-meeting flag through the deployed ORM mapper.
 - The source worktree was clean immediately before this reference was added.
 
 ## Checkpoint
 
-- Current implementation step: deployed reassessment control is under a
-  narrow schedule-ORM mapping repair; source fix and focused verification are
-  complete, with no live-data correction required.
-- Last verified source commit: `ae7259e local: add story beat reassessment controls`.
-- Deployment backup: `pre-story-beat-reassessment-20260830-233223.dump`,
+- Current implementation step: schedule-ORM mapping repair, deployment, and
+  runtime verification are complete; no live-data correction was required.
+- Last verified source commit: `76a64cd local: preserve schedule commitment identity`.
+- Deployment backup: `pre-schedule-identity-hotfix-20260830-235206.dump`,
   PostgreSQL custom format verified by `pg_restore --list`, SHA-256
-  `277BC513ED1CE12529BB34D8055E3B49DBD995C68CFE713B91BFF346C03FCCE8`.
+  `56243118F06702584D434FDD8E08D7A6586B882A74AA88859C6B9A82FB6497BC`.
 - Last backend test: `.venv\\Scripts\\python.exe -m pytest -q
   tests\\unit\\test_story_event_arc_integration.py
   tests\\unit\\test_llm_beat_rechecker.py
@@ -207,17 +205,18 @@ and `skip_beat` are reported as pending and never mutate the arc.
   first-meeting, recheck, reassessment, service, and route tests passed;
   source compilation and `git diff --check` passed.
 - Deployment: built only `yuralume-local/app:custom` from source commit
-  `ae7259e`, ran the existing `migrate` service successfully, and recreated
+  `76a64cd`, ran the existing `migrate` service successfully, and recreated
   only `app`. Image ID is
-  `sha256:79149119d8a04bf0d923e39ea31a2ec2fda7de5800fad3864f0ecd7870ba8187`.
+  `sha256:1a8bacde128cccd95e6846e4a3211a442d2bdb3ca14ad28d35b087e71933f934`.
   PostgreSQL, storage, WhatsApp sidecar, and all volumes were retained.
 - Runtime verification: all four Compose services are healthy;
   `http://127.0.0.1:8012/health` returned `status=ok`; Alembic is
-  `u2c6m8p10046`; runtime build SHA is `ae7259e`; both reassessment routes are
-  registered in OpenAPI; and the post-start log contains no traceback,
-  `ERROR`, or `CRITICAL` entry. Existing external RSS fetch warnings are
-  unrelated and fail soft.
-- Next action: use the deployed Story Arc panel's reassessment control when an
-  eligible pending beat needs an operator-reviewed decision, after the mapping
-  repair is committed and deployed through a fresh backup and app-only restart.
+  `u2c6m8p10046`; runtime build SHA is `76a64cd`; both reassessment routes are
+  registered in OpenAPI; the running SQLAlchemy mapper reconstructs the
+  17:30 activity as `commitment_key=REVIEW-MEET-20260830`,
+  `is_first_meeting=true`, `memorialized=true`, `has_memory=false`; and the
+  post-start log contains no traceback, `ERROR`, or `CRITICAL` entry. Existing
+  external RSS fetch warnings are unrelated and fail soft.
+- Next action: use the Story Arc panel's reassessment control; it should now
+  pass the exact schedule-anchor check and show the evidence review result.
 - Blocked reason: none.
