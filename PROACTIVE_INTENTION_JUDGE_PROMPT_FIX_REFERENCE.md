@@ -40,8 +40,9 @@ reported as `intention judge raised` and prevents the judge's LLM call.
 
 ## Status
 
-Source fix and focused regression verification are complete; source commit
-`c574ddb` is recorded. Backup and app-only deployment remain.
+Complete. Source fix, regression verification, backup, and app-only deployment
+are finished. The real-message 30-minute cooldown and deferred-intent data are
+unchanged.
 
 ## Verification So Far
 
@@ -51,9 +52,23 @@ Source fix and focused regression verification are complete; source commit
 - `git diff --check`: passed.
 - No live data or database schema change is part of this fix.
 
-## Deployment Checkpoint
+## Deployment Verification (2026-08-30)
 
-- The running stack remains on the previous app image until the backup is
-  verified.
-- Next action: create a fresh PostgreSQL custom-format dump, then rebuild and
-  recreate only `app` with `c574ddb`.
+- Verified backup: `pre-proactive-intention-judge-fix-20260830-163419.dump`
+  (PostgreSQL custom format, 640 TOC entries).
+- SHA-256: `5BD4F2A95E4816BC77FA8B72323EABFC3952E39B643BF37825035A260BEF0DD2`.
+- Built `yuralume-local/app:custom` from `c574ddb`; image digest was
+  `sha256:251305ee23e3b2acd2c2c9317afd6801e6212865d3437f09c33f395a298377dc`.
+- Existing `migrate` exited 0; Alembic remained
+  `u2c6m8p10046 (head)`. Only `app` was recreated; PostgreSQL, storage,
+  WhatsApp sidecar, and volumes were retained.
+- All Compose services are healthy, `/health` returns `status: ok`, and runtime
+  version reports commit `c574ddb`.
+- The active deferred intent remains intact with its 17:30 HK revisit time.
+  Post-deployment logs show a successful scheduler tick and no recurrence of
+  the `parts` `NameError`; no new `errored` proactive attempt was recorded.
+
+## Final Status
+
+The `intention judge raised` error was caused by the undefined `parts` variable
+introduced during the upstream merge. It is fixed and deployed.

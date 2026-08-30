@@ -5,6 +5,29 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-08-30 - Fix proactive intention-judge prompt crash
+
+- Status: completed
+- Type: approved local source fix and app-only deployment
+- Git result: source fix committed as `c574ddb` on `local/customizations`.
+- Fix: corrected the undefined `parts` reference in deferred-intent prompt
+  rendering and restored the future revisit-time display. This removes the
+  `intention judge raised` crash while preserving existing judgement semantics
+  and the real-message 30-minute cooldown.
+- Data: no deferred intents, audit history, conversations, schedules, goals,
+  memories, or schema rows were changed.
+- Backup: `pre-proactive-intention-judge-fix-20260830-163419.dump`, verified as
+  PostgreSQL custom format; SHA-256 is recorded in the scoped reference.
+- Deployment: built the local app image, ran the existing migrate service
+  successfully, and recreated only `app`; support services and volumes were
+  retained.
+- Verification: 33 intention-judge tests and 77 dispatcher/deferred-intent/
+  scheduler tests passed; compile and diff checks passed; all Compose services
+  healthy; `/health` returned `status: ok`; Alembic remained at
+  `u2c6m8p10046 (head)`; no new post-deployment `NameError` or errored attempt
+  appeared in the runtime check.
+- Follow-up: monitor the next due deferred-intent evaluation at 17:30 HK.
+
 ### 2026-08-30 - Prevent premature first-meeting story completion
 
 - Status: completed
