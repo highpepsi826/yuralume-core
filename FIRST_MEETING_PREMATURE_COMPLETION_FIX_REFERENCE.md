@@ -143,3 +143,20 @@ commit, live backup, exact data repair, and deployment verification remain.
 - SHA-256: `995A3448EB573137BAD80EC74C1A4B2395EF2EEB7CB1429A4AE0921F19B35B22`.
 - The exact repair transaction is the next live action; no row has been
   changed yet.
+
+## Repair Result (2026-08-30)
+
+- Transaction returned `FIRST_MEETING_REPAIR_COMMITTED` under `SERIALIZABLE`.
+- The target arc is `active`; beat
+  `3364666069e5424fbf0e5d9a5faffb37` is `pending`, has no realized event, and
+  has zero play attempts/failures while retaining its approved key and flag.
+- The false story event and both exact false memories are absent.
+- The two valid same-day stage events remain present.
+- There is exactly one live first-meeting schedule and one live first-meeting
+  beat. The 17:30 HK (`09:30 UTC`) and 18:00 HK (`10:00 UTC`) activities are
+  unchanged and separate.
+- The repair touched no goals, promises, conversations, or cooldown rows.
+- Post-repair counts: characters 1, daily schedules 23, schedule activities
+  293, story arcs 4, story beats 31, story events 30, memory items 1444,
+  character goals 20, pending follow-ups 53. (Schedule counts include normal
+  runtime-generated days before the app was stopped.)
