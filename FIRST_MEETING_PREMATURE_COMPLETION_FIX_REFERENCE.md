@@ -111,5 +111,19 @@ commit, live backup, exact data repair, and deployment verification remain.
 - Background proactive/scheduler/tick/story suite: 148 passed.
 - `python -m compileall -q src`: passed.
 - `git diff --check`: passed.
-- No live data, migration, or deployment operation has been performed in this
-  phase.
+
+## Live Preflight (2026-08-30)
+
+- Runtime Compose was read successfully; PostgreSQL and all support services
+  are healthy, and the current app health endpoint returns `status: ok`.
+- The target arc is currently `completed` with 14/14 beats realized.
+- The target first-meeting beat still has the approved date/key/flag but is
+  incorrectly `realized`, points at the approved false event ID, and has one
+  `scene_simulation` attempt. Its other attempt/failure fields remain at the
+  values covered by the repair precondition.
+- The false event and both exact false memory IDs are present. The valid
+  same-day stage records remain separate and are outside the repair set.
+- The live 17:30 HK activity is an unmemorialized first-meeting activity at
+  `09:30 UTC`; the separate festival activity starts at `10:00 UTC` and is not
+  a first meeting.
+- No live row has been changed yet. App stop and backup are the next actions.
