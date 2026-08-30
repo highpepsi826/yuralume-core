@@ -140,7 +140,7 @@ and `skip_beat` are reported as pending and never mutate the arc.
 4. [x] Implement preview/confirm API and focused reassessment logic.
 5. [x] Add the Story Arc panel control and localized states.
 6. [x] Run focused backend/frontend tests and record results.
-7. [ ] Commit the verified source change with a narrow `local:` commit.
+7. [x] Commit the verified source change with a narrow `local:` commit.
 8. [ ] Create a backup, deploy, verify runtime health, and record deployment.
 
 ## Current Facts
@@ -154,11 +154,10 @@ and `skip_beat` are reported as pending and never mutate the arc.
 
 ## Checkpoint
 
-- Current implementation step: source implementation and focused verification
-  are complete; no live data or deployment action has run.
-- Last verified commit: `29d34d9 local: record proactive intention judge fix deployment`.
-- Working tree: source, frontend, reference, and regression test changes are
-  uncommitted.
+- Current implementation step: source implementation, focused verification,
+  and local commit are complete; no live data or deployment action has run.
+- Last verified source commit: `ae7259e local: add story beat reassessment controls`.
+- Working tree: expected documentation checkpoint follow-up only.
 - Last backend test: `.venv\\Scripts\\python.exe -m pytest -q
   tests\\unit\\test_story_event_arc_integration.py
   tests\\unit\\test_llm_beat_rechecker.py
@@ -172,6 +171,6 @@ and `skip_beat` are reported as pending and never mutate the arc.
 - Test stability note: the unrelated commitment reconciliation fixture now
   injects its declared 2026-08-28 clock instead of consulting the wall clock;
   its six focused tests pass and no product behavior changed.
-- Next action: review the complete diff, create a narrow `local:` commit, then
-  await separate deployment approval.
+- Next action: await separate deployment approval. Before deployment, follow
+  the backup/build/migrate/health checklist above.
 - Blocked reason: none.

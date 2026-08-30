@@ -671,3 +671,23 @@ database rows.
   by the host's Windows temp-directory `EPERM`.
 - Follow-up: review the source commit, then separately approve deployment if
   the new admin controls should be exposed in the running app.
+
+### 2026-08-30 - First-meeting reassessment controls
+
+- Status: source implementation committed; deployment not performed.
+- Type: local story-arc safety repair and admin workflow.
+- Git result: committed `ae7259e` on `local/customizations`.
+- Scope: a latch-only first-meeting activity (`memorialized=true`,
+  `has_memory=false`) remains a valid exact schedule anchor; manual
+  reassessment reads a bounded cross-channel dialogue window and remains
+  read-only until explicit confirmation writes through the existing
+  StoryEvent path. Empty or unavailable evidence fails closed.
+- Data safety: no migration, backup, live row edit, schedule/memory/history
+  rewrite, or proactive cooldown change. The real-message 30-minute cooldown
+  is unchanged.
+- Verification: 75 focused story-event/recheck/service/route tests and 6
+  commitment reconciliation tests passed; frontend reassessment API test,
+  `vue-tsc -b`, i18n checks, and the local-permission Vite/PWA production
+  build passed; Python compilation and `git diff --check` passed.
+- Follow-up: separately approve backup and app-only deployment before exposing
+  the new Story Arc panel control in the running app.
