@@ -438,6 +438,40 @@ async def test_prompt_shows_whether_a_parked_alarm_has_arrived() -> None:
 
 
 @pytest.mark.asyncio
+async def test_prompt_renders_future_deferred_alarm_without_name_error() -> None:
+    """A future revisit alarm must reach the model instead of crashing the judge."""
+    from dataclasses import replace
+    from datetime import timedelta
+
+    from kokoro_link.domain.entities.deferred_intent import DeferredIntent
+
+    model = _StubModel(
+        '{"should_consume_slot": false, "inner_motive": "", '
+        '"conversation_purpose": "", "expected_reply": "", '
+        '"risk": "", "best_timing": "later", "reason": ""}',
+    )
+    judge = LLMProactiveIntentionJudge(model=model)
+    ctx = _context()
+    parked = DeferredIntent.new(
+        character_id=ctx.character.id,
+        operator_id="default",
+        trigger="tick",
+        inner_motive="在約定時間再關心玩家",
+        revisit_at=ctx.now + timedelta(minutes=30),
+        ttl_minutes=180,
+        now=ctx.now - timedelta(minutes=40),
+    )
+
+    decision = await judge.judge(replace(ctx, deferred_intents=(parked,)))
+
+    assert decision.judge_unavailable is False
+    assert model.calls == 1
+    prompt = model.captured_prompt or ""
+    assert "原先記下的時點" in prompt
+    assert "已等候" in prompt
+
+
+@pytest.mark.asyncio
 async def test_prompt_omits_the_alarm_line_for_a_motive_without_one() -> None:
     from dataclasses import replace
     from datetime import timedelta

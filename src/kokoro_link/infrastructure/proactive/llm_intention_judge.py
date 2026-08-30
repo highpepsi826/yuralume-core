@@ -554,11 +554,14 @@ def _optional_deferred_intents_block(context: ProactiveContext) -> str:
                 f"  · 已到原先記下的時點：{local_revisit.strftime('%m/%d %H:%M')}。"
                 "現在必須重新判斷，不可把舊的拒絕理由當成現在的結論。",
             )
-        parts.append(
-            f"  · 已等候 {format_elapsed_ago_label(elapsed_minutes)}，"
-            f"距離自然遺忘還有約 {format_elapsed_ago_label(remaining_minutes)}",
-        )
-        body.append("\n".join(parts))
+        else:
+            body.append(
+                f"  · 原先記下的時點：{local_revisit.strftime('%m/%d %H:%M')}。",
+            )
+    body.append(
+        f"  · 已等候 {format_elapsed_ago_label(elapsed_minutes)}，"
+        f"距離自然遺忘還有約 {format_elapsed_ago_label(remaining_minutes)}",
+    )
     return _section(
         "先前你曾想過、但被自己暫緩的念頭（請以現在狀況重新判斷，或讓它自然淡掉）：",
         body,
