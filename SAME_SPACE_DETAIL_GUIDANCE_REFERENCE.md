@@ -83,15 +83,15 @@ is trying to play a scene with richer local detail.
 3. [x] Update focused regression assertions.
 4. [x] Refresh the intentional prompt goldens and run focused tests,
    compilation, and diff checks.
-5. [ ] Commit the verified source change and progress record.
+5. [x] Commit the verified source change and progress record.
 6. [ ] Await separate deployment approval.
 
 ## Checkpoint
 
 - Current implementation step: stage guidance, focused regression tests, and
-  intentional golden refresh are verified; commit remains.
-- Last verified commit: `a3e87f2 local: finalize cross-channel deployment checkpoint`.
-- Working tree: reference, stage prompt, and focused tests are uncommitted.
+  intentional golden refresh are committed; deployment remains separate.
+- Last verified commit: `1386a00 local: enrich same-space reply guidance`.
+- Working tree: clean after the checkpoint-record commit.
 - Last tests: `test_prompt_action_narration.py` +
   `test_prompt_builder_presence_frame.py` — 19 passed; `prompt_golden` — 85
   passed; `python -m compileall -q src/kokoro_link/infrastructure/prompt` and
@@ -99,6 +99,5 @@ is trying to play a scene with richer local detail.
 - Golden note: 19 stage-prompt snapshots changed for this instruction. The
   `tools_and_outcomes` snapshot also caught up with the pre-existing source
   wording for an explicit image trigger; its source was not changed here.
-- Next action: inspect the final aggregate diff and create the narrow source
-  commit. Deployment remains a separate approval.
+- Next action: await separate deployment approval.
 - Blocked reason: none.

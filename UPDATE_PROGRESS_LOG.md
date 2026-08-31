@@ -773,8 +773,11 @@ database rows.
 
 ### 2026-08-31 - Enrich same-space reply guidance
 
-- Status: source implementation verified; deployment not performed.
+- Status: source implementation committed and verified; deployment not
+  performed.
 - Type: local prompt-quality adjustment.
+- Git result: committed `1386a00 local: enrich same-space reply guidance` on
+  `local/customizations`.
 - Scope: the normal web same-space response format now permits grounded,
   scene-dependent environment, sensory, spatial, pause, and continuous-action
   detail in the existing `*...*` action spans. It does not impose a fixed
