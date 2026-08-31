@@ -73,8 +73,8 @@ is trying to play a scene with richer local detail.
    short-text guidance remains present and the stage detail guidance does not
    leak into them.
 3. Run focused prompt tests, Python compilation, and `git diff --check`.
-4. Commit a narrow `local:` source change. Deployment remains separate and
-   requires explicit approval.
+4. Commit a narrow `local:` source change. Deploy only after explicit
+   approval and a verified backup.
 
 ## Ordered Checklist
 
@@ -84,14 +84,14 @@ is trying to play a scene with richer local detail.
 4. [x] Refresh the intentional prompt goldens and run focused tests,
    compilation, and diff checks.
 5. [x] Commit the verified source change and progress record.
-6. [ ] Await separate deployment approval.
+6. [x] Deploy the local app after separate approval and a verified backup.
 
 ## Checkpoint
 
-- Current implementation step: stage guidance, focused regression tests, and
-  intentional golden refresh are committed; deployment remains separate.
-- Last verified commit: `1386a00 local: enrich same-space reply guidance`.
-- Working tree: clean after the checkpoint-record commit.
+- Current implementation step: stage guidance is deployed to the local app.
+- Last verified source commits: `1386a00 local: enrich same-space reply
+  guidance`; `caa41a8 local: record same-space guidance checkpoint`.
+- Working tree: clean after the deployment-record commit.
 - Last tests: `test_prompt_action_narration.py` +
   `test_prompt_builder_presence_frame.py` — 19 passed; `prompt_golden` — 85
   passed; `python -m compileall -q src/kokoro_link/infrastructure/prompt` and
@@ -99,5 +99,15 @@ is trying to play a scene with richer local detail.
 - Golden note: 19 stage-prompt snapshots changed for this instruction. The
   `tools_and_outcomes` snapshot also caught up with the pre-existing source
   wording for an explicit image trigger; its source was not changed here.
-- Next action: await separate deployment approval.
+- Deployment: user approval received on 2026-08-31. Verified backup
+  `pre-same-space-detail-guidance-20260831-231054.dump` (SHA-256
+  `86DFF9650FB0CD089208FCB88AA231E72F8C4302AFCDB6C8F1CA839669D4D167`);
+  built `yuralume-local/app:custom` image
+  `sha256:cda6321024f9eb3927bc6ed38201f1488fba72d13f237b8acdca33234bcc7e3d`;
+  the migration gate exited 0; and only `app` was recreated. PostgreSQL,
+  storage, WhatsApp sidecar, and volumes were retained.
+- Runtime verification: all Compose services are healthy; `/health` returned
+  `status=ok`; Alembic is `u2c6m8p10046 (head)`; the container build SHA is
+  `caa41a8`; and the container contains the new same-space detail guidance.
+- Next action: normal use; no further deployment or data operation is pending.
 - Blocked reason: none.

@@ -731,8 +731,7 @@ database rows.
 
 ### 2026-08-31 - Use cross-channel dialogue context for normal story arcs
 
-- Status: source implementation committed and verified; deployment not
-  performed.
+- Status: completed and deployed.
 - Type: local story-arc planning context repair.
 - Git result: committed `300218c` on `local/customizations`.
 - Scope: ordinary LLM-planned story-arc summaries now read the existing
@@ -791,6 +790,15 @@ database rows.
   `git diff --check` passed. The `tools_and_outcomes` golden also caught up
   with a pre-existing explicit-image-trigger source wording without a source
   behavior change in that area.
-- Deployment: none. No migration or live-data operation was run.
-- Follow-up: review the narrow source commit, then separately approve a local
-  app deployment when the new same-space guidance should take effect.
+- Backup: `pre-same-space-detail-guidance-20260831-231054.dump`, verified as a
+  PostgreSQL custom-format archive with `pg_restore --list`; SHA-256
+  `86DFF9650FB0CD089208FCB88AA231E72F8C4302AFCDB6C8F1CA839669D4D167`.
+- Deployment: built only `yuralume-local/app:custom`
+  (`sha256:cda6321024f9eb3927bc6ed38201f1488fba72d13f237b8acdca33234bcc7e3d`),
+  ran the existing migration gate successfully, and recreated only `app`.
+  PostgreSQL, storage, WhatsApp sidecar, and volumes were retained. No schema
+  or live-data change was applied.
+- Runtime verification: all Compose services are healthy; `/health` returned
+  `status=ok`; Alembic is `u2c6m8p10046 (head)`; runtime build SHA is
+  `caa41a8`; and the container contains the new same-space detail guidance.
+- Follow-up: normal use; no further deployment action is pending.
