@@ -2,10 +2,10 @@
 
 ## Status
 
-Source implementation is committed and verified on `local/customizations` as
-`300218c`; it has not been deployed. This reference covers only the normal
-LLM-planned story-arc dialogue context. It does not change abandoned-arc
-history handling.
+Source implementation is committed as `300218c` and deployed from
+`local/customizations` build `4b78590` on 2026-08-31. This reference covers
+only the normal LLM-planned story-arc dialogue context. It does not change
+abandoned-arc history handling.
 
 ## Problem
 
@@ -79,15 +79,14 @@ path.
 3. [x] Switch the normal planner summary helper to the merged message tail.
 4. [x] Add/update focused regression tests.
 5. [x] Verify and commit the scoped source change.
-6. [ ] Await separate deployment approval.
+6. [x] Deploy the local source image after a verified PostgreSQL backup.
 
 ## Checkpoint
 
-- Current implementation step: source change is committed and source-only
-  verification is complete; deployment remains pending separate approval.
-- Last verified commit: `300218c local: use cross-channel story arc context`.
-- Working tree: clean after the source commit and progress-record commit
-  `65eebe7 local: record cross-channel arc planner change`.
+- Current implementation step: deployment and runtime verification complete.
+- Last verified build: `4b78590`, containing behavior commit
+  `300218c local: use cross-channel story arc context`.
+- Working tree: deployment-record update pending.
 - Last test: StoryArcService/planner/context suites — 63 passed; cross-source
   conversation repository suites — 26 passed; broader story-arc / event /
   planner suite — 276 passed; final dialogue-summary/service rerun — 31
@@ -97,6 +96,14 @@ path.
 - Files changed: `src/kokoro_link/application/services/story_arc_service.py`,
   `tests/unit/test_story_arc_dialogue_summary.py`, and test-only isolation
   updates in `tests/unit/test_story_arc_service.py`.
-- Next action: await separate deployment approval; no migration, live-data
-  change, or deployment is part of the current request.
+- Deployment: backup `pre-cross-channel-arc-planner-20260831-114811.dump`
+  verified as PostgreSQL custom format; SHA-256
+  `1575101598705076DD27FC7C8ABE720A930A8EB9A0B2CA0F26FA01272A479FEE`.
+  Built only `yuralume-local/app:custom`, recreated migration gate and app,
+  and retained PostgreSQL, storage, WhatsApp sidecar, and volumes. Migration
+  exited 0; Alembic is `u2c6m8p10046 (head)`; all services are healthy;
+  `/health` returned `status=ok`; and the deployed source file contains the
+  cross-channel repository call.
+- Next action: normal use. Regenerate or create a non-abandoned story arc when
+  appropriate to use the new context; no existing records were rewritten.
 - Blocked reason: none.

@@ -749,3 +749,24 @@ database rows.
 - Deployment: none.
 - Follow-up: separately approve a local-source deployment when this behavior
   should be enabled in the running app.
+
+### 2026-08-31 - Deploy cross-channel story-arc context repair
+
+- Status: completed and deployed.
+- Type: local story-arc planning context repair deployment.
+- Git/build result: behavior commit `300218c` deployed from verified local
+  build `4b78590` on `local/customizations`.
+- Data safety: this is a read-path-only change. No conversation, arc, beat,
+  schedule, memory, goal, promise, cooldown, or schema data was rewritten.
+- Backup: `pre-cross-channel-arc-planner-20260831-114811.dump`, verified as a
+  PostgreSQL custom-format archive with `pg_restore --list`; SHA-256
+  `1575101598705076DD27FC7C8ABE720A930A8EB9A0B2CA0F26FA01272A479FEE`.
+- Deployment: built only `yuralume-local/app:custom`, ran the existing migrate
+  service successfully, and recreated only `app`. PostgreSQL, storage,
+  WhatsApp sidecar, and volumes were retained.
+- Runtime verification: all Compose services are healthy; `/health` returned
+  `status=ok`; migration exited 0; Alembic is `u2c6m8p10046 (head)`; build SHA
+  is `4b78590`; the app container includes the merged cross-channel planner
+  call; and no startup error or traceback lines were found.
+- Follow-up: create or regenerate a normal story arc when appropriate; its
+  summary will then include the recent web, Telegram, and LINE timeline.
