@@ -666,7 +666,11 @@ async def test_manual_reassessment_keeps_pending_without_interaction_evidence() 
         dialogue_summarizer=summarizer,  # type: ignore[arg-type]
     )
     character = _character()
-    arc = await svc.start_new_arc(character, today=date(2026, 5, 1))
+    arc = await svc.start_new_arc(
+        character,
+        today=date(2026, 5, 1),
+        recent_dialogue_summary="測試 arc 的既有摘要",
+    )
     beat = arc.beats[0]
 
     decision = await svc.reassess_pending_beat(
@@ -700,7 +704,11 @@ async def test_manual_reassessment_uses_cross_source_dialogue_summary() -> None:
         dialogue_summarizer=summarizer,  # type: ignore[arg-type]
     )
     character = _character()
-    arc = await svc.start_new_arc(character, today=date(2026, 5, 1))
+    arc = await svc.start_new_arc(
+        character,
+        today=date(2026, 5, 1),
+        recent_dialogue_summary="測試 arc 的既有摘要",
+    )
     beat = arc.beats[0]
 
     await svc.reassess_pending_beat(

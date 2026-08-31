@@ -1859,28 +1859,30 @@ the everyday gacha never draws
     # ---- internals ----------------------------------------------------
 
     async def _summarize_recent_dialogue(self, character: Character) -> str:
-        """Condense the latest web conversation so the arc planner can
-        pick up the thread. Returns empty string when dependencies are
-        unwired, there is no conversation, or the summariser fails."""
+        """Condense the recent cross-channel dialogue for story planning.
+
+        ``recent_messages_for_character`` is the canonical unified timeline
+        for a character (web, Telegram, LINE, and other channels). Keep the
+        bounded tail and tool-only filtering here so every existing planner
+        caller receives the same evidence without changing its fail-soft
+        contract.
+        """
         if (
             self._conversation_repository is None
             or self._dialogue_summarizer is None
         ):
             return ""
         try:
-            conversation = await self._conversation_repository.latest_for_character(
-                character.id, source="web",
+            messages = await self._conversation_repository.recent_messages_for_character(
+                character.id,
+                limit=_DIALOGUE_CONTEXT_LIMIT,
+                exclude_tool_only=True,
             )
         except Exception:
             _LOGGER.exception(
                 "arc dialogue load failed character=%s", character.id,
             )
             return ""
-        if conversation is None:
-            return ""
-        messages = conversation.recent_messages(
-            limit=_DIALOGUE_CONTEXT_LIMIT, exclude_tool_only=True,
-        )
         if not messages:
             return ""
         messages = sanitize_messages_for_tolerance(

@@ -1,16 +1,16 @@
 """StoryArcService forwards recent-dialogue summary into the planner.
 
 Mirrors ``test_schedule_dialogue_summary`` for the arc pipeline:
-``start_new_arc`` should run the summarizer against the latest web
-conversation (tool-only turns filtered) and pass the output to
-``plan_arc``. Missing conversation / unwired summarizer / summarizer
+``start_new_arc`` should run the summarizer against a bounded, merged
+web + Telegram + LINE timeline (tool-only turns filtered) and pass the
+output to ``plan_arc``. Missing history / unwired summarizer / summarizer
 failure all degrade to ``recent_dialogue_summary=""`` without breaking
 arc creation.
 """
 
 from __future__ import annotations
 
-from datetime import date, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -111,6 +111,25 @@ async def _seed_conversation(
     await repo.save(convo)
 
 
+async def _seed_channel(
+    repo: InMemoryConversationRepository,
+    character_id: str,
+    *,
+    source: str,
+    messages: list[tuple[MessageRole, str, MessageKind]],
+) -> None:
+    """Persist a deterministic channel tail for the planner merge test."""
+    convo = Conversation.start(character_id=character_id, source=source)
+    for index, (role, content, kind) in enumerate(messages):
+        convo = convo.append(Message(
+            role=role,
+            content=content,
+            kind=kind,
+            created_at=datetime(2026, 4, 18, 12, index, tzinfo=UTC),
+        ))
+    await repo.save(convo)
+
+
 @pytest.mark.asyncio
 async def test_arc_start_forwards_summary_into_planner() -> None:
     repo = InMemoryStoryArcRepository()
@@ -122,12 +141,35 @@ async def test_arc_start_forwards_summary_into_planner() -> None:
         conversation_repository=convos, dialogue_summarizer=summarizer,
     )
     character = _character()
-    await _seed_conversation(convos, character.id)
+    await _seed_channel(
+        convos,
+        character.id,
+        source="web",
+        messages=[(MessageRole.USER, "web context", MessageKind.CHAT)],
+    )
+    await _seed_channel(
+        convos,
+        character.id,
+        source="telegram",
+        messages=[(MessageRole.USER, "telegram context", MessageKind.CHAT)],
+    )
+    await _seed_channel(
+        convos,
+        character.id,
+        source="line",
+        messages=[
+            (MessageRole.ASSISTANT, "line context", MessageKind.CHAT),
+            (MessageRole.ASSISTANT, "tool artifact", MessageKind.TOOL_ONLY),
+        ],
+    )
 
     await service.start_new_arc(character, today=date(2026, 4, 18))
 
     assert planner.last_summary == "最近你在陪對方處理煩悶"
     assert len(summarizer.calls) == 1
+    assert [message.content for message in summarizer.calls[0]] == [
+        "web context", "telegram context", "line context",
+    ]
     assert all(m.kind is MessageKind.CHAT for m in summarizer.calls[0])
 
 
