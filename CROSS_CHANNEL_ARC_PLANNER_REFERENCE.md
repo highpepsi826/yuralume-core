@@ -86,7 +86,8 @@ path.
 - Current implementation step: source change is committed and source-only
   verification is complete; deployment remains pending separate approval.
 - Last verified commit: `300218c local: use cross-channel story arc context`.
-- Working tree: clean after the source commit; progress-record update pending.
+- Working tree: clean after the source commit and progress-record commit
+  `65eebe7 local: record cross-channel arc planner change`.
 - Last test: StoryArcService/planner/context suites — 63 passed; cross-source
   conversation repository suites — 26 passed; broader story-arc / event /
   planner suite — 276 passed; final dialogue-summary/service rerun — 31
