@@ -86,7 +86,8 @@ path.
 - Current implementation step: deployment and runtime verification complete.
 - Last verified build: `4b78590`, containing behavior commit
   `300218c local: use cross-channel story arc context`.
-- Working tree: deployment-record update pending.
+- Working tree: clean after deployment-record commit
+  `d0f1ed1 local: record cross-channel arc planner deployment`.
 - Last test: StoryArcService/planner/context suites — 63 passed; cross-source
   conversation repository suites — 26 passed; broader story-arc / event /
   planner suite — 276 passed; final dialogue-summary/service rerun — 31
