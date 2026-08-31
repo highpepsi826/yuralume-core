@@ -101,6 +101,7 @@ def _assert_not_texting_style(prompt: str) -> None:
     assert "通常一到三則" not in prompt
     assert "不要使用 `*...*`" not in prompt
     assert "動作、表情、或當下狀態的描寫請用" in prompt
+    assert "數個連續的具體動作" in prompt
 
 
 def test_stage_frame_renders_player_declared_narrative_guidance() -> None:
@@ -154,6 +155,7 @@ def test_web_dm_frame_still_renders_texting_style() -> None:
     assert "通常一到三則" in prompt
     assert "連發四五則以上是少數" in prompt
     assert "動作、表情、或當下狀態的描寫請用" not in prompt
+    assert "數個連續的具體動作" not in prompt
     assert "手機文字訊息" in prompt
     # The stage narrative block must not leak into the phone branch.
     assert "玩家宣告此刻與你同場" not in prompt
@@ -170,6 +172,7 @@ def test_messaging_frame_still_renders_texting_style() -> None:
     assert "手機即時通訊" in prompt
     assert "洗版" in prompt
     assert "動作、表情、或當下狀態的描寫請用" not in prompt
+    assert "數個連續的具體動作" not in prompt
     assert "玩家宣告此刻與你同場" not in prompt
 
 

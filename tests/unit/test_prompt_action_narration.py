@@ -100,6 +100,23 @@ def test_prompt_pins_action_narration_to_operator_primary_language() -> None:
     assert "不要因為下方格式範例是中文就把動作描寫寫成中文" in prompt
 
 
+def test_stage_prompt_invites_grounded_scene_detail_without_old_blanket_cap() -> None:
+    """Same-space prose may breathe when the scene calls for it.
+
+    The prompt should encourage concrete sensory progression while retaining
+    the frontend's asterisk boundary and the no-invented-player rule.
+    """
+    prompt = _build_prompt()
+
+    assert "環境與感官細節" in prompt
+    assert "數個連續的具體動作" in prompt
+    assert "空間距離" in prompt
+    assert "每個 `*...*` 段落請保持單一行" in prompt
+    assert "不要把整篇回覆包在同一組星號裡" in prompt
+    assert "不要替玩家虛構未宣告的行動、表情、位置或想法" in prompt
+    assert "不要一整段散文包在星號裡" not in prompt
+
+
 def test_text_message_prompt_uses_texting_format_instead_of_action_convention() -> None:
     prompt = _build_prompt(presence_frame=PresenceFrame.web_dm())
 

@@ -770,3 +770,24 @@ database rows.
   call; and no startup error or traceback lines were found.
 - Follow-up: create or regenerate a normal story arc when appropriate; its
   summary will then include the recent web, Telegram, and LINE timeline.
+
+### 2026-08-31 - Enrich same-space reply guidance
+
+- Status: source implementation verified; deployment not performed.
+- Type: local prompt-quality adjustment.
+- Scope: the normal web same-space response format now permits grounded,
+  scene-dependent environment, sensory, spatial, pause, and continuous-action
+  detail in the existing `*...*` action spans. It does not impose a fixed
+  length, add a UI mode, change persistence, or alter phone, Telegram, or LINE
+  text-message guidance.
+- Safety: asterisk spans must remain single-line and moderate in size; the
+  prompt explicitly retains the existing no-invented-player rule and prohibits
+  creating durable facts, people, places, or commitments merely to add prose.
+- Verification: stage/presence regression tests passed 19; prompt golden tests
+  passed 85 after intentional snapshot refresh; prompt compilation and
+  `git diff --check` passed. The `tools_and_outcomes` golden also caught up
+  with a pre-existing explicit-image-trigger source wording without a source
+  behavior change in that area.
+- Deployment: none. No migration or live-data operation was run.
+- Follow-up: review the narrow source commit, then separately approve a local
+  app deployment when the new same-space guidance should take effect.
