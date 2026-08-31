@@ -2,8 +2,8 @@
 
 ## Status
 
-Approved for implementation on `local/customizations`; source and live data are
-unchanged at the start of this work. This reference covers only the normal
+Source implementation is committed and verified on `local/customizations` as
+`300218c`; it has not been deployed. This reference covers only the normal
 LLM-planned story-arc dialogue context. It does not change abandoned-arc
 history handling.
 
@@ -78,23 +78,24 @@ path.
 2. [x] Record the cross-channel design and non-goals in this reference.
 3. [x] Switch the normal planner summary helper to the merged message tail.
 4. [x] Add/update focused regression tests.
-5. [x] Verify and update checkpoint; local commit is the next immediate step.
+5. [x] Verify and commit the scoped source change.
 6. [ ] Await separate deployment approval.
 
 ## Checkpoint
 
-- Current implementation step: source change and focused verification complete;
-  commit and any deployment remain pending.
-- Last verified commit: `0471b7c local: record schedule identity hotfix deployment`.
-- Working tree: source, tests, and this reference are uncommitted.
+- Current implementation step: source change is committed and source-only
+  verification is complete; deployment remains pending separate approval.
+- Last verified commit: `300218c local: use cross-channel story arc context`.
+- Working tree: clean after the source commit; progress-record update pending.
 - Last test: StoryArcService/planner/context suites — 63 passed; cross-source
   conversation repository suites — 26 passed; broader story-arc / event /
-  planner suite — 276 passed; compile and `git diff --check` passed. The
+  planner suite — 276 passed; final dialogue-summary/service rerun — 31
+  passed; compile and `git diff --check` passed. The
   broader suite's sandbox-only Windows temp permission errors were reproduced
   as environmental and passed unchanged in the local-permission rerun.
 - Files changed: `src/kokoro_link/application/services/story_arc_service.py`,
   `tests/unit/test_story_arc_dialogue_summary.py`, and test-only isolation
   updates in `tests/unit/test_story_arc_service.py`.
-- Next action: inspect the final diff, update the progress record, and create
-  a narrow `local:` commit; deployment requires separate approval.
+- Next action: await separate deployment approval; no migration, live-data
+  change, or deployment is part of the current request.
 - Blocked reason: none.

@@ -728,3 +728,24 @@ database rows.
   log appeared.
 - Follow-up: retry 「重新判定」 in the Story Arc panel; it should now proceed
   to the evidence review result.
+
+### 2026-08-31 - Use cross-channel dialogue context for normal story arcs
+
+- Status: source implementation committed and verified; deployment not
+  performed.
+- Type: local story-arc planning context repair.
+- Git result: committed `300218c` on `local/customizations`.
+- Scope: ordinary LLM-planned story-arc summaries now read the existing
+  merged web, Telegram, LINE, and other channel timeline, ordered by message
+  timestamp and excluding tool-only artifacts. New arcs, regeneration, season
+  context, and normal beat recheck share this helper.
+- Explicit non-goal: abandoned/completed arc history handling is unchanged.
+- Data safety: no migration, live-row edit, conversation/schedule/story/goal/
+  promise/memory change, or proactive cooldown change.
+- Verification: focused StoryArcService/planner/context tests passed 63;
+  cross-source conversation repository tests passed 26; broader story-arc /
+  event / planner tests passed 276; final dialogue-summary/service tests
+  passed 31. Source compilation and diff checks passed.
+- Deployment: none.
+- Follow-up: separately approve a local-source deployment when this behavior
+  should be enabled in the running app.
