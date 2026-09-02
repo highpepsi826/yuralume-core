@@ -10,6 +10,7 @@ build/
 # ── Environment / Secrets ──
 .env
 .env.container
+deploy/zeabur/production.env
 *.local
 *.pem
 
