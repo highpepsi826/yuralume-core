@@ -53,7 +53,7 @@ const navItems: AdminNavItem[] = [
 
   { labelKey: 'admin.nav.proactive', to: '/admin/proactive', group: 'behavior', debugOnly: true },
   { labelKey: 'admin.nav.schedule', to: '/admin/schedule', group: 'behavior', cloudOperatorOnly: true },
-  { labelKey: 'admin.nav.followUps', to: '/admin/follow-ups', group: 'behavior', debugOnly: true },
+  { labelKey: 'admin.nav.followUps', to: '/admin/follow-ups', group: 'behavior' },
   { labelKey: 'admin.nav.world', to: '/admin/world', group: 'behavior', cloudOperatorOnly: true },
 
   { labelKey: 'admin.nav.observability', to: '/admin/observability', group: 'ops', cloudLocked: true },

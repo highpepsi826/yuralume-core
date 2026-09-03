@@ -47,8 +47,9 @@ const needsSetup = ref<boolean>(false)
 const buildInfo = ref<BuildInfo | null>(null)
 // Mirror of backend KOKORO_DEBUG_UI_ENABLED. Drives whether the SPA
 // renders developer-facing admin panels — observability, experiments,
-// pending follow-ups, subsystem health metrics, persona drift / pattern
-// timelines. Default false so the public build hides them.
+// subsystem health metrics, persona drift / pattern timelines. Default false
+// so the public build hides them; the operational pending-follow-ups page is
+// intentionally not behind this flag.
 const debugUiEnabled = ref<boolean>(false)
 // Absolute URL of the account Portal, advertised by hosted deployments only
 // (self-host leaves it null). Drives the "back to the account centre" exits

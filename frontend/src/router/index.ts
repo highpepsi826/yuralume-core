@@ -82,7 +82,6 @@ const adminPlaceholderRoutes: RouteRecordRaw[] = [
     path: 'follow-ups',
     name: 'admin-follow-ups',
     component: () => import('@/pages/admin/FollowUpsAdminPage.vue'),
-    meta: { debugOnly: true },
   },
   {
     path: 'world',
@@ -310,8 +309,8 @@ router.beforeEach(async (to) => {
     return { path: '/' }
   }
 
-  // Developer-only routes (observability, experiments, follow-ups,
-  // disposition / pattern timelines, proactive funnel). Hidden from
+  // Developer-only routes (observability, experiments, disposition / pattern
+  // timelines, proactive funnel). Hidden from
   // both nav and direct URL access unless the deployment owner set
   // ``KOKORO_DEBUG_UI_ENABLED=true``. Backend admin APIs stay
   // reachable for curl-based exports regardless.

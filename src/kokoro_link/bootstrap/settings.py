@@ -1276,8 +1276,9 @@ class AppSettings:
     """
     debug_ui_enabled: bool = False
     """Surface developer-facing admin panels (observability, experiments,
-    pending follow-ups, subsystem health metrics, persona disposition drift /
-    behavioural patterns) in the frontend.
+    subsystem health metrics, persona disposition drift / behavioural
+    patterns) in the frontend. The operational pending-follow-ups admin page
+    is not controlled by this flag.
 
     Driven by ``KOKORO_DEBUG_UI_ENABLED``. Default is ``False`` so the
     public self-host build hides the panels and gives players a clean

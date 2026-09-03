@@ -148,6 +148,12 @@ describe('AdminLayout mobile drawer (SSR render)', () => {
     expect(html).toContain('admin-layout__crumb-sep')
     expect(html).toContain('is-current')
   })
+
+  it('keeps pending follow-ups visible when the developer UI flag is off', async () => {
+    const html = await render('/admin/follow-ups')
+    expect(html).toContain('href="/admin/follow-ups"')
+    expect(html).toContain(zhTW.admin.nav.followUps)
+  })
 })
 
 describe('AdminLayout mobile drawer CSS contract (source scan)', () => {

@@ -99,9 +99,9 @@ class AuthConfigResponse(BaseModel):
     """Mirror of ``AppSettings.debug_ui_enabled`` (env
     ``KOKORO_DEBUG_UI_ENABLED``). Lets the SPA decide whether to
     render developer-facing admin panels (observability, experiments,
-    pending follow-ups, subsystem health metrics, persona drift / pattern
-    timelines) on startup. Backend admin APIs are unaffected — flag
-    only controls UI rendering."""
+    subsystem health metrics, persona drift / pattern timelines) on startup.
+    The operational pending-follow-ups admin page is not controlled by this
+    flag. Backend admin APIs are unaffected — flag only controls UI rendering."""
 
 
 class SetupStatusResponse(BaseModel):

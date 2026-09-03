@@ -65,10 +65,10 @@ export interface AuthConfig {
   /**
    * Mirror of backend ``AppSettings.debug_ui_enabled`` (env
    * ``KOKORO_DEBUG_UI_ENABLED``). When false the SPA hides
-   * developer-facing admin panels — observability, experiments,
-   * pending-follow-ups, subsystem health metrics, persona drift / pattern
-   * timelines — so the public build stays clean. Backend admin APIs
-   * remain reachable either way.
+   * developer-facing admin panels — observability, experiments, subsystem
+   * health metrics, persona drift / pattern timelines — so the public build
+   * stays clean. The operational pending-follow-ups admin page is not gated
+   * by this flag. Backend admin APIs remain reachable either way.
    */
   debug_ui_enabled?: boolean
   /**

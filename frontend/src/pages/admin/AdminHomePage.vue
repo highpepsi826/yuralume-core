@@ -136,7 +136,6 @@ const entries: AdminPanelEntry[] = [
     titleKey: 'admin.home.entries.followUps.title',
     descriptionKey: 'admin.home.entries.followUps.description',
     group: 'behavior',
-    debugOnly: true,
   },
   {
     to: '/admin/world',

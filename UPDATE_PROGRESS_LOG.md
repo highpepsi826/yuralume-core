@@ -802,3 +802,20 @@ database rows.
   `status=ok`; Alembic is `u2c6m8p10046 (head)`; runtime build SHA is
   `caa41a8`; and the container contains the new same-space detail guidance.
 - Follow-up: normal use; no further deployment action is pending.
+
+### 2026-09-04 - Expose pending-follow-ups admin tool
+
+- Status: source implementation committed and verified; Zeabur deployment not
+  performed.
+- Type: narrow frontend admin-navigation visibility fix.
+- Scope: pending follow-ups remains protected by the existing admin routes and
+  is now visible in the admin sidebar, admin home, and direct route even when
+  `KOKORO_DEBUG_UI_ENABLED` is false. Other developer-only panels remain behind
+  the debug flag.
+- Data safety: no database, storage, Telegram, scheduler, or live user data
+  was changed. No migration is needed.
+- Verification: focused frontend navigation tests passed 14; `vue-tsc -b`
+  passed; Vite production build passed; `git diff --check` passed.
+- Follow-up: the Zeabur memory request/limit and end-to-end backup streaming
+  work are recorded in `PENDING_ZEABUR_STABILITY_AND_ADMIN_MENU.md` and remain
+  deferred to a separately approved implementation/deployment pass.
