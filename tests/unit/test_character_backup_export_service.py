@@ -319,6 +319,17 @@ async def _run_export(env, service, character_id="char-1"):
     return stored
 
 
+class _RecordingStreamStorage(InMemoryObjectStorage):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stream_calls = 0
+
+    async def put_stream(self, **kwargs):  # noqa: ANN003, ANN201
+        if kwargs["object_key"].startswith(BACKUP_EXPORT_OBJECT_KEY_PREFIX):
+            self.stream_calls += 1
+        return await super().put_stream(**kwargs)
+
+
 def _open_archive(encrypted: bytes, password: str) -> io.BytesIO:
     plain = io.BytesIO()
     decrypt_stream(io.BytesIO(encrypted), plain, password=password)
@@ -329,6 +340,17 @@ def _open_archive(encrypted: bytes, password: str) -> io.BytesIO:
 # ---------------------------------------------------------------------------
 # 驗收 1 — 正確密碼開得起來、逐表筆數與 manifest 一致
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_export_uses_streaming_object_storage_upload(env) -> None:  # noqa: ANN001
+    env.storage = _RecordingStreamStorage()
+    await _seed_full_character(env)
+
+    stored = await _run_export(env, _service(env))
+
+    assert stored.status == BACKUP_JOB_STATUS_SUCCEEDED
+    assert env.storage.stream_calls == 1
 
 
 @pytest.mark.asyncio

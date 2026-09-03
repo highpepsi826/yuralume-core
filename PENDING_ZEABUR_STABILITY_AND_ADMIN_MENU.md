@@ -3,8 +3,9 @@
 ## Status
 
 Planning reference created 2026-09-04. The pending-follow-ups navigation fix is
-approved for a narrow source change. The memory/resource and streaming work is
-deferred until a separate implementation pass and production approval.
+complete. The streaming/resource work is approved for implementation after the
+Zeabur host was upgraded to 4 vCPU / 8 GB RAM / 70 GB disk on 2026-09-04.
+Production rollout remains a separate, explicit step after local verification.
 
 ## Problems
 
@@ -41,12 +42,13 @@ panels stay behind the debug flag.
    unchanged.
 3. Add focused frontend regression coverage for visibility with the debug flag
    off, including the menu entry and direct route metadata.
-4. In a later pass, add end-to-end streaming upload for large backup artifacts:
-   an additive object-storage capability, an app-side file/stream uploader,
-   chunked storage-service ingestion with incremental size/hash accounting,
-   and focused adapter/service/export tests.
-5. In a separate deployment step, set measured Pod memory requests/limits and
-   document the values in the Zeabur runbook.
+4. Add end-to-end streaming upload for large backup artifacts and staged
+   restore uploads: an additive object-storage capability, a shared app-side
+   file/stream uploader, raw chunked HTTP transport, chunked storage-service
+   ingestion with incremental size/hash accounting, and focused
+   adapter/service/export/import tests.
+5. Set measured Pod memory requests/limits for the upgraded Zeabur host in a
+   separate deployment step and document the applied values in the runbook.
 
 ## Explicit non-goals
 
@@ -82,18 +84,20 @@ panels stay behind the debug flag.
 - `frontend/src/pages/admin/AdminHomePage.vue`
 - `frontend/src/router/index.ts`
 - `frontend/tests/` navigation regression coverage
-- Later streaming pass: `contracts/object_storage.py`,
-  `infrastructure/storage/http.py`, `storage_service/app.py`,
-  `application/services/character_backup_export_service.py`, and related
+- Streaming pass: `contracts/object_storage.py`,
+  `infrastructure/storage/http.py`, `infrastructure/storage/in_memory.py`,
+  `storage_service/app.py`, shared application upload helper,
+  `application/services/character_backup_export_service.py`,
+  `application/services/character_backup_import_service.py`, and related
   tests/Docker image publishing.
 
 ## Test and verification plan
 
 - Run the focused frontend navigation test(s), TypeScript check, and frontend
   build for the menu change.
-- Later run focused backup-export and storage adapter/service tests, including
-  a large-file path that verifies bounded buffering and unchanged artifact
-  bytes.
+- Run focused backup-export/import and storage adapter/service tests, including
+  a large-file path that verifies bounded buffering, incremental SHA-256, and
+  unchanged artifact bytes.
 - Run `git diff --check` after each small step.
 - Before any production rollout, verify the app-only deployment and separately
   verify the storage image if that image changed.
@@ -105,16 +109,51 @@ panels stay behind the debug flag.
    entry and route; preserve all admin authorization. **Complete**
 3. Add and run focused frontend regression coverage. **Complete**
 4. Commit the narrow menu fix and record it in `UPDATE_PROGRESS_LOG.md`.
-   **In progress**
-5. Design and implement end-to-end streaming upload in a separate pass.
-   **Deferred**
+   **Complete**
+5. Design and implement end-to-end streaming upload. **Complete**
 6. Measure and set Pod resource requests/limits in Zeabur, then deploy through
    the reviewed branch/image workflow. **Deferred**
 
 ## Deployment status
 
 No production setting, database, storage volume, or Zeabur service has been
-modified by this reference.
+modified by this reference during the implementation pass.
+
+## Implementation decisions (2026-09-04)
+
+- `SupportsObjectStreamUpload.put_stream` is optional and remains outside
+  `ObjectStoragePort`; adapters and test doubles without it continue to use
+  `put_bytes`.
+- The HTTP adapter sends `PUT /v1/objects/stream/{object_key}` with a raw
+  async byte stream. Content type and JSON metadata travel in dedicated
+  headers, so multipart encoding cannot buffer the archive in the app.
+- The storage service writes the request stream to a per-object temporary file,
+  enforces `max_object_bytes` while receiving it, computes SHA-256
+  incrementally, and publishes metadata only after an atomic object replace.
+- Export and import staging share a file uploader that reads at most one
+  `DEFAULT_STREAM_CHUNK_BYTES` chunk at a time. The compatibility fallback is
+  intentionally retained for adapters that only implement `put_bytes`.
+- The upgraded 8 GB host permits a separately measured resource policy, but no
+  Zeabur resource setting is changed until the code pass and local tests are
+  complete.
+
+## Streaming implementation checkpoint (2026-09-04)
+
+- Source implementation is complete in the optional `put_stream` capability,
+  shared file uploader, HTTP adapter, in-memory adapter, storage service, and
+  CB2/CB3 services.
+- Storage's default object ceiling is now 2 GiB, matching the backup import
+  contract; a Zeabur storage service should set
+  `YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648` explicitly.
+- Verification: 97 storage/variant/uploader tests and 100 storage-service/
+  backup export/import tests passed; Python compilation and `git diff --check`
+  passed.
+- Docker image build was not available on this workstation because the Docker
+  CLI/daemon is absent. No Zeabur app or storage image has been published and
+  no production setting or data was changed.
+- Next action: commit and push the source, publish a pinned `app` and
+  `storage-local` image from the same revision, then set and verify Zeabur Pod
+  resources before an app/storage rolling deployment.
 
 ## Menu-fix verification checkpoint
 

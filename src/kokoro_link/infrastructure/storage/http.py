@@ -57,6 +57,43 @@ class HttpObjectStorage:
         data = self._parse_response(response)
         return _stored_from_json(data, public_base_url=self._public_base_url)
 
+    async def put_stream(
+        self,
+        *,
+        object_key: str,
+        chunks: AsyncIterator[bytes],
+        content_type: str,
+        metadata: Mapping[str, str] | None = None,
+    ) -> StoredObject:
+        """Upload an object as a raw async stream.
+
+        Multipart encoding is intentionally avoided here: httpx's ordinary
+        ``files=`` path expects a concrete bytes/file value and can therefore
+        materialise a GB-scale backup before sending it. The storage service
+        accepts the object key, content type, and metadata in headers and
+        receives the request body with HTTP chunked transfer encoding when no
+        content length is known.
+        """
+        key = validate_object_key(object_key)
+        headers = {
+            **self._headers(),
+            "Content-Type": "application/octet-stream",
+            "X-Object-Content-Type": content_type,
+            "X-Object-Metadata": json.dumps(
+                dict(metadata or {}),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+        }
+        response = await self._send(
+            "PUT",
+            f"{self._base_url}/v1/objects/stream/{key}",
+            headers=headers,
+            content=_AsyncIteratorByteStream(chunks),
+        )
+        data = self._parse_response(response)
+        return _stored_from_json(data, public_base_url=self._public_base_url)
+
     async def get_bytes(self, *, object_key: str) -> bytes:
         key = validate_object_key(object_key)
         response = await self._send(
@@ -172,10 +209,14 @@ class HttpObjectStorage:
         failed. Wrap it in :class:`ObjectStorageUnavailableError` naming
         the storage base URL so callers/logs can point at the right box.
         """
+        headers = kwargs.pop("headers", None)
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 return await client.request(
-                    method, url, headers=self._headers(), **kwargs,
+                    method,
+                    url,
+                    headers=self._headers() if headers is None else headers,
+                    **kwargs,
                 )
         except httpx.HTTPError as exc:
             raise ObjectStorageUnavailableError(
@@ -223,6 +264,22 @@ def _stored_from_json(data: Mapping, *, public_base_url: str) -> StoredObject:
         sha256=data.get("sha256"),
         metadata=dict(data.get("metadata") or {}),
     )
+
+
+class _AsyncIteratorByteStream(httpx.AsyncByteStream):
+    """Bridge an application async iterator to httpx's request streaming API."""
+
+    def __init__(self, chunks: AsyncIterator[bytes]) -> None:
+        self._chunks = chunks
+
+    async def __aiter__(self):  # noqa: ANN201
+        async for chunk in self._chunks:
+            yield chunk
+
+    async def aclose(self) -> None:
+        close = getattr(self._chunks, "aclose", None)
+        if callable(close):
+            await close()
 
 
 def _metadata_from_json(data: Mapping, *, public_base_url: str) -> ObjectMetadata:

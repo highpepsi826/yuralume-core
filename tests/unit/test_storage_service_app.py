@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from pathlib import Path
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from kokoro_link.storage_service.app import (
     BACKUP_EXPORT_TTL_SECONDS,
     DEFAULT_EPHEMERAL_TTL_SECONDS,
+    DEFAULT_MAX_OBJECT_BYTES,
     MIN_EPHEMERAL_TTL_SECONDS,
     LocalStorageSettings,
     _resolve_prefix_dir,
@@ -85,6 +87,76 @@ def test_storage_service_upload_metadata_public_and_delete(
     assert client.get("/v1/public/feed/char-1/a.png").status_code == 404
 
 
+def test_storage_service_stream_upload_is_atomic_and_hashes_incrementally(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    client = _client(tmp_path, monkeypatch)
+    headers = {
+        "Authorization": "Bearer secret",
+        "X-Object-Content-Type": "application/octet-stream",
+        "X-Object-Metadata": '{"kind":"backup","slot":"export"}',
+    }
+    payload = b"streamed-backup-bytes" * 32
+
+    response = client.put(
+        "/v1/objects/stream/character-backups/u1/job.lumebackup",
+        headers=headers,
+        content=payload,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["object_key"] == "character-backups/u1/job.lumebackup"
+    assert body["size_bytes"] == len(payload)
+    assert body["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert body["metadata"] == {"kind": "backup", "slot": "export"}
+    assert client.get(
+        "/v1/public/character-backups/u1/job.lumebackup",
+    ).content == payload
+    assert list((tmp_path / "objects").rglob("*.part")) == []
+
+
+def test_storage_service_stream_upload_rejects_over_limit_without_publish(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("YURALUME_STORAGE_MAX_OBJECT_BYTES", "8")
+    client = _client(tmp_path, monkeypatch)
+    headers = {
+        "Authorization": "Bearer secret",
+        "X-Object-Content-Type": "application/octet-stream",
+    }
+
+    client.post(
+        "/v1/objects",
+        headers={"Authorization": "Bearer secret"},
+        data={
+            "object_key": "character-backups/u1/too-large.lumebackup",
+            "content_type": "application/octet-stream",
+        },
+        files={
+            "file": (
+                "too-large.lumebackup",
+                b"old",
+                "application/octet-stream",
+            ),
+        },
+    )
+
+    response = client.put(
+        "/v1/objects/stream/character-backups/u1/too-large.lumebackup",
+        headers=headers,
+        content=b"123456789",
+    )
+
+    assert response.status_code == 413
+    existing = client.get(
+        "/v1/public/character-backups/u1/too-large.lumebackup",
+    )
+    assert existing.status_code == 200
+    assert existing.content == b"old"
+    assert list((tmp_path / "objects").rglob("*.part")) == []
+
+
 def test_storage_service_requires_auth_for_protected_routes(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -118,6 +190,18 @@ def test_storage_service_accepts_compose_storage_env_aliases(
 
     assert response.status_code == 200
     assert response.json()["url"] == "http://127.0.0.1:9012/v1/public/probe/a.txt"
+
+
+def test_storage_service_default_object_cap_matches_backup_contract(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("YURALUME_STORAGE_ROOT", str(tmp_path))
+    monkeypatch.delenv("YURALUME_STORAGE_MAX_OBJECT_BYTES", raising=False)
+
+    settings = LocalStorageSettings.from_env()
+
+    assert DEFAULT_MAX_OBJECT_BYTES == 2 * 1024 * 1024 * 1024
+    assert settings.max_object_bytes == DEFAULT_MAX_OBJECT_BYTES
 
 
 def test_storage_service_rejects_unsafe_key(tmp_path: Path, monkeypatch) -> None:

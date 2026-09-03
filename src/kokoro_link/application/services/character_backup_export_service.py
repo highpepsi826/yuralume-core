@@ -75,6 +75,7 @@ from kokoro_link.application.services.character_backup_restore_plan import (
     operator_profile_field_is_nsfw_flagged,
     pending_follow_up_is_nsfw_flagged,
 )
+from kokoro_link.application.services.object_storage_upload import put_file
 from kokoro_link.application.services.nsfw_mode import (
     CONTENT_MODE_NSFW,
     MEMORY_TAG_NSFW_MODE,
@@ -614,12 +615,10 @@ class CharacterBackupExportService:
             lease.raise_if_lost()
             await self._checkpoint(job, {"stage": _STAGE_UPLOAD})
             artifact_key = self._artifact_key(job)
-            # GB-scale whole-file read is a single blocking call —
-            # off-thread so the event loop keeps serving (A5).
-            content = await asyncio.to_thread(encrypted_path.read_bytes)
-            await self._object_storage.put_bytes(
+            await put_file(
+                self._object_storage,
+                encrypted_path,
                 object_key=artifact_key,
-                content=content,
                 content_type=BACKUP_ARTIFACT_CONTENT_TYPE,
             )
             return artifact_key

@@ -628,7 +628,7 @@ async def test_read_side_methods_delegate_unchanged() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Optional capability forwarding (``iter_bytes``)
+# Optional capability forwarding (``iter_bytes`` / ``put_stream``)
 #
 # ``SupportsObjectStream`` is detected with ``getattr``, so a decorator
 # that drops it degrades the public media route back to buffering whole
@@ -656,6 +656,28 @@ async def test_iter_bytes_survives_the_decorator() -> None:
 
     assert b"".join(chunks) == payload
     assert [len(chunk) for chunk in chunks] == [100, 100, 56]
+
+
+@pytest.mark.asyncio
+async def test_put_stream_survives_the_decorator() -> None:
+    """Backup uploads use the optional writer through this decorator too."""
+    inner = InMemoryObjectStorage()
+    storage = VariantAwareObjectStorage(inner)
+
+    async def chunks():
+        yield b"encrypted-"
+        yield b"backup"
+
+    stored = await storage.put_stream(
+        object_key="character-backups/u1/job.lumebackup",
+        chunks=chunks(),
+        content_type="application/octet-stream",
+    )
+
+    assert stored.size_bytes == len(b"encrypted-backup")
+    assert await inner.get_bytes(object_key=stored.object_key) == (
+        b"encrypted-backup"
+    )
 
 
 def test_absent_capability_is_forwarded_as_absent() -> None:

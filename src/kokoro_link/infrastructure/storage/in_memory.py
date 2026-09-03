@@ -54,6 +54,31 @@ class InMemoryObjectStorage:
             metadata=meta.metadata,
         )
 
+    async def put_stream(
+        self,
+        *,
+        object_key: str,
+        chunks: AsyncIterator[bytes],
+        content_type: str,
+        metadata: Mapping[str, str] | None = None,
+    ) -> StoredObject:
+        """Accept the optional stream capability for adapter parity.
+
+        The in-memory adapter necessarily materialises its result; collecting
+        through a single ``bytearray`` keeps the test double's behaviour
+        deterministic while exercising the same application capability that
+        the HTTP adapter uses for large files.
+        """
+        data = bytearray()
+        async for chunk in chunks:
+            data.extend(chunk)
+        return await self.put_bytes(
+            object_key=object_key,
+            content=bytes(data),
+            content_type=content_type,
+            metadata=metadata,
+        )
+
     async def get_bytes(self, *, object_key: str) -> bytes:
         key = validate_object_key(object_key)
         try:

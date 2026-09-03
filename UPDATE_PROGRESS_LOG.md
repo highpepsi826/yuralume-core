@@ -5,6 +5,32 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-09-04 - Stream large backup transfers within bounded memory
+
+- Status: source implementation complete; Zeabur deployment pending.
+- Type: local source stability repair for hosted backup export/import.
+- Git result: committed as `b1e910f` on `local/customizations`.
+- Fix: added an optional raw `put_stream` object-storage capability, a shared
+  bounded file uploader, HTTP chunked request transport, and storage-service
+  atomic temp-file ingestion with incremental size/SHA-256 accounting. CB2
+  encrypted artifact uploads and CB3 staged uploads now use the capability and
+  retain `put_bytes` compatibility for legacy adapters.
+- Compatibility: `.lumebackup` bytes, encryption, restore semantics, and
+  existing multipart/small-object uploads are unchanged. Storage's default
+  object cap is aligned to the 2 GiB backup import cap; Zeabur should set
+  `YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648` on the storage service.
+- Data safety: no database schema, storage volume, user data, Telegram state,
+  or migration was changed.
+- Verification: 97 storage/variant/uploader tests, 100 storage-service/backup
+  export/import tests, Python compilation, and `git diff --check` passed.
+- Deployment: not performed. Docker CLI/daemon is unavailable on this
+  workstation; publish both the app and `storage-local` images from the same
+  reviewed revision before changing Zeabur services. Pod resource values for
+  the upgraded 4 vCPU / 8 GB / 70 GB host remain pending dashboard review.
+- Follow-up: commit/push source, publish pinned images, apply measured Pod
+  requests/limits, deploy, and verify health, media, admin login, one replica,
+  and one Telegram polling owner.
+
 ### 2026-08-30 - Fix proactive intention-judge prompt crash
 
 - Status: completed

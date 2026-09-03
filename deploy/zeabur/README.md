@@ -76,7 +76,10 @@ database service. The app receives the resulting asyncpg URL through
 ## Storage Service
 
 Set `YURALUME_STORAGE_ROOT=/data`, `STORAGE_KEY`, and
-`STORAGE_PUBLIC_URL` in the storage service. `STORAGE_PUBLIC_URL` must be the
+`STORAGE_PUBLIC_URL` in the storage service. Set
+`YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648` there as well: it matches the
+application's 2 GiB `.lumebackup` import cap, while the streaming endpoint
+keeps the transfer bounded in memory. `STORAGE_PUBLIC_URL` must be the
 public app URL, not a public storage URL: the app proxies `/v1/public/*` while
 the storage service stays private.
 

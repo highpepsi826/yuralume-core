@@ -413,6 +413,17 @@ async def _stage(service, data: bytes, *, operator_id: str = IMPORTER) -> str:
     return staged.object_key
 
 
+class _RecordingStreamStorage(InMemoryObjectStorage):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stream_calls = 0
+
+    async def put_stream(self, **kwargs):  # noqa: ANN003, ANN201
+        if "/staging/" in kwargs["object_key"]:
+            self.stream_calls += 1
+        return await super().put_stream(**kwargs)
+
+
 async def _run_import(env, service, staged_key: str) -> CharacterBackupJob:
     job = await service.start_import(
         staged_object_key=staged_key,
@@ -438,6 +449,17 @@ async def _rows_for(env, table: str, character_id: str) -> list:
 # ---------------------------------------------------------------------------
 # 驗收 1 — round-trip：逐表筆數與內容、全新 id、operator 重映射、URL 改寫
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_staging_upload_uses_streaming_object_storage(env) -> None:  # noqa: ANN001
+    env.storage = _RecordingStreamStorage()
+    service = _import_service(env)
+
+    staged_key = await _stage(service, b"LUMEBAK1" + b"payload")
+
+    assert staged_key.startswith(EPHEMERAL_OBJECT_KEY_PREFIXES[1])
+    assert env.storage.stream_calls == 1
 
 
 @pytest.mark.asyncio

@@ -66,6 +66,7 @@ from kokoro_link.application.services.character_backup_restore_pipeline import (
 from kokoro_link.application.services.character_backup_restore_plan import (
     restored_media_key_prefixes,
 )
+from kokoro_link.application.services.object_storage_upload import put_file
 from kokoro_link.application.services.studio_execution_lease import (
     StudioLeaseLost,
     StudioLeaseSession,
@@ -365,14 +366,10 @@ class CharacterBackupImportService:
                 f"{self._staging_prefix(operator_id)}"
                 f"{uuid4().hex}{BACKUP_FILE_EXTENSION}"
             )
-            # Whole-bytes put mirrors the CB2 artifact upload — the port
-            # has no streaming write capability yet (known limitation
-            # shared with the export side). The GB-scale spool read is a
-            # single blocking call — off-thread (A5).
-            content = await asyncio.to_thread(spool.read_bytes)
-            await self._object_storage.put_bytes(
+            await put_file(
+                self._object_storage,
+                spool,
                 object_key=object_key,
-                content=content,
                 content_type=BACKUP_ARTIFACT_CONTENT_TYPE,
             )
             await self._record_hosted_upload_event(operator_id, now=now)

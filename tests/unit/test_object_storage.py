@@ -187,7 +187,15 @@ def _patch_httpx_connect_error(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "operation",
-    ["put_bytes", "get_bytes", "stat", "delete", "copy", "purge_prefix"],
+    [
+        "put_bytes",
+        "put_stream",
+        "get_bytes",
+        "stat",
+        "delete",
+        "copy",
+        "purge_prefix",
+    ],
 )
 async def test_http_object_storage_network_failure_names_storage_host(
     monkeypatch: pytest.MonkeyPatch,
@@ -212,6 +220,11 @@ async def test_http_object_storage_network_failure_names_storage_host(
             content=b"PNG",
             content_type="image/png",
         ),
+        "put_stream": lambda: storage.put_stream(
+            object_key="characters/char-1/a.png",
+            chunks=_one_chunk(),
+            content_type="image/png",
+        ),
         "get_bytes": lambda: storage.get_bytes(
             object_key="characters/char-1/a.png",
         ),
@@ -232,6 +245,10 @@ async def test_http_object_storage_network_failure_names_storage_host(
     message = str(exc_info.value)
     assert "object storage unreachable at http://storage-local:9000" in message
     assert "Name or service not known" in message
+
+
+async def _one_chunk():
+    yield b"PNG"
 
 
 def _patch_httpx_transport(
@@ -282,6 +299,62 @@ async def test_http_object_storage_iter_bytes_streams_in_chunks(
     assert len(chunks) > 1
     assert seen[0].url.path == "/v1/objects/content/characters/char-1/a.png"
     assert seen[0].headers["authorization"] == "Bearer secret"
+
+
+@pytest.mark.asyncio
+async def test_http_object_storage_put_stream_sends_raw_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = b"0123456789" * 128
+    seen: list[tuple[httpx.Request, bytes]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request, await request.aread()))
+        return httpx.Response(
+            200,
+            json={
+                "object_key": "character-backups/u1/job.lumebackup",
+                "content_type": "application/octet-stream",
+                "size_bytes": len(payload),
+                "sha256": "digest",
+                "metadata": {"kind": "backup"},
+            },
+        )
+
+    _patch_httpx_transport(monkeypatch, handler)
+    storage = HttpObjectStorage(
+        base_url="http://storage-local:9000",
+        api_key="secret",
+    )
+
+    async def chunks():
+        for start in range(0, len(payload), 17):
+            yield payload[start:start + 17]
+
+    stored = await storage.put_stream(
+        object_key="character-backups/u1/job.lumebackup",
+        chunks=chunks(),
+        content_type="application/octet-stream",
+        metadata={"kind": "backup", "角色": "芊璃"},
+    )
+
+    assert stored.object_key == "character-backups/u1/job.lumebackup"
+    assert seen[0][0].method == "PUT"
+    assert (
+        seen[0][0].url.path
+        == "/v1/objects/stream/character-backups/u1/job.lumebackup"
+    )
+    assert seen[0][0].headers["authorization"] == "Bearer secret"
+    assert seen[0][0].headers["x-object-content-type"] == (
+        "application/octet-stream"
+    )
+    assert seen[0][0].headers["transfer-encoding"] == "chunked"
+    assert json.loads(seen[0][0].headers["x-object-metadata"]) == {
+        "kind": "backup",
+        "角色": "芊璃",
+    }
+    assert "multipart" not in seen[0][0].headers["content-type"]
+    assert seen[0][1] == payload
 
 
 @pytest.mark.asyncio
@@ -367,6 +440,26 @@ async def test_in_memory_object_storage_iter_bytes_round_trip() -> None:
     with pytest.raises(ObjectNotFoundError):
         async for _ in storage.iter_bytes(object_key="feed/char-1/missing.png"):
             pass
+
+
+@pytest.mark.asyncio
+async def test_in_memory_object_storage_put_stream_round_trip() -> None:
+    storage = InMemoryObjectStorage()
+
+    async def chunks():
+        yield b"WAV"
+        yield b"-STREAM"
+
+    stored = await storage.put_stream(
+        object_key="character-backups/u1/job.lumebackup",
+        chunks=chunks(),
+        content_type="application/octet-stream",
+        metadata={"kind": "backup"},
+    )
+
+    assert stored.size_bytes == len(b"WAV-STREAM")
+    assert stored.metadata == {"kind": "backup"}
+    assert await storage.get_bytes(object_key=stored.object_key) == b"WAV-STREAM"
 
 
 @pytest.mark.parametrize(

@@ -18,6 +18,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Request,
     UploadFile,
     status,
 )
@@ -49,6 +50,12 @@ _LOGGER = logging.getLogger(__name__)
 EPHEMERAL_PREFIXES: tuple[str, ...] = EPHEMERAL_OBJECT_KEY_PREFIXES
 EPHEMERAL_TTL_ENV = "YURALUME_STORAGE_EPHEMERAL_TTL_SECONDS"
 DEFAULT_EPHEMERAL_TTL_SECONDS = 3600
+# The application-level character-backup import contract permits 2 GiB
+# archives. Keep the storage ceiling at least that large by default so a
+# correctly streamed backup is not rejected merely because this optional env
+# variable was omitted. Individual app upload routes retain their own tighter
+# media/card limits.
+DEFAULT_MAX_OBJECT_BYTES = 2 * 1024 * 1024 * 1024
 
 # CB2 (.lumebackup export artifacts): the encrypted archive has to survive
 # a *download window*, not just an in-flight upstream fetch — the player is
@@ -69,6 +76,10 @@ EPHEMERAL_PREFIX_TTL_OVERRIDES: dict[str, int] = {
 # deletes reference images out from under live requests.
 MIN_EPHEMERAL_TTL_SECONDS = 600
 MIN_SWEEP_INTERVAL_SECONDS = 300
+
+
+class ObjectTooLargeError(Exception):
+    """The streamed object exceeded the configured storage size cap."""
 
 
 class CopyRequest(BaseModel):
@@ -106,7 +117,10 @@ class LocalStorageSettings(BaseModel):
                 or "http://127.0.0.1:9012"
             ).rstrip("/"),
             max_object_bytes=int(
-                os.getenv("YURALUME_STORAGE_MAX_OBJECT_BYTES", "536870912"),
+                os.getenv(
+                    "YURALUME_STORAGE_MAX_OBJECT_BYTES",
+                    str(DEFAULT_MAX_OBJECT_BYTES),
+                ),
             ),
             cache_control=os.getenv(
                 "YURALUME_STORAGE_CACHE_CONTROL",
@@ -184,6 +198,50 @@ def create_app() -> FastAPI:
             content_type=content_type,
             metadata=meta,
         )
+
+    @app.put("/v1/objects/stream/{object_key:path}")
+    async def put_object_stream(
+        object_key: str,
+        request: Request,
+        object_content_type: str = Header(
+            default="application/octet-stream",
+            alias="X-Object-Content-Type",
+        ),
+        metadata: str = Header(default="{}", alias="X-Object-Metadata"),
+        content_length: int | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        """Persist a raw request body without buffering it in FastAPI.
+
+        ``PUT`` is additive to the multipart ``POST /v1/objects`` route.
+        Clients send the original media type and JSON metadata in dedicated
+        headers; the body itself can use HTTP chunked transfer encoding when
+        the sender does not know its length up front.
+        """
+        _require_auth(settings, authorization)
+        if (
+            content_length is not None
+            and content_length > settings.max_object_bytes
+        ):
+            raise _error(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "object_too_large",
+                "object exceeds configured max size",
+            )
+        meta = _parse_metadata(metadata)
+        try:
+            return await store.put_stream(
+                object_key=object_key,
+                chunks=request.stream(),
+                content_type=object_content_type,
+                metadata=meta,
+            )
+        except ObjectTooLargeError as exc:
+            raise _error(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "object_too_large",
+                "object exceeds configured max size",
+            ) from exc
 
     @app.get("/v1/objects/content/{object_key:path}")
     async def get_object_content(
@@ -313,6 +371,51 @@ class _LocalVolumeStore:
         self._write_metadata(key, payload)
         return payload
 
+    async def put_stream(
+        self,
+        *,
+        object_key: str,
+        chunks: AsyncIterator[bytes],
+        content_type: str,
+        metadata: dict[str, str],
+    ) -> dict:
+        """Write an async request stream to disk with bounded memory.
+
+        The object is published only after the complete body is received and
+        its digest is known. A failed or oversized upload removes its private
+        ``.part`` file and cannot replace an existing object half-way through.
+        """
+        key = _safe_key(object_key)
+        target = self.object_path(key)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.parent / f".{target.name}.{uuid4().hex}.part"
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            with tmp.open("wb") as sink:
+                async for chunk in chunks:
+                    if not chunk:
+                        continue
+                    size += len(chunk)
+                    if size > self._settings.max_object_bytes:
+                        raise ObjectTooLargeError(size)
+                    await asyncio.to_thread(sink.write, chunk)
+                    digest.update(chunk)
+            payload = self._build_metadata_from_stats(
+                object_key=key,
+                size_bytes=size,
+                sha256=digest.hexdigest(),
+                content_type=content_type,
+                metadata=metadata,
+            )
+            tmp.replace(target)
+            self._write_metadata(key, payload)
+            return payload
+        except BaseException:
+            with suppress(OSError):
+                tmp.unlink()
+            raise
+
     def copy(
         self,
         *,
@@ -415,13 +518,29 @@ class _LocalVolumeStore:
         content_type: str,
         metadata: dict[str, str],
     ) -> dict:
-        sha = hashlib.sha256(content).hexdigest()
+        return self._build_metadata_from_stats(
+            object_key=object_key,
+            size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+            content_type=content_type,
+            metadata=metadata,
+        )
+
+    def _build_metadata_from_stats(
+        self,
+        *,
+        object_key: str,
+        size_bytes: int,
+        sha256: str,
+        content_type: str,
+        metadata: dict[str, str],
+    ) -> dict:
         return {
             "object_key": object_key,
             "url": f"{self._settings.public_base_url}/v1/public/{object_key}",
             "content_type": content_type or "application/octet-stream",
-            "size_bytes": len(content),
-            "sha256": sha,
+            "size_bytes": size_bytes,
+            "sha256": sha256,
             "metadata": dict(metadata or {}),
         }
 

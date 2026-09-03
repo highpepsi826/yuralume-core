@@ -148,6 +148,26 @@ class SupportsObjectStream(Protocol):
         """
 
 
+class SupportsObjectStreamUpload(Protocol):
+    """Optional capability: write an object from an async byte stream.
+
+    This stays outside :class:`ObjectStoragePort` so adapters that only
+    support the original ``put_bytes`` contract remain valid. Large backup
+    exports and staged restores probe for ``put_stream`` at the application
+    boundary and retain ``put_bytes`` as their compatibility fallback.
+    """
+
+    async def put_stream(
+        self,
+        *,
+        object_key: str,
+        chunks: AsyncIterator[bytes],
+        content_type: str,
+        metadata: Mapping[str, str] | None = None,
+    ) -> StoredObject:
+        """Persist chunks without materialising the complete object."""
+
+
 class SupportsPrefixPurge(Protocol):
     """Optional capability: delete every object under a key prefix.
 
