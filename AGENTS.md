@@ -1,7 +1,72 @@
-# Local Self-Host Instructions
+# Yuralume Development and Deployment Instructions
 
 Read `LOCAL_CUSTOMIZATION_WORKFLOW.md` before modifying this repository or the
 local Yuralume deployment.
+
+## Current Hosted Production
+
+The project now has a hosted production runtime in Zeabur. Keep this section
+current when the topology changes; the Zeabur dashboard is the final source of
+truth for live status, while `deploy/zeabur/README.md` is the detailed
+operation runbook.
+
+- The production project is `yuralume-production` on the dedicated Tokyo
+  server. The public app domain is `yuralume-prod.zeabur.app`.
+- The active app service is the only production runtime and must stay at one
+  replica using the default `all` role. It is the sole owner of Telegram
+  polling and scheduled background work.
+- The active database service is `postgresql` with `pgvector`, reachable from
+  the project only through `postgresql.zeabur.internal:5432`. The older
+  `postgres` service is a suspended rollback copy; do not delete, restart, or
+  write to it unless the user explicitly requests a rollback.
+- The active object-storage service is `storage`, reachable only through
+  `http://storage.zeabur.internal:9000`. Its `/data` volume contains both
+  `objects/` and `metadata/` restored from the encrypted migration backup.
+  The temporary migration public domain has been removed; never expose the
+  storage or database services publicly.
+- The initial admin account has been configured through the hosted `/setup`
+  flow. Do not reset it or add bootstrap credentials unless the user asks.
+- The database and storage migration has been validated. Keep the local
+  encrypted backup and the cloud rollback/restore protection in place until
+  the user explicitly approves retention cleanup.
+
+## Hosted Development and Deployment
+
+- Edit source in `C:\Entertainment\yuralume-src` and push reviewed commits on
+  `local/customizations`; Zeabur builds the hosted app from that branch. Do
+  not edit a running cloud container or treat a manual dashboard build as a
+  substitute for a source commit.
+- Local development on this computer or another notebook must use an isolated
+  local Compose stack. Never point a default local runtime at the hosted
+  database or storage, and never run local Telegram polling or schedulers at
+  the same time as the hosted app. There must be exactly one Telegram polling
+  owner.
+- For a production bug, obtain a labelled encrypted cloud snapshot/export and
+  restore it into an isolated local stack. Disable Telegram and other external
+  connectors there. Reproduce, test, and repair locally; never write a local
+  development database back into production.
+- Before any production migration or data operation, read the Zeabur runbook,
+  check the current service status, obtain explicit user confirmation, and
+  create and verify a PostgreSQL custom-format backup. Migrations run once in
+  a controlled environment; never run Alembic concurrently from local and
+  cloud. Prefer an app-only redeploy when no schema change is involved.
+- A storage migration must move `objects/` and `metadata/` together. Use the
+  staged encrypted transfer procedure in the runbook; do not use Zeabur
+  `Restore from File` for the storage archive, and do not expose plaintext
+  storage during transfer.
+- After a hosted deployment, verify the app is `Running` with one replica,
+  `GET https://yuralume-prod.zeabur.app/health` returns `status=ok` with the
+  database overlay active, representative media can be read, and admin login
+  works. Only after those checks should Telegram polling be considered
+  operational.
+- Keep `CONFIG_ENCRYPTION_KEY` stable across deployments so encrypted Admin
+  provider configuration remains readable. Store all secrets only in Zeabur
+  variables or local ignored environment files; never commit, log, paste, or
+  print them.
+- Production uploads, deletes, rollback changes, public-port changes, and
+  actions that may incur Zeabur charges require explicit confirmation at the
+  point of action. Preserve rollback backups until the resulting deployment
+  and data have been verified.
 
 ## Branches and Upstream
 

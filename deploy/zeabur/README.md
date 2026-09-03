@@ -4,6 +4,25 @@ This directory describes the production topology for the personal
 `local/customizations` fork. It intentionally contains no credential, dump,
 upload, or user data.
 
+## Current Cutover Status (2026-09-04)
+
+The initial Zeabur cutover is complete. The existing `yuralume-production`
+project already contains the active `app`, `storage`, and `postgresql`
+services; the older `postgres` service is retained as a suspended rollback
+copy. Do not repeat the service-creation or initial data-migration steps below
+for this project. Use the hosted workflow in `AGENTS.md` for ordinary source
+changes and use the migration sections only for a planned migration or a new
+environment.
+
+- The app is running as one production replica at `yuralume-prod.zeabur.app`.
+- PostgreSQL is private at `postgresql.zeabur.internal:5432`; public TCP
+  forwarding is disabled.
+- Storage is private at `http://storage.zeabur.internal:9000`; the complete
+  `objects/` and `metadata/` data set has been restored and the temporary
+  migration domain has been removed.
+- The first hosted admin account has been configured. Keep the existing
+  encryption and rollback backups until an explicit retention decision.
+
 ## Service Layout
 
 Create one Zeabur project with these services:
