@@ -9,7 +9,8 @@ database rows.
 
 - Status: source implementation complete; Zeabur deployment pending.
 - Type: local source stability repair for hosted backup export/import.
-- Git result: committed as `b1e910f` on `local/customizations`.
+- Git result: implementation committed as `af31c37` on `local/customizations`;
+  this progress entry is recorded separately.
 - Fix: added an optional raw `put_stream` object-storage capability, a shared
   bounded file uploader, HTTP chunked request transport, and storage-service
   atomic temp-file ingestion with incremental size/SHA-256 accounting. CB2
