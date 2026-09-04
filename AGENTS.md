@@ -21,7 +21,7 @@ operation runbook.
   explicitly deleted on 2026-09-04; do not recreate or target them.
 - The active object-storage service is `storage`, reachable only through
   `http://storage.zeabur.internal:9000`. It uses the personal-fork moving image
-  `ghcr.io/highpepsi826/yuralume-core/storage-local:local-current`, with
+  `ghcr.io/highpepsi826/yuralume-core/storage-local:local`, with
   `YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648`. Its `storage-data` volume is
   mounted at `/data` and contains both `objects/` and `metadata` restored from
   the encrypted migration backup. The temporary migration public domain has
@@ -57,8 +57,8 @@ operation runbook.
   `Restore from File` for the storage archive, and do not expose plaintext
   storage during transfer.
 - `local/customizations` publishes personal-fork images under the moving
-  `local-current` tag and an immutable `sha-<commit>` tag. Zeabur normally
-  follows `storage-local:local-current`; `latest` remains reserved for
+  `local` tag and an immutable `sha-<commit>` tag. Zeabur normally follows
+  `storage-local:local`; `latest` remains reserved for
   `main`/`master`. Keep the existing `storage` service and `storage-data`
   volume mounted at `/data`, and verify a known media object after restart.
   Roll back by temporarily selecting the last known-good immutable SHA tag.

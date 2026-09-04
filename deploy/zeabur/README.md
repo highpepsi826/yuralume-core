@@ -21,7 +21,7 @@ a planned migration or a new environment.
 - Storage is private at `http://storage.zeabur.internal:9000`; the complete
   `objects/` and `metadata/` data set has been restored. It runs the
   personal-fork deployment image
-  `ghcr.io/highpepsi826/yuralume-core/storage-local:local-current` with
+  `ghcr.io/highpepsi826/yuralume-core/storage-local:local` with
   `YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648`; the temporary migration
   domain has been removed.
 - The first hosted admin account has been configured. Keep the existing
@@ -34,11 +34,11 @@ Create one Zeabur project with these services:
 | Service | Deployment source | Private port | Persistent paths |
 | --- | --- | --- | --- |
 | `postgresql` | `docker.io/pgvector/pgvector:pg18` | `5432/TCP` | `/var/lib/postgresql/18/docker` |
-| `storage` | `ghcr.io/highpepsi826/yuralume-core/storage-local:local-current` | `9000/HTTP` | `/data` (`storage-data`) |
+| `storage` | `ghcr.io/highpepsi826/yuralume-core/storage-local:local` | `9000/HTTP` | `/data` (`storage-data`) |
 | `app` | GitHub fork, branch `local/customizations` | `8002/HTTP` | none |
 | `whatsapp-sidecar` | optional `ghcr.io/yuralume/yuralume-core/whatsapp-sidecar:<pinned-tag>` | `32190/TCP` | `/data/auth`, `/data/media` |
 
-The personal storage deployment follows the moving `local-current` tag, while
+The personal storage deployment follows the moving `local` tag, while
 every publication also retains an immutable `sha-<commit>` rollback tag.
 `latest` is reserved for `main`/`master`; never use it for personal-fork
 production. App and storage revisions must remain protocol-compatible, while
@@ -94,7 +94,7 @@ The `/data` volume holds both object bytes and metadata. Restoring only the
 database will leave existing image, attachment, feed, and TTS references
 broken.
 
-For a storage-code rollout, GitHub Actions publishes `local-current` plus an
+For a storage-code rollout, GitHub Actions publishes `local` plus an
 immutable SHA tag, then restarts the existing `storage` service when the
 `ZEABUR_TOKEN` Actions secret is configured. Preserve `storage-data`, its
 `/data` mount, and all existing variables. Afterward verify `Running 1/1`,
@@ -103,7 +103,7 @@ representative media URL through the public app proxy.
 
 If the automated restart is not configured or fails, the published image is
 safe but inactive until the existing service is restarted. Do not recreate the
-service. For rollback, temporarily replace `local-current` with the last
+service. For rollback, temporarily replace `local` with the last
 known-good `sha-<commit>` tag; changing the image does not roll back volume or
 database data.
 

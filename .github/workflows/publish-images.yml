@@ -3,7 +3,7 @@ name: Publish container images
 # Builds and pushes four images to ghcr.io: app / storage-local /
 # postgres / whatsapp-sidecar. Upstream mirror branches publish `latest`;
 # `local/customizations` publishes the moving personal-deployment tag
-# `local-current`. Every run also retains an immutable short commit SHA tag.
+# `local`. Every run also retains an immutable short commit SHA tag.
 # Manual runs can override the moving tag and platforms. Multi-arch via QEMU
 # emulation (slower than native runners, but a single workflow covers both
 # linux/amd64 and linux/arm64). End-user compose stacks resolve whichever
@@ -20,7 +20,7 @@ on:
       tag:
         description: "Moving/release tag to push. An immutable short commit SHA tag is also published."
         required: true
-        default: local-current
+        default: local
         type: string
       platforms:
         description: "Comma-separated buildx platforms. Drop linux/arm64 if the run is timing out."
@@ -42,7 +42,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     env:
-      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name == 'local/customizations' && 'local-current' || 'latest' }}
+      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name == 'local/customizations' && 'local' || 'latest' }}
       PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && inputs.platforms || 'linux/amd64,linux/arm64' }}
     strategy:
       # Don't abort the other matrix entries if one fails — a partial publish
@@ -122,9 +122,9 @@ jobs:
     steps:
       - name: Report missing Zeabur token
         if: env.ZEABUR_TOKEN == ''
-        run: echo "::notice::ZEABUR_TOKEN is not configured; local-current was published but storage restart was skipped."
+        run: echo "::notice::ZEABUR_TOKEN is not configured; local was published but storage restart was skipped."
 
-      - name: Restart storage with the freshly published local-current image
+      - name: Restart storage with the freshly published local image
         if: env.ZEABUR_TOKEN != ''
         shell: bash
         run: |
