@@ -20,8 +20,8 @@ operation runbook.
   suspended `postgres` rollback service and its `postgres-data` volume were
   explicitly deleted on 2026-09-04; do not recreate or target them.
 - The active object-storage service is `storage`, reachable only through
-  `http://storage.zeabur.internal:9000`. It uses the pinned personal-fork image
-  `ghcr.io/highpepsi826/yuralume-core/storage-local:sha-347c951`, with
+  `http://storage.zeabur.internal:9000`. It uses the personal-fork moving image
+  `ghcr.io/highpepsi826/yuralume-core/storage-local:local-current`, with
   `YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648`. Its `storage-data` volume is
   mounted at `/data` and contains both `objects/` and `metadata` restored from
   the encrypted migration backup. The temporary migration public domain has
@@ -56,11 +56,12 @@ operation runbook.
   staged encrypted transfer procedure in the runbook; do not use Zeabur
   `Restore from File` for the storage archive, and do not expose plaintext
   storage during transfer.
-- Update the hosted `storage` image only when storage-service code changes.
-  Pin a personal-fork commit tag (or digest), keep the existing `storage`
-  service and `storage-data` volume mounted at `/data`, and verify a known
-  media object after restart. Never switch production back to an upstream
-  moving `latest` tag merely because the app branch changed.
+- `local/customizations` publishes personal-fork images under the moving
+  `local-current` tag and an immutable `sha-<commit>` tag. Zeabur normally
+  follows `storage-local:local-current`; `latest` remains reserved for
+  `main`/`master`. Keep the existing `storage` service and `storage-data`
+  volume mounted at `/data`, and verify a known media object after restart.
+  Roll back by temporarily selecting the last known-good immutable SHA tag.
 - After a hosted deployment, verify the app is `Running` with one replica,
   `GET https://yuralume-prod.zeabur.app/health` returns `status=ok` with the
   database overlay active, representative media can be read, and admin login

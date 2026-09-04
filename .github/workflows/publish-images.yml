@@ -1,23 +1,26 @@
 name: Publish container images
 
 # Builds and pushes four images to ghcr.io: app / storage-local /
-# postgres / whatsapp-sidecar. Pushing to master publishes `latest` + short commit sha;
-# manual runs can override the tag and platforms. Multi-arch via QEMU
-# emulation (slower than native runners, but a single workflow covers
-# both linux/amd64 and linux/arm64). End-user compose stacks resolve
-# whichever architecture matches the host without any extra config.
+# postgres / whatsapp-sidecar. Upstream mirror branches publish `latest`;
+# `local/customizations` publishes the moving personal-deployment tag
+# `local-current`. Every run also retains an immutable short commit SHA tag.
+# Manual runs can override the moving tag and platforms. Multi-arch via QEMU
+# emulation (slower than native runners, but a single workflow covers both
+# linux/amd64 and linux/arm64). End-user compose stacks resolve whichever
+# architecture matches the host without any extra config.
 
 on:
   push:
     branches:
       - master
       - main
+      - local/customizations
   workflow_dispatch:
     inputs:
       tag:
-        description: "Image tag to push (e.g. latest, v0.1.0). Also pushed as the second tag alongside the short commit sha."
+        description: "Moving/release tag to push. An immutable short commit SHA tag is also published."
         required: true
-        default: latest
+        default: local-current
         type: string
       platforms:
         description: "Comma-separated buildx platforms. Drop linux/arm64 if the run is timing out."
@@ -31,11 +34,15 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: publish-images-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     env:
-      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'latest' }}
+      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name == 'local/customizations' && 'local-current' || 'latest' }}
       PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && inputs.platforms || 'linux/amd64,linux/arm64' }}
     strategy:
       # Don't abort the other matrix entries if one fails — a partial publish
@@ -102,3 +109,39 @@ jobs:
           # base-image + dependency layers.
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }},mode=max
+
+  restart-zeabur-storage:
+    name: Restart Zeabur storage
+    needs: publish
+    if: github.event_name == 'push' && github.ref_name == 'local/customizations'
+    runs-on: ubuntu-latest
+    env:
+      ZEABUR_TOKEN: ${{ secrets.ZEABUR_TOKEN }}
+      ZEABUR_ENV_ID: 6a9834092504b02ec1521a4e
+      ZEABUR_SERVICE_NAME: storage
+    steps:
+      - name: Report missing Zeabur token
+        if: env.ZEABUR_TOKEN == ''
+        run: echo "::notice::ZEABUR_TOKEN is not configured; local-current was published but storage restart was skipped."
+
+      - name: Restart storage with the freshly published local-current image
+        if: env.ZEABUR_TOKEN != ''
+        shell: bash
+        run: |
+          npx --yes zeabur@latest auth login --token "$ZEABUR_TOKEN"
+          npx --yes zeabur@latest service restart \
+            --env-id "$ZEABUR_ENV_ID" \
+            --service-name "$ZEABUR_SERVICE_NAME" \
+            -i=false
+
+      - name: Check deployment and public application health
+        if: env.ZEABUR_TOKEN != ''
+        shell: bash
+        run: |
+          npx --yes zeabur@latest deployment get \
+            --env-id "$ZEABUR_ENV_ID" \
+            --service-name "$ZEABUR_SERVICE_NAME" \
+            -i=false
+          curl --fail --silent --show-error \
+            --retry 12 --retry-all-errors --retry-delay 5 \
+            https://yuralume-prod.zeabur.app/health

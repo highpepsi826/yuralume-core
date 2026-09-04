@@ -19,9 +19,9 @@ a planned migration or a new environment.
 - PostgreSQL is private at `postgresql.zeabur.internal:5432`; public TCP
   forwarding is disabled.
 - Storage is private at `http://storage.zeabur.internal:9000`; the complete
-  `objects/` and `metadata/` data set has been restored. It runs the pinned
-  personal-fork image
-  `ghcr.io/highpepsi826/yuralume-core/storage-local:sha-347c951` with
+  `objects/` and `metadata/` data set has been restored. It runs the
+  personal-fork deployment image
+  `ghcr.io/highpepsi826/yuralume-core/storage-local:local-current` with
   `YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648`; the temporary migration
   domain has been removed.
 - The first hosted admin account has been configured. Keep the existing
@@ -34,14 +34,15 @@ Create one Zeabur project with these services:
 | Service | Deployment source | Private port | Persistent paths |
 | --- | --- | --- | --- |
 | `postgresql` | `docker.io/pgvector/pgvector:pg18` | `5432/TCP` | `/var/lib/postgresql/18/docker` |
-| `storage` | `ghcr.io/highpepsi826/yuralume-core/storage-local:sha-347c951` | `9000/HTTP` | `/data` (`storage-data`) |
+| `storage` | `ghcr.io/highpepsi826/yuralume-core/storage-local:local-current` | `9000/HTTP` | `/data` (`storage-data`) |
 | `app` | GitHub fork, branch `local/customizations` | `8002/HTTP` | none |
 | `whatsapp-sidecar` | optional `ghcr.io/yuralume/yuralume-core/whatsapp-sidecar:<pinned-tag>` | `32190/TCP` | `/data/auth`, `/data/media` |
 
-Pin every production image to an immutable commit tag or digest. App and
-storage revisions must remain protocol-compatible, but the PostgreSQL and
-optional sidecar images have independent version lines. Do not use a moving
-upstream `latest` tag after initial empty-stack validation.
+The personal storage deployment follows the moving `local-current` tag, while
+every publication also retains an immutable `sha-<commit>` rollback tag.
+`latest` is reserved for `main`/`master`; never use it for personal-fork
+production. App and storage revisions must remain protocol-compatible, while
+the PostgreSQL and optional sidecar images have independent version lines.
 
 Volumes belong to one Zeabur service only. The app reaches the database and
 storage through the private hostnames shown in each service's Networking page;
@@ -93,11 +94,18 @@ The `/data` volume holds both object bytes and metadata. Restoring only the
 database will leave existing image, attachment, feed, and TTS references
 broken.
 
-For a storage-code rollout, change only the image on the existing `storage`
-service and restart it. Preserve `storage-data`, its `/data` mount, and all
-existing variables. Afterward verify `Running 1/1`, successful `/health`
-probes, both `/data/objects` and `/data/metadata`, and a representative media
-URL through the public app proxy.
+For a storage-code rollout, GitHub Actions publishes `local-current` plus an
+immutable SHA tag, then restarts the existing `storage` service when the
+`ZEABUR_TOKEN` Actions secret is configured. Preserve `storage-data`, its
+`/data` mount, and all existing variables. Afterward verify `Running 1/1`,
+successful `/health` probes, both `/data/objects` and `/data/metadata`, and a
+representative media URL through the public app proxy.
+
+If the automated restart is not configured or fails, the published image is
+safe but inactive until the existing service is restarted. Do not recreate the
+service. For rollback, temporarily replace `local-current` with the last
+known-good `sha-<commit>` tag; changing the image does not roll back volume or
+database data.
 
 ## Migration Gate
 
