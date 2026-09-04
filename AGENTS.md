@@ -16,14 +16,16 @@ operation runbook.
   replica using the default `all` role. It is the sole owner of Telegram
   polling and scheduled background work.
 - The active database service is `postgresql` with `pgvector`, reachable from
-  the project only through `postgresql.zeabur.internal:5432`. The older
-  `postgres` service is a suspended rollback copy; do not delete, restart, or
-  write to it unless the user explicitly requests a rollback.
+  the project only through `postgresql.zeabur.internal:5432`. The obsolete
+  suspended `postgres` rollback service and its `postgres-data` volume were
+  explicitly deleted on 2026-09-04; do not recreate or target them.
 - The active object-storage service is `storage`, reachable only through
-  `http://storage.zeabur.internal:9000`. Its `/data` volume contains both
-  `objects/` and `metadata/` restored from the encrypted migration backup.
-  The temporary migration public domain has been removed; never expose the
-  storage or database services publicly.
+  `http://storage.zeabur.internal:9000`. It uses the pinned personal-fork image
+  `ghcr.io/highpepsi826/yuralume-core/storage-local:sha-347c951`, with
+  `YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648`. Its `storage-data` volume is
+  mounted at `/data` and contains both `objects/` and `metadata` restored from
+  the encrypted migration backup. The temporary migration public domain has
+  been removed; never expose the storage or database services publicly.
 - The initial admin account has been configured through the hosted `/setup`
   flow. Do not reset it or add bootstrap credentials unless the user asks.
 - The database and storage migration has been validated. Keep the local
@@ -54,6 +56,11 @@ operation runbook.
   staged encrypted transfer procedure in the runbook; do not use Zeabur
   `Restore from File` for the storage archive, and do not expose plaintext
   storage during transfer.
+- Update the hosted `storage` image only when storage-service code changes.
+  Pin a personal-fork commit tag (or digest), keep the existing `storage`
+  service and `storage-data` volume mounted at `/data`, and verify a known
+  media object after restart. Never switch production back to an upstream
+  moving `latest` tag merely because the app branch changed.
 - After a hosted deployment, verify the app is `Running` with one replica,
   `GET https://yuralume-prod.zeabur.app/health` returns `status=ok` with the
   database overlay active, representative media can be read, and admin login

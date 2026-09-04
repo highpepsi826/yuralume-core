@@ -8,18 +8,22 @@ upload, or user data.
 
 The initial Zeabur cutover is complete. The existing `yuralume-production`
 project already contains the active `app`, `storage`, and `postgresql`
-services; the older `postgres` service is retained as a suspended rollback
-copy. Do not repeat the service-creation or initial data-migration steps below
-for this project. Use the hosted workflow in `AGENTS.md` for ordinary source
-changes and use the migration sections only for a planned migration or a new
-environment.
+services. The obsolete suspended `postgres` service and its `postgres-data`
+volume were explicitly deleted on 2026-09-04 after the active database and
+off-platform backup were verified. Do not repeat the service-creation or
+initial data-migration steps below for this project. Use the hosted workflow in
+`AGENTS.md` for ordinary source changes and use the migration sections only for
+a planned migration or a new environment.
 
 - The app is running as one production replica at `yuralume-prod.zeabur.app`.
 - PostgreSQL is private at `postgresql.zeabur.internal:5432`; public TCP
   forwarding is disabled.
 - Storage is private at `http://storage.zeabur.internal:9000`; the complete
-  `objects/` and `metadata/` data set has been restored and the temporary
-  migration domain has been removed.
+  `objects/` and `metadata/` data set has been restored. It runs the pinned
+  personal-fork image
+  `ghcr.io/highpepsi826/yuralume-core/storage-local:sha-347c951` with
+  `YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648`; the temporary migration
+  domain has been removed.
 - The first hosted admin account has been configured. Keep the existing
   encryption and rollback backups until an explicit retention decision.
 
@@ -29,13 +33,15 @@ Create one Zeabur project with these services:
 
 | Service | Deployment source | Private port | Persistent paths |
 | --- | --- | --- | --- |
-| `postgres` | `ghcr.io/yuralume/yuralume-core/postgres:<pinned-tag>` | `5432/TCP` | `/var/lib/postgresql/data` |
-| `storage` | `ghcr.io/yuralume/yuralume-core/storage-local:<pinned-tag>` | `9000/TCP` | `/data` |
+| `postgresql` | `docker.io/pgvector/pgvector:pg18` | `5432/TCP` | `/var/lib/postgresql/18/docker` |
+| `storage` | `ghcr.io/highpepsi826/yuralume-core/storage-local:sha-347c951` | `9000/HTTP` | `/data` (`storage-data`) |
 | `app` | GitHub fork, branch `local/customizations` | `8002/HTTP` | none |
 | `whatsapp-sidecar` | optional `ghcr.io/yuralume/yuralume-core/whatsapp-sidecar:<pinned-tag>` | `32190/TCP` | `/data/auth`, `/data/media` |
 
-Use the same pinned image tag for `postgres`, `storage`, and the optional
-sidecar. Do not use `latest` after the initial empty-stack validation.
+Pin every production image to an immutable commit tag or digest. App and
+storage revisions must remain protocol-compatible, but the PostgreSQL and
+optional sidecar images have independent version lines. Do not use a moving
+upstream `latest` tag after initial empty-stack validation.
 
 Volumes belong to one Zeabur service only. The app reaches the database and
 storage through the private hostnames shown in each service's Networking page;
@@ -61,9 +67,9 @@ default runtime against this database.
 
 ## Database Service
 
-The Yuralume schema requires PostgreSQL 16 with `pgvector`. The listed image
-includes the `vector` extension initializer. Before moving any real data, run
-this command in the database service and require one row:
+The current production database runs PostgreSQL 18 with `pgvector`. The listed
+image includes the `vector` extension. Before moving any real data into a new
+environment, run this command in the database service and require one row:
 
 ```sql
 SELECT extname FROM pg_extension WHERE extname = 'vector';
@@ -86,6 +92,12 @@ the storage service stays private.
 The `/data` volume holds both object bytes and metadata. Restoring only the
 database will leave existing image, attachment, feed, and TTS references
 broken.
+
+For a storage-code rollout, change only the image on the existing `storage`
+service and restart it. Preserve `storage-data`, its `/data` mount, and all
+existing variables. Afterward verify `Running 1/1`, successful `/health`
+probes, both `/data/objects` and `/data/metadata`, and a representative media
+URL through the public app proxy.
 
 ## Migration Gate
 

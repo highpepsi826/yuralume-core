@@ -5,6 +5,26 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-09-04 - Deploy pinned streaming storage image on Zeabur
+
+- Status: completed.
+- Deployment: kept the existing `storage` service and changed only its image
+  to `ghcr.io/highpepsi826/yuralume-core/storage-local:sha-347c951`; added
+  `YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648` and restarted the service.
+- Data safety: the existing `storage-data` volume remained mounted at `/data`.
+  The `objects/` and `metadata/` trees were retained; no database schema, row,
+  Telegram setting, storage key, service identity, or public port changed.
+- Verification: Zeabur pulled the pinned image and started Uvicorn; repeated
+  storage `/health` probes returned 200; storage, app, and PostgreSQL are
+  `Running 1/1`; public `/health` returned `status=ok` with database overlay;
+  a representative pre-existing character image was readable through the app
+  proxy.
+- Topology cleanup: after explicit confirmation and active-database/backup
+  checks, the obsolete suspended `postgres` service and its `postgres-data`
+  volume were deleted. Active `postgresql` was unaffected.
+- Follow-up: measure and set explicit Pod resource requests/limits. Do not run
+  a multi-GB production backup solely as a smoke test.
+
 ### 2026-09-04 - Stream large backup transfers within bounded memory
 
 - Status: source implementation complete; Zeabur deployment pending.

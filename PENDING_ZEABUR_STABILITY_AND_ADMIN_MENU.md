@@ -111,13 +111,19 @@ panels stay behind the debug flag.
 4. Commit the narrow menu fix and record it in `UPDATE_PROGRESS_LOG.md`.
    **Complete**
 5. Design and implement end-to-end streaming upload. **Complete**
-6. Measure and set Pod resource requests/limits in Zeabur, then deploy through
-   the reviewed branch/image workflow. **Deferred**
+6. Publish and deploy the reviewed app plus pinned personal-fork
+   `storage-local` image. **Complete**
+7. Measure and set Pod resource requests/limits in Zeabur. **Deferred**
 
 ## Deployment status
 
-No production setting, database, storage volume, or Zeabur service has been
-modified by this reference during the implementation pass.
+The app revision containing the streaming client and admin navigation repair is
+deployed. On 2026-09-04 the existing `storage` service was switched to
+`ghcr.io/highpepsi826/yuralume-core/storage-local:sha-347c951`,
+`YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648` was added, and the service was
+restarted. The existing `storage-data` volume stayed mounted at `/data`; no
+storage data, database row, schema, Telegram setting, or service identity was
+recreated.
 
 ## Implementation decisions (2026-09-04)
 
@@ -148,12 +154,17 @@ modified by this reference during the implementation pass.
 - Verification: 97 storage/variant/uploader tests and 100 storage-service/
   backup export/import tests passed; Python compilation and `git diff --check`
   passed.
-- Docker image build was not available on this workstation because the Docker
-  CLI/daemon is absent. No Zeabur app or storage image has been published and
-  no production setting or data was changed.
-- Next action: commit and push the source, publish a pinned `app` and
-  `storage-local` image from the same revision, then set and verify Zeabur Pod
-  resources before an app/storage rolling deployment.
+- GitHub Actions published the personal-fork `storage-local` image from build
+  revision `347c951`, which contains the streaming implementation from
+  `af31c37`. Zeabur pulled that exact pinned tag and started it successfully.
+- Production verification passed: storage is `Running 1/1`; repeated storage
+  `/health` probes returned 200; `storage-data` remains mounted at `/data`;
+  existing `objects/` and `metadata/` trees and a representative character
+  image remained readable; app and PostgreSQL are `Running 1/1`; public
+  `/health` returned `status=ok` with the database overlay active.
+- Next action: measure and set explicit Pod resource requests/limits. A real
+  multi-GB backup rehearsal remains optional and must run in a controlled
+  window; it was intentionally not triggered as part of this image switch.
 
 ## Menu-fix verification checkpoint
 
@@ -162,4 +173,5 @@ modified by this reference during the implementation pass.
 - Type check: `frontend/node_modules/.bin/vue-tsc.cmd -b` passed.
 - Frontend build: Vite production build passed. The local Node runtime emitted
   a version advisory only; it did not fail the build.
-- Production deployment: not performed.
+- Production deployment: complete in app build `347c951`; authenticated admin
+  navigation remains protected by the existing backend authorization.
