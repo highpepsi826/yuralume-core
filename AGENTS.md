@@ -58,10 +58,14 @@ operation runbook.
   storage during transfer.
 - `local/customizations` publishes personal-fork images under the moving
   `local` tag and an immutable `sha-<commit>` tag. Zeabur normally follows
-  `storage-local:local`; `latest` remains reserved for
-  `main`/`master`. Keep the existing `storage` service and `storage-data`
-  volume mounted at `/data`, and verify a known media object after restart.
-  Roll back by temporarily selecting the last known-good immutable SHA tag.
+  `storage-local:local`; `latest` remains reserved for `main`/`master`.
+  Pushing the branch updates GHCR, but Zeabur may not notice a moving-tag
+  change automatically. Without the optional `ZEABUR_TOKEN` GitHub Actions
+  secret, manually restart the existing `storage` service after a storage
+  image publication; never recreate the service or volume. Keep
+  `storage-data` mounted at `/data`, and verify a known media object after
+  restart. Roll back by temporarily selecting the last known-good immutable
+  SHA tag.
 - After a hosted deployment, verify the app is `Running` with one replica,
   `GET https://yuralume-prod.zeabur.app/health` returns `status=ok` with the
   database overlay active, representative media can be read, and admin login

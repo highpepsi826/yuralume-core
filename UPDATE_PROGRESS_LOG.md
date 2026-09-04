@@ -5,16 +5,20 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
-### 2026-09-04 - Adopt `local` moving image tag
+### 2026-09-05 - Adopt `local` moving image tag
 
-- Status: source update in progress.
+- Status: completed.
 - Decision: `local/customizations` publishes both the moving `local` tag and
   immutable `sha-<commit>` tags; `latest` remains reserved for `main`/`master`.
 - Deployment boundary: after the first successful `local` publication is
   verified, the existing Zeabur `storage` service can switch image reference
   without changing its `storage-data` volume or `/data` mount.
-- Follow-up: push the workflow/documentation change, verify GHCR, then perform
-  the one-time Zeabur image switch and health check.
+- Git result: committed `bed2820 local: use local moving image tag` and pushed
+  to `origin/local/customizations`; GitHub Actions completed successfully and
+  published the moving `local` tag plus the immutable commit tag.
+- Deployment workflow: Zeabur storage was manually changed to `:local` by the
+  operator. Automatic restart remains optional and skipped without
+  `ZEABUR_TOKEN`; no health check was run in this follow-up by request.
 
 ### 2026-09-04 - Deploy pinned streaming storage image on Zeabur
 
