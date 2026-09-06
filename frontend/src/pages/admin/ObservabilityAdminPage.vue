@@ -42,7 +42,7 @@ async function exportDiagnostic() {
     anchor.click()
     URL.revokeObjectURL(url)
   } catch (err) {
-    exportError.value = err instanceof Error ? err.message : '診斷匯出失敗'
+    exportError.value = err instanceof Error ? err.message : t('admin.page.observability.exportFailed')
   } finally {
     exportBusy.value = false
   }
@@ -110,17 +110,17 @@ watch(selected, (next) => {
 
     <UiCard v-if="selected" size="lg">
       <template #header>
-        <h2 class="observability-admin__card-title">診斷匯出</h2>
+        <h2 class="observability-admin__card-title">{{ t('admin.page.observability.diagnosticTitle') }}</h2>
       </template>
-      <p class="observability-admin__hint">下載選定角色的 Turn 紀錄摘要。時間使用 ISO 8601；留空會取最近一小時。</p>
+      <p class="observability-admin__hint">{{ t('admin.page.observability.diagnosticHint') }}</p>
       <div class="observability-admin__export-fields">
-        <label>開始時間 <input v-model="exportSince" type="datetime-local" /></label>
-        <label>結束時間 <input v-model="exportUntil" type="datetime-local" /></label>
-        <label class="observability-admin__checkbox"><input v-model="exportIncludePrompt" type="checkbox" /> 包含完整 Prompt</label>
+        <label>{{ t('admin.page.observability.sinceLabel') }} <input v-model="exportSince" type="datetime-local" /></label>
+        <label>{{ t('admin.page.observability.untilLabel') }} <input v-model="exportUntil" type="datetime-local" /></label>
+        <label class="observability-admin__checkbox"><input v-model="exportIncludePrompt" type="checkbox" /> {{ t('admin.page.observability.includePrompt') }}</label>
       </div>
       <p v-if="exportError" class="observability-admin__error">{{ exportError }}</p>
       <button class="observability-admin__export-button" :disabled="exportBusy" @click="exportDiagnostic">
-        {{ exportBusy ? '匯出中…' : '下載診斷包' }}
+        {{ exportBusy ? t('admin.page.observability.exportBusy') : t('admin.page.observability.exportAction') }}
       </button>
     </UiCard>
 
