@@ -353,7 +353,7 @@ async def diagnostic_export(
             item["prompt_assembled"] = record.prompt_assembled
         turns.append(item)
     payload = {
-        "schema_version": 1, "character_id": character_id,
+        "schema_version": 2, "character_id": character_id,
         "window": {"since": start.isoformat(), "until": end.isoformat(), "timezone": "Asia/Hong_Kong"},
         "limits": {"max_turns": 500, "include_prompt": include_prompt},
         "turn_records": turns,
@@ -377,6 +377,8 @@ async def diagnostic_export(
         ]
     account_ids = [account.id for account in accounts]
     dispatcher = container.messaging_dispatcher
+    inbound_rows: list[object] = []
+    outbound_rows: list[object] = []
     sources = (
         ("inbound_receipts", getattr(dispatcher, "_receipts", None), InboundMessageReceiptRow),
         ("outbound_deliveries", getattr(dispatcher, "_outbound_deliveries", None), OutboundMessageDeliveryRow),
@@ -391,6 +393,7 @@ async def diagnostic_export(
                      .where(row_type.created_at <= end).limit(1000))
             rows = (await session.execute(query)).scalars().all()
         if name == "inbound_receipts":
+            inbound_rows = list(rows)
             payload[name] = [{"platform": r.platform, "account_id": r.account_id,
                               "chat_ref": r.chat_ref, "platform_message_id": r.platform_message_id,
                               "state": r.state, "failure_code": r.failure_code,
@@ -399,6 +402,7 @@ async def diagnostic_export(
                               "completed_at": r.completed_at.isoformat() if r.completed_at else None}
                              for r in rows]
         else:
+            outbound_rows = list(rows)
             payload[name] = [{"id": r.id, "platform": r.platform, "account_id": r.account_id,
                               "chat_ref": r.chat_ref, "state": r.state,
                               "attempt_count": r.attempt_count, "last_error": r.last_error,
@@ -406,6 +410,40 @@ async def diagnostic_export(
                               "created_at": r.created_at.isoformat(),
                               "delivered_at": r.delivered_at.isoformat() if r.delivered_at else None}
                              for r in rows]
+    now = datetime.now(timezone.utc)
+    polling_accounts = [
+        account for account in accounts
+        if account.enabled and account.platform.value == "telegram"
+        and account.delivery_mode.value == "polling"
+    ]
+    stale_accounts = [
+        account.id for account in polling_accounts
+        if account.polling_last_update_at is None
+        or (now - account.polling_last_update_at).total_seconds() > 120
+    ]
+    failed_deliveries = [
+        row for row in outbound_rows if row.state in ("pending", "terminal")
+    ]
+    unresolved_receipts = [
+        row for row in inbound_rows if row.state in ("claimed", "queued")
+    ]
+    turn_errors = [record for record in records if record.error]
+    health_status = "healthy"
+    if not accounts and not records:
+        health_status = "unknown"
+    elif stale_accounts or failed_deliveries or unresolved_receipts or turn_errors:
+        health_status = "degraded"
+    payload["inferred_health"] = {
+        "status": health_status,
+        "checked_at": now.isoformat(),
+        "application_endpoint": "healthy",
+        "polling_accounts": len(polling_accounts),
+        "stale_polling_account_ids": stale_accounts,
+        "turn_error_count": len(turn_errors),
+        "unresolved_receipt_count": len(unresolved_receipts),
+        "pending_or_terminal_delivery_count": len(failed_deliveries),
+        "platform_events": "not included; inspect Zeabur",
+    }
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("summary.json", json.dumps(payload, ensure_ascii=False, indent=2))

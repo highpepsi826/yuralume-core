@@ -70,6 +70,13 @@ in the export.
   back to Telegram.
 - Keep Zeabur platform events outside the application database.
 
+The diagnostic bundle also reports an inferred application health summary from
+the export request itself and the selected character's durable records. It
+must distinguish functional health from unknown platform lifecycle state:
+``healthy`` means recent polling and no pending/failed evidence in the window,
+``degraded`` means a stale polling account or failed/unresolved delivery, and
+``unknown`` means there is not enough durable activity to infer a state.
+
 The receipt outcome fields and 14-day default are now implemented in the
 working tree, with migration ``v6r4t2y10055``. Telegram fallback behavior is
 unchanged pending a production log sample that identifies a terminal path.
@@ -100,6 +107,10 @@ Backend export endpoint and frontend download control are implemented in the
 working tree. The bundle contains Turn-record summaries, selected-character
 messaging account status, inbound receipts, and outbound delivery/retry rows.
 Full prompts remain opt-in; Zeabur platform logs are still supplied separately.
+The export also includes an ``inferred_health`` summary with current endpoint
+availability, stale Telegram polling accounts, unresolved receipts, failed or
+pending deliveries, and Turn errors. It is functional evidence, not a
+reconstruction of Zeabur Pod lifecycle history.
 Receipt outcome migration and dispatcher outcome marks are implemented in
 commit ``e90f15c``. Production deployment remains pending a PostgreSQL backup
 and migration verification. No fallback text behavior was changed yet; the
