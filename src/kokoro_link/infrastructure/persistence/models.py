@@ -2571,6 +2571,21 @@ class TurnRecordRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True,
     )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="completed", index=True,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    failure_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True,
+    )
 
 
 class AccountRuntimeEventRow(Base):

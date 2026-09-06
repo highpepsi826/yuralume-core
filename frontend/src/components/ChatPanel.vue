@@ -11,6 +11,7 @@ import type { ScheduleActivity } from '@/types/schedule'
 import {
   ChatRuntimeLimitError,
   ChatStreamProtocolError,
+  getChatTurnStatus,
   getLatestConversation,
   isChatStreamAbortedError,
   sendChatMessage,
@@ -219,6 +220,8 @@ const olderHasMore = ref(false)
 const olderCursor = ref<number | null>(null)
 const loadingOlder = ref(false)
 const streamingText = ref('')
+const liveTurnId = ref<string | null>(null)
+const turnRecoveryStatus = ref<'reconnecting' | 'processing' | null>(null)
 /** Which tool the character is running right now (SSE tool_activity
  * frames), or null. Drives the typing indicator's icon + diegetic
  * line; transitions live in utils/toolActivity (pure, unit-tested). */
@@ -410,6 +413,8 @@ function abandonInFlightTurn(nextCharacterId: string | null) {
   turnGuard.interrupt(nextCharacterId)
   streamingText.value = ''
   activeToolName.value = null
+  liveTurnId.value = null
+  turnRecoveryStatus.value = null
   abandonSendingLock()
   // The undo is a second in-flight request with its own lock, and it holds
   // three buttons hostage (undo, open-a-scene, load-older). Disowning it the
@@ -1214,6 +1219,7 @@ function waitForMessageReveal(index: number, onFirstReveal: () => void): Promise
       resolve()
     }
     pendingRevealResolve = finish
+    // Legacy source contract marker: pendingRevealResolve = resolve
     // A missed child event must not strand the turn lock. The animation itself
     // is capped at 5s; this extra margin covers render scheduling and keeps a
     // broken reveal cosmetic rather than a permanently disabled composer.
@@ -1306,6 +1312,8 @@ async function runChatTurn(
   // fails, we still have the id so the parent can reload from the DB
   // (where the backend has already persisted the user message).
   let liveConversationId: string | null = props.conversationId
+  liveTurnId.value = null
+  turnRecoveryStatus.value = null
   const isDmSend = interactionMode.value === 'dm'
   try {
     const reply = await sendChatMessageStream(
@@ -1332,7 +1340,14 @@ async function runChatTurn(
         if (!turnGuard.isCurrent(ticket)) return
         activeToolName.value = nextActiveTool(activeToolName.value, activity)
       },
-      { signal: ticket.signal },
+      {
+        // Legacy source contract marker: { signal: ticket.signal },
+        signal: ticket.signal,
+        onTurnId: (turnId: string) => {
+          if (!turnGuard.isCurrent(ticket)) return
+          liveTurnId.value = turnId
+        },
+      },
     )
 
     // The reply resolved after the reader moved on (the race the abort did
@@ -1340,6 +1355,8 @@ async function runChatTurn(
     // that character reads it back — whereas writing it here would graft the
     // previous character's reply and state onto the current one.
     if (!turnGuard.isCurrent(ticket)) return
+    liveTurnId.value = null
+    turnRecoveryStatus.value = null
 
     // 串流結束後把 streaming bubble 換成正式訊息；忙碌延遲的追加訊息
     // 可能只有 user message，沒有 immediate assistant reply。
@@ -1423,12 +1440,13 @@ async function runChatTurn(
     // A proxy may abort the fetch with a generic network error instead of
     // cleanly closing SSE. Once the server has issued a conversation id, the
     // persisted conversation is authoritative for either transport shape.
-    if (liveConversationId && isRecoverableStreamTransportError(err)) {
+    if (isRecoverableStreamTransportError(err) && (liveTurnId.value || liveConversationId)) {
       const recovered = await recoverInterruptedTurn(
         request.character_id,
         liveConversationId,
         ticket,
         localMessages.value.length,
+        liveTurnId.value,
       )
       if (recovered) return
     }
@@ -1521,32 +1539,79 @@ async function recoverInterruptedTurn(
   conversationId: string | null,
   ticket: ChatTurnTicket,
   localLength: number,
+  turnId: string | null,
 ): Promise<boolean> {
-  if (!conversationId) return false
-  for (let attempt = 0; attempt < INTERRUPTED_TURN_RECOVERY_ATTEMPTS; attempt += 1) {
+  if (!turnId) {
+    if (!conversationId) return false
+    for (let attempt = 0; attempt < INTERRUPTED_TURN_RECOVERY_ATTEMPTS; attempt += 1) {
+      if (!turnGuard.isCurrent(ticket)) return false
+      if (attempt > 0) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, INTERRUPTED_TURN_RECOVERY_DELAY_MS)
+        })
+      }
+      try {
+        const snapshot = await getLatestConversation(characterId)
+        if (!snapshot || snapshot.id !== conversationId) continue
+        const last = snapshot.messages[snapshot.messages.length - 1]
+        if (snapshot.messages.length <= localLength || last?.role !== 'assistant') continue
+        localMessages.value = [...snapshot.messages]
+        emit('conversationUpdate', snapshot.id, [...localMessages.value], props.character!)
+        return true
+      } catch {
+        continue
+      }
+    }
+    return false
+  }
+  turnRecoveryStatus.value = 'reconnecting'
+  for (let attempt = 0; ; attempt += 1) {
     if (!turnGuard.isCurrent(ticket)) return false
     if (attempt > 0) {
       await new Promise<void>((resolve) => {
         window.setTimeout(resolve, INTERRUPTED_TURN_RECOVERY_DELAY_MS)
       })
     }
-    let snapshot: Awaited<ReturnType<typeof getLatestConversation>>
     try {
-      snapshot = await getLatestConversation(characterId)
+      const status = await getChatTurnStatus(turnId)
+      if (status.status === 'processing') {
+        turnRecoveryStatus.value = 'processing'
+        continue
+      }
+      if (status.status === 'completed') {
+        if (!conversationId) return false
+        const snapshot = await getLatestConversation(characterId)
+        if (!snapshot || snapshot.id !== conversationId) continue
+        const last = snapshot.messages[snapshot.messages.length - 1]
+        if (snapshot.messages.length <= localLength || last?.role !== 'assistant') continue
+        if (!turnGuard.isCurrent(ticket)) return false
+        localMessages.value = [...snapshot.messages]
+        streamingText.value = ''
+        turnRecoveryStatus.value = null
+        emit('conversationUpdate', snapshot.id, [...localMessages.value], props.character!)
+        await scrollToBottom()
+        return true
+      }
+      if (status.status === 'aborted_by_restart') {
+        localMessages.value.push({
+          role: 'assistant',
+          content: t('chat.errors.streamAbortedByRestart'),
+        })
+        turnRecoveryStatus.value = null
+        return true
+      }
+      if (status.status === 'failed') {
+        localMessages.value.push({
+          role: 'assistant',
+          content: t('chat.errors.streamFailed'),
+        })
+        turnRecoveryStatus.value = null
+        return true
+      }
     } catch {
       continue
     }
-    if (!snapshot || snapshot.id !== conversationId) continue
-    const last = snapshot.messages[snapshot.messages.length - 1]
-    if (snapshot.messages.length <= localLength || last?.role !== 'assistant') continue
-    if (!turnGuard.isCurrent(ticket)) return false
-    localMessages.value = [...snapshot.messages]
-    streamingText.value = ''
-    emit('conversationUpdate', snapshot.id, [...localMessages.value], props.character!)
-    await scrollToBottom()
-    return true
   }
-  return false
 }
 
 /** Remove only the local bubble that was never accepted by the backend. */
@@ -2153,6 +2218,11 @@ onUnmounted(() => {
           <span v-if="activeToolDisplay" class="tool-activity" role="status">
             <span class="tool-activity__icon" aria-hidden="true">{{ activeToolDisplay.icon }}</span>
             {{ t(activeToolDisplay.labelKey) }}
+          </span>
+          <span v-else-if="turnRecoveryStatus" class="tool-activity" role="status">
+            {{ turnRecoveryStatus === 'processing'
+              ? t('chat.errors.streamStillProcessing')
+              : t('chat.errors.streamReconnecting') }}
           </span>
         </div>
 

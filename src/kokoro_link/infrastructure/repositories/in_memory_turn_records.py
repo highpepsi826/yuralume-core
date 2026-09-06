@@ -9,7 +9,12 @@ from kokoro_link.contracts.observability import (
     LatencyBucket,
     TurnRecordRepositoryPort,
 )
-from kokoro_link.domain.entities.turn_record import TurnKind, TurnRecord
+from kokoro_link.domain.entities.turn_record import (
+    TURN_STATUS_ABORTED_BY_RESTART,
+    TURN_STATUS_PROCESSING,
+    TurnKind,
+    TurnRecord,
+)
 from kokoro_link.infrastructure.persistence.sa_turn_record_repository import (
     _bucketize,
 )
@@ -21,6 +26,56 @@ class InMemoryTurnRecordRepository(TurnRecordRepositoryPort):
 
     async def add(self, record: TurnRecord) -> None:
         self._rows.append(record)
+
+    async def save(self, record: TurnRecord) -> None:
+        for index, row in enumerate(self._rows):
+            if row.id == record.id:
+                self._rows[index] = record
+                return
+        self._rows.append(record)
+
+    async def update_lifecycle(
+        self,
+        record_id: str,
+        *,
+        status: str,
+        updated_at: datetime,
+        last_heartbeat_at: datetime | None = None,
+        failure_code: str | None = None,
+    ) -> TurnRecord | None:
+        for index, row in enumerate(self._rows):
+            if row.id != record_id:
+                continue
+            updated = replace(
+                row,
+                status=status,
+                updated_at=updated_at,
+                last_heartbeat_at=last_heartbeat_at or row.last_heartbeat_at,
+                failure_code=failure_code,
+            )
+            self._rows[index] = updated
+            return updated
+        return None
+
+    async def abort_stale_processing(
+        self,
+        *,
+        before: datetime,
+        updated_at: datetime,
+    ) -> int:
+        count = 0
+        for index, row in enumerate(self._rows):
+            heartbeat = row.last_heartbeat_at or row.updated_at or row.created_at
+            if row.status != TURN_STATUS_PROCESSING or heartbeat >= before:
+                continue
+            self._rows[index] = replace(
+                row,
+                status=TURN_STATUS_ABORTED_BY_RESTART,
+                updated_at=updated_at,
+                failure_code="service_restart",
+            )
+            count += 1
+        return count
 
     async def get(self, record_id: str) -> TurnRecord | None:
         for row in self._rows:

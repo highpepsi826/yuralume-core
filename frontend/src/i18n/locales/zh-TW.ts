@@ -787,6 +787,9 @@ export const messages = {
       quotaExceeded: '這個功能本月的用量已達方案上限，下個月會自動恢復。',
       streamEndedWithoutFinalResponse: '連線中斷，沒有收到完整回覆',
       streamFailed: '這次回覆未能完成，請再試一次。',
+      streamReconnecting: '連線中斷，正在確認回覆狀態…',
+      streamStillProcessing: '伺服器仍在處理，完成後會自動顯示回覆。',
+      streamAbortedByRestart: '服務剛剛重新啟動，這次回覆沒有完成；你的訊息已保存，請重新送出。',
     },
   },
   feed: {

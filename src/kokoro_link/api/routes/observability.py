@@ -103,6 +103,11 @@ class TurnRecordDetail(BaseModel):
     post_turn_refs: dict[str, Any] = Field(default_factory=dict)
     operator_feedback: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+    status: str = "completed"
+    started_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_heartbeat_at: datetime | None = None
+    failure_code: str | None = None
 
     @classmethod
     def from_domain(cls, record: TurnRecord) -> "TurnRecordDetail":
@@ -123,6 +128,11 @@ class TurnRecordDetail(BaseModel):
             post_turn_refs=record.post_turn_refs,
             operator_feedback=record.operator_feedback,
             created_at=record.created_at,
+            status=record.status,
+            started_at=record.started_at,
+            updated_at=record.updated_at,
+            last_heartbeat_at=record.last_heartbeat_at,
+            failure_code=record.failure_code,
         )
 
 

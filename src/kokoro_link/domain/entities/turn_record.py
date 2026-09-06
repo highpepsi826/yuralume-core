@@ -36,6 +36,17 @@ TurnKind = str
 Open set so new subsystems can record without touching domain code.
 """
 
+TURN_STATUS_PROCESSING = "processing"
+TURN_STATUS_COMPLETED = "completed"
+TURN_STATUS_FAILED = "failed"
+TURN_STATUS_ABORTED_BY_RESTART = "aborted_by_restart"
+TURN_STATUSES = frozenset({
+    TURN_STATUS_PROCESSING,
+    TURN_STATUS_COMPLETED,
+    TURN_STATUS_FAILED,
+    TURN_STATUS_ABORTED_BY_RESTART,
+})
+
 
 @dataclass(frozen=True, slots=True)
 class TurnRecord:
@@ -79,6 +90,11 @@ class TurnRecord:
     currently writes ``{kind, note, tags, source, updated_at}``.
     """
     created_at: datetime = field(default_factory=_utcnow)
+    status: str = TURN_STATUS_COMPLETED
+    started_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_heartbeat_at: datetime | None = None
+    failure_code: str | None = None
 
     @classmethod
     def new(
@@ -99,6 +115,12 @@ class TurnRecord:
         error: str | None = None,
         post_turn_refs: dict[str, Any] | None = None,
         operator_feedback: dict[str, Any] | None = None,
+        status: str = TURN_STATUS_COMPLETED,
+        started_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        last_heartbeat_at: datetime | None = None,
+        failure_code: str | None = None,
+        created_at: datetime | None = None,
         now: datetime | None = None,
     ) -> TurnRecord:
         return cls(
@@ -117,5 +139,10 @@ class TurnRecord:
             error=error,
             post_turn_refs=dict(post_turn_refs or {}),
             operator_feedback=dict(operator_feedback or {}),
-            created_at=now or _utcnow(),
+            created_at=created_at or now or _utcnow(),
+            status=status if status in TURN_STATUSES else TURN_STATUS_COMPLETED,
+            started_at=started_at,
+            updated_at=updated_at,
+            last_heartbeat_at=last_heartbeat_at,
+            failure_code=failure_code,
         )

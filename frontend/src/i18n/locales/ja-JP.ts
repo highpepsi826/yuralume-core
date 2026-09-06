@@ -786,6 +786,9 @@ export const messages: MessageSchema = {
       quotaExceeded: 'この機能は今月分のプラン上限に達しました。来月になると自動的に回復します。',
       streamEndedWithoutFinalResponse: '接続が切れ、返信を最後まで受信できませんでした',
       streamFailed: '返信を完了できませんでした。もう一度お試しください。',
+      streamReconnecting: '接続が切れました。返信の状態を確認しています…',
+      streamStillProcessing: 'サーバーで処理中です。完了すると自動的に返信が表示されます。',
+      streamAbortedByRestart: 'サービスが再起動したため返信を完了できませんでした。メッセージは保存済みです。もう一度送信してください。',
     },
   },
   feed: {

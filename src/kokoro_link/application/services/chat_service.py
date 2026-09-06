@@ -2889,6 +2889,26 @@ class ChatService:
         if user_message is not None:
             await self._conversation_repository.save(conversation_with_user)
 
+        # Allocate and persist the foreground lifecycle identity before any
+        # upstream model work. A Pod restart can therefore leave a durable
+        # processing row for the status endpoint to explain.
+        turn_record_id = str(uuid4())
+        now_started = self._resolve_now()
+        if self._turn_recorder is not None:
+            record_durable = getattr(self._turn_recorder, "record_durable", None)
+            if callable(record_durable):
+                await record_durable(TurnRecordingDraft(
+                    id=turn_record_id,
+                    character_id=character.id,
+                    kind="chat",
+                    conversation_id=conversation_with_user.id,
+                    status="processing",
+                    started_at=now_started,
+                    updated_at=now_started,
+                    last_heartbeat_at=now_started,
+                    post_turn_refs={"source": "send_message_stream"},
+                ))
+
         model, model_id = await self._resolve_main_chat_model(
             character=character,
             payload=payload,
@@ -2982,6 +3002,7 @@ class ChatService:
                 scene_session=scene_session,
                 operator=operator,
                 stage_nudge=nudge.enabled,
+                turn_record_id=turn_record_id,
             )
             token_stream = _tool_cycle_stream(
                 generation_task, activity_events, finalizer,
@@ -3299,6 +3320,7 @@ class ChatService:
             scene_session=scene_session,
             operator=operator,
             stage_nudge=nudge.enabled,
+            turn_record_id=turn_record_id,
         )
         return token_stream, finalizer
 
@@ -4404,6 +4426,7 @@ class ChatService:
         upcoming_day_schedules: list | None = None,
         presence_frame: PresenceFrame | None = None,
         stage_nudge: bool = False,
+        turn_record_id: str | None = None,
         content_tolerance: str = CONTENT_TOLERANCE_FRONTIER,
         routing_content_tolerance: str = CONTENT_TOLERANCE_FRONTIER,
         source_surface: str = "chat",
@@ -9297,6 +9320,7 @@ class StreamFinalizer:
         scene_session: "StorySceneSession | None" = None,
         operator: "OperatorProfile | None" = None,
         stage_nudge: bool = False,
+        turn_record_id: str | None = None,
     ) -> None:
         self._service = service
         self._character = character
@@ -9307,6 +9331,7 @@ class StreamFinalizer:
         self._user_message = user_message
         self._user_text = user_message.content if user_message is not None else ""
         self._stage_nudge = stage_nudge
+        self._turn_record_id = turn_record_id
         self._pending_state = pending_state
         self._used_memories = used_memories
         self._prior_messages = prior_messages
@@ -9365,6 +9390,25 @@ class StreamFinalizer:
     @property
     def conversation_id(self) -> str:
         return self._conversation.id
+
+    @property
+    def turn_record_id(self) -> str | None:
+        return self._turn_record_id
+
+    async def mark_failed(self, *, failure_code: str = "stream_failed") -> None:
+        if not self._turn_record_id or self._service._turn_recorder is None:
+            return
+        updater = getattr(self._service._turn_recorder, "update_lifecycle", None)
+        if not callable(updater):
+            return
+        now = self._service._resolve_now()
+        await updater(
+            self._turn_record_id,
+            status="failed",
+            updated_at=now,
+            last_heartbeat_at=now,
+            failure_code=failure_code,
+        )
 
     def attach_turn_lease(self, session: "StudioLeaseSession | None") -> None:
         """Take ownership of the turn's conversation lease."""
@@ -9519,7 +9563,7 @@ class StreamFinalizer:
         # persisted user message before we got here, so the extractor
         # sees clean conversational text and decides on its own whether
         # there's anything worth remembering.
-        turn_record_id = str(uuid4())
+        turn_record_id = self._turn_record_id or str(uuid4())
         post_turn_refs = await self._service._run_post_turn(
             character=self._character,
             conversation_id=updated_conversation.id,
@@ -9632,6 +9676,12 @@ class StreamFinalizer:
                 "stage_nudge": self._stage_nudge,
                 **post_turn_refs,
             },
+            status="completed",
+            started_at=(
+                self._journal.turn_started_at if self._journal is not None else None
+            ),
+            updated_at=now,
+            last_heartbeat_at=now,
         ))
         await self._service._record_llm_usage_safely(
             character_id=self._character.id,

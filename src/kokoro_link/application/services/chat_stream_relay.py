@@ -383,9 +383,27 @@ class TurnStreamRelay:
                     "completed",
                     self._conversation_id,
                 )
+                marker = getattr(self._finalizer, "mark_failed", None)
+                if callable(marker):
+                    try:
+                        await marker(failure_code="stream_cancelled")
+                    except Exception:  # pragma: no cover - diagnostic only
+                        _LOGGER.exception(
+                            "failed to mark cancelled chat turn for conversation %s",
+                            self._conversation_id,
+                        )
             raise
         except BaseException as error:  # noqa: BLE001 - handed to the route
             outcome = TurnFailed(error)
+            marker = getattr(self._finalizer, "mark_failed", None)
+            if callable(marker):
+                try:
+                    await marker()
+                except Exception:  # pragma: no cover - diagnostic only
+                    _LOGGER.exception(
+                        "failed to mark chat turn failure for conversation %s",
+                        self._conversation_id,
+                    )
             self._log_failure(error)
         finally:
             # Cleanup *before* publishing the outcome: the transport may raise

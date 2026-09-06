@@ -46,6 +46,11 @@ class TurnRecordingDraft:
     completion_tokens: int | None = None
     error: str | None = None
     post_turn_refs: dict[str, Any] | None = None
+    status: str = "completed"
+    started_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_heartbeat_at: datetime | None = None
+    failure_code: str | None = None
 
 
 class TurnRecorderPort(Protocol):
@@ -58,6 +63,18 @@ class TurnRecorderPort(Protocol):
         the caller; log and swallow.
         """
         ...
+
+    async def record_durable(self, draft: TurnRecordingDraft) -> str: ...
+
+    async def update_lifecycle(
+        self,
+        record_id: str,
+        *,
+        status: str,
+        updated_at: datetime,
+        last_heartbeat_at: datetime | None = None,
+        failure_code: str | None = None,
+    ) -> TurnRecord | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +95,25 @@ class LatencyBucket:
 
 class TurnRecordRepositoryPort(Protocol):
     async def add(self, record: TurnRecord) -> None: ...
+
+    async def save(self, record: TurnRecord) -> None: ...
+
+    async def update_lifecycle(
+        self,
+        record_id: str,
+        *,
+        status: str,
+        updated_at: datetime,
+        last_heartbeat_at: datetime | None = None,
+        failure_code: str | None = None,
+    ) -> TurnRecord | None: ...
+
+    async def abort_stale_processing(
+        self,
+        *,
+        before: datetime,
+        updated_at: datetime,
+    ) -> int: ...
 
     async def get(self, record_id: str) -> TurnRecord | None: ...
 

@@ -96,6 +96,23 @@ export interface ChatStreamOptions {
    * delivering tokens the moment the signal fires.
    */
   signal?: AbortSignal
+  onTurnId?: (id: string) => void
+}
+
+export interface ChatTurnStatus {
+  turn_id: string
+  conversation_id: string | null
+  status: 'processing' | 'completed' | 'failed' | 'aborted_by_restart' | string
+  failure_code?: string | null
+  started_at?: string | null
+  updated_at?: string | null
+  last_heartbeat_at?: string | null
+}
+
+export async function getChatTurnStatus(turnId: string): Promise<ChatTurnStatus> {
+  const res = await authedFetch(`/api/v1/chat/turns/${encodeURIComponent(turnId)}`)
+  if (!res.ok) throw new Error(`Failed to load chat turn status: ${res.status}`)
+  return res.json() as Promise<ChatTurnStatus>
 }
 
 /**
@@ -395,6 +412,7 @@ export async function sendChatMessageStream(
       if (parsed.conversation_id && onConversationId) {
         onConversationId(parsed.conversation_id)
       }
+      if (parsed.turn_id && options.onTurnId) options.onTurnId(parsed.turn_id)
       // Tool-activity frames — the backend interleaves these while a
       // tool cycle runs so the UI can show what the character is busy
       // with. Shape-guarded: a malformed frame is ignored, never fatal.

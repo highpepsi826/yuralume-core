@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime
 from typing import Final
 
 from kokoro_link.contracts.observability import (
@@ -85,15 +86,69 @@ class BackgroundTurnRecorder(TurnRecorderPort):
             completion_tokens=draft.completion_tokens,
             error=draft.error,
             post_turn_refs=draft.post_turn_refs,
+            status=draft.status,
+            started_at=draft.started_at,
+            updated_at=draft.updated_at,
+            last_heartbeat_at=draft.last_heartbeat_at,
+            failure_code=draft.failure_code,
         )
         task = asyncio.create_task(self._persist_safely(record))
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
         return record.id
 
+    async def record_durable(self, draft: TurnRecordingDraft) -> str:
+        """Persist a lifecycle row before an upstream call starts."""
+        record = TurnRecord.new(
+            character_id=draft.character_id,
+            kind=draft.kind,
+            id=draft.id,
+            model_id=draft.model_id,
+            prompt_pack_hash=(
+                draft.prompt_pack_hash or get_default_loader().prompt_pack_hash()
+            ),
+            prompt_assembled=_truncate(draft.prompt_assembled, _MAX_PROMPT_CHARS),
+            response_text=_truncate(draft.response_text, _MAX_RESPONSE_CHARS),
+            conversation_id=draft.conversation_id,
+            response_json=draft.response_json,
+            latency_ms=draft.latency_ms,
+            prompt_tokens=draft.prompt_tokens,
+            completion_tokens=draft.completion_tokens,
+            error=draft.error,
+            post_turn_refs=draft.post_turn_refs,
+            status=draft.status,
+            started_at=draft.started_at,
+            updated_at=draft.updated_at,
+            last_heartbeat_at=draft.last_heartbeat_at,
+            failure_code=draft.failure_code,
+        )
+        await self._repository.save(record)
+        return record.id
+
+    async def update_lifecycle(
+        self,
+        record_id: str,
+        *,
+        status: str,
+        updated_at: datetime,
+        last_heartbeat_at: datetime | None = None,
+        failure_code: str | None = None,
+    ) -> TurnRecord | None:
+        return await self._repository.update_lifecycle(
+            record_id,
+            status=status,
+            updated_at=updated_at,
+            last_heartbeat_at=last_heartbeat_at,
+            failure_code=failure_code,
+        )
+
     async def _persist_safely(self, record: TurnRecord) -> None:
         try:
-            await self._repository.add(record)
+            save = getattr(self._repository, "save", None)
+            if callable(save):
+                await save(record)
+            else:
+                await self._repository.add(record)
         except Exception:  # noqa: BLE001 — recorder must never bubble
             _LOGGER.exception(
                 "turn_recorder failed to persist record %s (kind=%s, character=%s)",
@@ -112,3 +167,19 @@ class NullTurnRecorder(TurnRecorderPort):
 
     async def record(self, draft: TurnRecordingDraft) -> str:
         return ""
+
+    async def record_durable(self, draft: TurnRecordingDraft) -> str:
+        return draft.id or str(TurnRecord.new(
+            character_id=draft.character_id, kind=draft.kind,
+        ).id)
+
+    async def update_lifecycle(
+        self,
+        record_id: str,
+        *,
+        status: str,
+        updated_at: datetime,
+        last_heartbeat_at: datetime | None = None,
+        failure_code: str | None = None,
+    ) -> TurnRecord | None:
+        return None

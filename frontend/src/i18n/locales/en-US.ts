@@ -788,6 +788,9 @@ export const messages: MessageSchema = {
       quotaExceeded: 'This feature has reached its plan quota for this month. It will refresh automatically next month.',
       streamEndedWithoutFinalResponse: 'The connection dropped before a full reply arrived',
       streamFailed: 'The reply could not be completed. Please try again.',
+      streamReconnecting: 'The connection dropped; checking the reply status…',
+      streamStillProcessing: 'The server is still working. The reply will appear automatically when ready.',
+      streamAbortedByRestart: 'The service restarted before this reply finished. Your message was saved; please send it again.',
     },
   },
   feed: {

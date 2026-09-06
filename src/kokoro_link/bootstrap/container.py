@@ -1404,6 +1404,7 @@ class ServiceContainer:
     ) = None
     album_repository: AlbumRepositoryPort | None = None
     turn_record_repository: "TurnRecordRepositoryPort | None" = None
+    turn_recorder: "TurnRecorderPort | None" = None
     usage_event_repository: "UsageEventRepositoryPort | None" = None
     emotion_event_repository: "EmotionEventRepositoryPort | None" = None
     # HUMANIZATION_ROADMAP P1 repositories (§3.1–§3.5 audit / read paths).
@@ -6789,6 +6790,8 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         schedule_memorializer=schedule_memorializer,
         schedule_weather_drift_service=schedule_weather_drift_service,
         active_llm_provider=active_llm_provider,
+        turn_record_repository=turn_record_repository,
+        turn_recorder=turn_recorder,
         cloud_routing_profile_resolver=cloud_routing_profile_resolver,
         cloud_mode=app_settings.cloud.active,
         nsfw_mode_service=nsfw_mode_service,
@@ -6943,7 +6946,6 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         character_encounter_repository=character_encounter_repository,
         character_encounter_intent_repository=character_encounter_intent_repository,
         album_repository=album_repository,
-        turn_record_repository=turn_record_repository,
         usage_event_repository=usage_event_repository,
         emotion_event_repository=emotion_event_repository,
         disposition_drift_history_repository=disposition_drift_history_repository,

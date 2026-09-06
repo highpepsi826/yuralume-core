@@ -75,7 +75,51 @@ class ChatUploadsResponse(BaseModel):
     urls: list[str] = Field(default_factory=list)
 
 
+class ChatTurnStatusResponse(BaseModel):
+    turn_id: str
+    conversation_id: str | None
+    status: str
+    failure_code: str | None = None
+    started_at: str | None = None
+    updated_at: str | None = None
+    last_heartbeat_at: str | None = None
+
+
 router = APIRouter(tags=["chat"])
+
+
+@router.get("/chat/turns/{turn_id}", response_model=ChatTurnStatusResponse)
+async def get_chat_turn_status(
+    turn_id: str,
+    container: ServiceContainer = Depends(get_container),
+    current_user_id: str = Depends(get_current_user_id),
+) -> ChatTurnStatusResponse:
+    repo = container.turn_record_repository
+    if repo is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Turn status repository is not wired",
+        )
+    record = await repo.get(turn_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Turn not found")
+    character = await _safe_get_character_entity(
+        container, record.character_id, current_user_id,
+    )
+    if character is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Turn not found")
+    return ChatTurnStatusResponse(
+        turn_id=record.id,
+        conversation_id=record.conversation_id,
+        status=record.status,
+        failure_code=record.failure_code,
+        started_at=record.started_at.isoformat() if record.started_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+        last_heartbeat_at=(
+            record.last_heartbeat_at.isoformat()
+            if record.last_heartbeat_at else None
+        ),
+    )
 
 
 @router.get(
@@ -562,7 +606,7 @@ async def send_chat_message_stream(
             # it. The window is small (one frame) but it is a disconnect at
             # exactly the moment disconnects cluster: the user hitting send and
             # immediately navigating away.
-            yield f"data: {json.dumps({'conversation_id': finalizer.conversation_id})}\n\n"
+            yield f"data: {json.dumps({'conversation_id': finalizer.conversation_id, 'turn_id': finalizer.turn_record_id})}\n\n"
 
             # Ordered by frequency: every reply is mostly tokens. A comment
             # heartbeat keeps the HTTP/SSE connection alive when the upstream

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -278,6 +279,25 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 )
             await run_startup_seeds(container, settings)
 
+        # A previous Pod may have died while a foreground chat turn was still
+        # marked processing. Reconcile only rows quiet for a conservative
+        # grace period so a live turn on another replica is not misclassified.
+        turn_repo = getattr(container, "turn_record_repository", None)
+        if matrix.serve_api_routes and turn_repo is not None:
+            try:
+                cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+                count = await turn_repo.abort_stale_processing(
+                    before=cutoff,
+                    updated_at=datetime.now(timezone.utc),
+                )
+                if count:
+                    _LOGGER.warning(
+                        "marked %s stale processing chat turns as aborted_by_restart",
+                        count,
+                    )
+            except Exception as exc:  # fail-soft: never block startup
+                _LOGGER.warning("chat turn startup reconciliation failed: %r", exc)
+
         # Cross-process runtime-config refresher (provider hot-reload). Built on
         # PostgreSQL only, in EVERY role: a coordinator/worker/connector serves
         # no admin route, so before this it could never learn that an operator
@@ -521,6 +541,16 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 )
             except Exception as exc:  # fail-soft: never mask a clean shutdown
                 print(f"[lifespan] chat service background drain failed: {exc!r}")
+            recorder = getattr(container, "turn_recorder", None)
+            if recorder is not None:
+                flush = getattr(recorder, "flush", None)
+                if callable(flush):
+                    try:
+                        await asyncio.wait_for(
+                            flush(), timeout=CHAT_BACKGROUND_DRAIN_TIMEOUT_SECONDS,
+                        )
+                    except Exception as exc:  # fail-soft
+                        print(f"[lifespan] turn recorder flush failed: {exc!r}")
             # HOSTED_CORE_SCALING §9.1 — dispose the single shared async
             # engine (releases its connection pool) once, in every process
             # role. Fail-soft so a dispose error never masks a clean

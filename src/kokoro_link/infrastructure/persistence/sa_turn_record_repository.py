@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import cast, func, or_, select
+from sqlalchemy import cast, func, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -20,7 +20,12 @@ from kokoro_link.contracts.observability import (
     LatencyBucket,
     TurnRecordRepositoryPort,
 )
-from kokoro_link.domain.entities.turn_record import TurnKind, TurnRecord
+from kokoro_link.domain.entities.turn_record import (
+    TURN_STATUS_ABORTED_BY_RESTART,
+    TURN_STATUS_PROCESSING,
+    TurnKind,
+    TurnRecord,
+)
 from kokoro_link.infrastructure.persistence.models import TurnRecordRow
 
 
@@ -69,6 +74,20 @@ def _row_to_domain(row: TurnRecordRow) -> TurnRecord:
         post_turn_refs=post_turn_refs,
         operator_feedback=operator_feedback,
         created_at=_ensure_utc(row.created_at),
+        status=getattr(row, "status", "completed") or "completed",
+        started_at=(
+            _ensure_utc(row.started_at) if getattr(row, "started_at", None)
+            else None
+        ),
+        updated_at=(
+            _ensure_utc(row.updated_at) if getattr(row, "updated_at", None)
+            else None
+        ),
+        last_heartbeat_at=(
+            _ensure_utc(row.last_heartbeat_at)
+            if getattr(row, "last_heartbeat_at", None) else None
+        ),
+        failure_code=getattr(row, "failure_code", None),
     )
 
 
@@ -103,9 +122,96 @@ class SATurnRecordRepository(TurnRecordRepositoryPort):
                     record.operator_feedback, ensure_ascii=False, default=str,
                 ),
                 created_at=record.created_at,
+                status=record.status,
+                started_at=record.started_at,
+                updated_at=record.updated_at,
+                last_heartbeat_at=record.last_heartbeat_at,
+                failure_code=record.failure_code,
             )
             session.add(row)
             await session.commit()
+
+    async def save(self, record: TurnRecord) -> None:
+        async with self._session_factory() as session:
+            row = await session.get(TurnRecordRow, record.id)
+            if row is None:
+                await self.add(record)
+                return
+            row.character_id = record.character_id
+            row.conversation_id = record.conversation_id
+            row.kind = record.kind
+            row.model_id = record.model_id
+            row.prompt_pack_hash = record.prompt_pack_hash
+            row.prompt_assembled = record.prompt_assembled
+            row.response_text = record.response_text
+            row.response_json = (
+                json.dumps(record.response_json, ensure_ascii=False)
+                if record.response_json is not None else None
+            )
+            row.latency_ms = record.latency_ms
+            row.prompt_tokens = record.prompt_tokens
+            row.completion_tokens = record.completion_tokens
+            row.error = record.error
+            row.post_turn_refs = json.dumps(
+                record.post_turn_refs, ensure_ascii=False, default=str,
+            )
+            row.operator_feedback = json.dumps(
+                record.operator_feedback, ensure_ascii=False, default=str,
+            )
+            row.status = record.status
+            row.started_at = record.started_at
+            row.updated_at = record.updated_at
+            row.last_heartbeat_at = record.last_heartbeat_at
+            row.failure_code = record.failure_code
+            await session.commit()
+
+    async def update_lifecycle(
+        self,
+        record_id: str,
+        *,
+        status: str,
+        updated_at: datetime,
+        last_heartbeat_at: datetime | None = None,
+        failure_code: str | None = None,
+    ) -> TurnRecord | None:
+        async with self._session_factory() as session:
+            row = await session.get(TurnRecordRow, record_id)
+            if row is None:
+                return None
+            row.status = status
+            row.updated_at = updated_at
+            if last_heartbeat_at is not None:
+                row.last_heartbeat_at = last_heartbeat_at
+            row.failure_code = failure_code
+            await session.commit()
+            await session.refresh(row)
+            return _row_to_domain(row)
+
+    async def abort_stale_processing(
+        self,
+        *,
+        before: datetime,
+        updated_at: datetime,
+    ) -> int:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                update(TurnRecordRow)
+                .where(
+                    TurnRecordRow.status == TURN_STATUS_PROCESSING,
+                    func.coalesce(
+                        TurnRecordRow.last_heartbeat_at,
+                        TurnRecordRow.updated_at,
+                        TurnRecordRow.created_at,
+                    ) < before,
+                )
+                .values(
+                    status=TURN_STATUS_ABORTED_BY_RESTART,
+                    updated_at=updated_at,
+                    failure_code="service_restart",
+                )
+            )
+            await session.commit()
+            return int(result.rowcount or 0)
 
     async def get(self, record_id: str) -> TurnRecord | None:
         async with self._session_factory() as session:
