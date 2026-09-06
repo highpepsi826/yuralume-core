@@ -1420,8 +1420,10 @@ async function runChatTurn(
       pendingRevealResolve = null
     }
     pendingFirstRevealRelease = null
-    if (err instanceof ChatStreamProtocolError
-      && err.code === 'stream_ended_without_final_response') {
+    // A proxy may abort the fetch with a generic network error instead of
+    // cleanly closing SSE. Once the server has issued a conversation id, the
+    // persisted conversation is authoritative for either transport shape.
+    if (liveConversationId && isRecoverableStreamTransportError(err)) {
       const recovered = await recoverInterruptedTurn(
         request.character_id,
         liveConversationId,
@@ -1495,6 +1497,17 @@ async function runChatTurn(
       focusInput()
     }
   }
+}
+
+function isRecoverableStreamTransportError(err: unknown): boolean {
+  if (err instanceof ChatStreamProtocolError) {
+    return err.code === 'stream_ended_without_final_response'
+  }
+  if (!(err instanceof Error)) return false
+  return !(err instanceof ChatRuntimeLimitError)
+    && !isInsufficientCreditsError(err)
+    && !isPriceChangedError(err)
+    && !isConversationBusyError(err)
 }
 
 /**

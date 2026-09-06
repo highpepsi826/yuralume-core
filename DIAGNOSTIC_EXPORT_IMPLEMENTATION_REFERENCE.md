@@ -183,7 +183,8 @@ the final ``done`` event. Keep SSE as the low-latency display path while making
 the persisted conversation authoritative when the transport disappears:
 
 - On the client, poll the latest conversation briefly after a missing ``done``
-  event and silently reconcile the saved assistant message when it appears.
+  event or a transport/network failure after the conversation id is known, and
+  silently reconcile the saved assistant message when it appears.
 - If the bounded recovery window expires, request the ordinary conversation
   reload before showing the existing saved-message notice.
 - On the server, encode non-credit stream failures as a terminal structured
