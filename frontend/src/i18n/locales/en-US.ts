@@ -787,6 +787,7 @@ export const messages: MessageSchema = {
       costCapExceeded: 'We have reached this month\'s safety cap on service usage. We\'ve already been notified and are on it — please try again shortly.',
       quotaExceeded: 'This feature has reached its plan quota for this month. It will refresh automatically next month.',
       streamEndedWithoutFinalResponse: 'The connection dropped before a full reply arrived',
+      streamFailed: 'The reply could not be completed. Please try again.',
     },
   },
   feed: {

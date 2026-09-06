@@ -785,6 +785,7 @@ export const messages: MessageSchema = {
       costCapExceeded: '今月のサービス利用が安全上限に達しました。すでに把握して対応を進めていますので、しばらくしてからもう一度お試しください。',
       quotaExceeded: 'この機能は今月分のプラン上限に達しました。来月になると自動的に回復します。',
       streamEndedWithoutFinalResponse: '接続が切れ、返信を最後まで受信できませんでした',
+      streamFailed: '返信を完了できませんでした。もう一度お試しください。',
     },
   },
   feed: {

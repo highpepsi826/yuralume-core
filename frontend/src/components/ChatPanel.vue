@@ -206,6 +206,8 @@ const sending = ref(false)
 const messagesContainer = ref<HTMLElement>()
 // 浮動「回到最新」箭頭：捲離底部超過這個距離才顯示，見 handleMessagesScroll。
 const SCROLL_TO_LATEST_THRESHOLD_PX = 160
+const INTERRUPTED_TURN_RECOVERY_ATTEMPTS = 12
+const INTERRUPTED_TURN_RECOVERY_DELAY_MS = 5000
 const showScrollToLatest = ref(false)
 const textareaRef = ref<HTMLTextAreaElement>()
 const fileInputRef = ref<HTMLInputElement>()
@@ -1418,6 +1420,16 @@ async function runChatTurn(
       pendingRevealResolve = null
     }
     pendingFirstRevealRelease = null
+    if (err instanceof ChatStreamProtocolError
+      && err.code === 'stream_ended_without_final_response') {
+      const recovered = await recoverInterruptedTurn(
+        request.character_id,
+        liveConversationId,
+        ticket,
+        localMessages.value.length,
+      )
+      if (recovered) return
+    }
     if (isInsufficientCreditsError(err)) {
       // Not a failure to explain away: nothing ran and nothing was charged.
       // The notice card carries that promise plus the top-up CTA, so a
@@ -1483,6 +1495,45 @@ async function runChatTurn(
       focusInput()
     }
   }
+}
+
+/**
+ * The SSE connection is only a live view; the server persists the user turn
+ * before generation and may finish it after the browser/edge closes. Briefly
+ * re-read the newest page so a slow same-space turn resolves without asking
+ * the player to refresh manually.
+ */
+async function recoverInterruptedTurn(
+  characterId: string,
+  conversationId: string | null,
+  ticket: ChatTurnTicket,
+  localLength: number,
+): Promise<boolean> {
+  if (!conversationId) return false
+  for (let attempt = 0; attempt < INTERRUPTED_TURN_RECOVERY_ATTEMPTS; attempt += 1) {
+    if (!turnGuard.isCurrent(ticket)) return false
+    if (attempt > 0) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, INTERRUPTED_TURN_RECOVERY_DELAY_MS)
+      })
+    }
+    let snapshot: Awaited<ReturnType<typeof getLatestConversation>>
+    try {
+      snapshot = await getLatestConversation(characterId)
+    } catch {
+      continue
+    }
+    if (!snapshot || snapshot.id !== conversationId) continue
+    const last = snapshot.messages[snapshot.messages.length - 1]
+    if (snapshot.messages.length <= localLength || last?.role !== 'assistant') continue
+    if (!turnGuard.isCurrent(ticket)) return false
+    localMessages.value = [...snapshot.messages]
+    streamingText.value = ''
+    emit('conversationUpdate', snapshot.id, [...localMessages.value], props.character!)
+    await scrollToBottom()
+    return true
+  }
+  return false
 }
 
 /** Remove only the local bubble that was never accepted by the backend. */
@@ -1680,6 +1731,9 @@ function chatErrorContent(err: unknown): string {
     return t('chat.errors.streamError', {
       reason: t('chat.errors.streamEndedWithoutFinalResponse'),
     })
+  }
+  if (err instanceof ChatStreamProtocolError && err.code === 'stream_failed') {
+    return t('chat.errors.streamFailed')
   }
   return t('chat.errors.streamError', {
     reason: err instanceof Error ? err.message : t('common.errors.unknown'),

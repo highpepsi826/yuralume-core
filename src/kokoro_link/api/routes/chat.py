@@ -601,16 +601,24 @@ async def send_chat_message_stream(
                     # wire, so an out-of-credits refusal cannot become a 402
                     # status here — it travels as a terminal ``error`` frame
                     # instead, mirroring the sync route's structured detail.
-                    # Everything else keeps the old behaviour (propagate, no
-                    # final event); the relay has already released the turn by
-                    # the time it publishes this.
+                    # The relay has already released the turn by the time it
+                    # publishes this terminal event.
                     detail = insufficient_credits_detail(event.error)
                     if detail is None:
-                        raise event.error
+                        _LOGGER.exception(
+                            "chat stream failed for conversation %s",
+                            finalizer.conversation_id,
+                            exc_info=event.error,
+                        )
+                        detail = {
+                            "code": "stream_failed",
+                            "message": "The reply could not be completed. Please try again.",
+                        }
                     _LOGGER.info(
-                        "chat stream stopped: insufficient credits "
-                        "(conversation %s)",
+                        "chat stream stopped with terminal error "
+                        "(conversation %s, code=%s)",
                         finalizer.conversation_id,
+                        detail["code"],
                     )
                     yield f"data: {json.dumps({'error': detail})}\n\n"
                     yield "data: [DONE]\n\n"

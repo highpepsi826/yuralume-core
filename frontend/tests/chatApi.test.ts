@@ -69,6 +69,22 @@ describe('chat API runtime limit errors', () => {
     }, () => {})).rejects.toBeInstanceOf(ChatStreamProtocolError)
   })
 
+  it('preserves the backend stream_failed code from a terminal SSE frame', async () => {
+    mockedAuthedFetch.mockResolvedValueOnce(streamResponse([
+      'data: {"conversation_id":"conv-1"}\n\n',
+      'data: {"error":{"code":"stream_failed","message":"The reply could not be completed. Please try again."}}\n\n',
+      'data: [DONE]\n\n',
+    ]))
+
+    await expect(sendChatMessageStream({
+      character_id: 'char-1',
+      message: 'hello',
+    }, () => {})).rejects.toMatchObject({
+      code: 'stream_failed',
+      message: 'The reply could not be completed. Please try again.',
+    })
+  })
+
   it('maps a 429 cost_cap_exceeded to a typed error carrying the backend message', async () => {
     mockedAuthedFetch.mockResolvedValueOnce(jsonResponse(429, {
       detail: { code: 'cost_cap_exceeded', message: 'monthly cost cap reached' },

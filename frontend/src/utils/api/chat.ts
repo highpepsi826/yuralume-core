@@ -375,11 +375,14 @@ export async function sendChatMessageStream(
       // before the token/done branches: an error frame never carries either.
       if (parsed && typeof parsed === 'object' && parsed.error) {
         if (streamErrors.length === 0) {
+          const streamCode = parsed.error.code === 'stream_failed'
+            ? 'stream_failed'
+            : 'stream_error_frame'
           streamErrors.push(
             insufficientCreditsFromStreamFrame(parsed)
             ?? priceChangedFromStreamFrame(parsed)
             ?? new ChatStreamProtocolError(
-              'stream_error_frame',
+              streamCode,
               streamErrorFrameMessage(parsed.error),
             ),
           )

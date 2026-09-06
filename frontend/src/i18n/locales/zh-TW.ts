@@ -786,6 +786,7 @@ export const messages = {
       costCapExceeded: '服務用量已達本月安全上限，我們已收到通知並正在處理，請稍後再試。',
       quotaExceeded: '這個功能本月的用量已達方案上限，下個月會自動恢復。',
       streamEndedWithoutFinalResponse: '連線中斷，沒有收到完整回覆',
+      streamFailed: '這次回覆未能完成，請再試一次。',
     },
   },
   feed: {

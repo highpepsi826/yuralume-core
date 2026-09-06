@@ -174,3 +174,22 @@ The diagnostic payload also carries a non-sensitive ``deployment`` block with
 the process/pod label, process start time, and build image/commit metadata.
 This identifies restarts and confirms which image produced a bundle without
 pretending to reconstruct Zeabur lifecycle events.
+
+## Interrupted web-stream recovery (2026-09-06)
+
+The 20:36 same-space turn completed server-side after a 182-second wait for
+the first token, but the browser reported that the SSE stream ended without
+the final ``done`` event. Keep SSE as the low-latency display path while making
+the persisted conversation authoritative when the transport disappears:
+
+- On the client, poll the latest conversation briefly after a missing ``done``
+  event and silently reconcile the saved assistant message when it appears.
+- If the bounded recovery window expires, request the ordinary conversation
+  reload before showing the existing saved-message notice.
+- On the server, encode non-credit stream failures as a terminal structured
+  ``stream_failed`` frame. Do not expose provider exception text to the client.
+
+The recovery is additive and does not change billing, conversation ownership,
+same-space semantics, or the durable turn record contract. A future async-turn
+API remains the long-term option if the hosting edge enforces a hard request
+duration regardless of heartbeats.

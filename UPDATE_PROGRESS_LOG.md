@@ -5,6 +5,22 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-09-06 - Recover interrupted web chat streams
+
+- Status: source implementation complete; deployment pending.
+- Fix: when the browser loses an SSE stream before the final `done` frame,
+  the same-space chat panel briefly polls the persisted latest conversation and
+  restores the assistant reply automatically when it has landed.
+- Fix: non-credit streaming failures now end with an anonymous structured
+  `stream_failed` frame, while provider exception details remain server-side.
+- Compatibility: billing, conversation ownership, same-space semantics, and
+  the existing refresh fallback are unchanged.
+- Verification: frontend chat API tests passed (25 tests), the frontend main
+  production bundle built successfully, Python compilation and `git diff
+  --check` passed. The PWA sub-build was blocked by the workstation sandbox
+  denying `C:\Users\high_` metadata access after the main bundle completed.
+- Deployment: not performed; deploy only after reviewing this source change.
+
 ### 2026-09-05 - Adopt `local` moving image tag
 
 - Status: completed.
