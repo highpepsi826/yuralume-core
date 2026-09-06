@@ -1343,8 +1343,9 @@ async function runChatTurn(
     // 可能只有 user message，沒有 immediate assistant reply。
     streamingText.value = ''
     if (reply.assistant_message) {
-      const shouldReveal = isDmSend
-        && splitAssistantBubbles(reply.assistant_message.content).length > 1
+      const shouldReveal = splitAssistantBubbles(reply.assistant_message.content, {
+        splitActionNarration: !isDmSend,
+      }).length > 1
       const revealPromise = shouldReveal
         ? waitForMessageReveal(
           localMessages.value.length,
@@ -1570,6 +1571,7 @@ async function handleSend() {
     {
       role: 'user',
       content: userText,
+      created_at: new Date().toISOString(),
       attachments: uploadedUrls.map(url => ({
         kind: 'image',
         url,
@@ -2060,6 +2062,7 @@ onUnmounted(() => {
             :character-id="character?.id ?? null"
             :tts-available="ttsUsable"
             :animate-reveal="revealingMessageIndex === i"
+            :roleplay-reveal="interactionMode === 'stage'"
             :text-message-mode="interactionMode === 'dm'"
             @reveal-complete="handleBubbleRevealComplete(i)"
             @reveal-progress="handleBubbleRevealProgress(i)"

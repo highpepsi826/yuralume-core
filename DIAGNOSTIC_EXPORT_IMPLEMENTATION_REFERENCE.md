@@ -148,3 +148,13 @@ frontend had already rendered its optimistic user bubble before the 409, so a
 rejected retry appeared as a duplicate user message. Busy, price, credit, and
 session-cap refusals now remove only that unaccepted optimistic bubble while
 preserving messages that were persisted before a later stream failure.
+
+## Same-space pacing and message timestamps (2026-09-06)
+
+Same-space replies previously kept action narration in one rendered bubble and
+did not use the DM reveal cadence, so multi-paragraph roleplay appeared all at
+once. The stage surface now reveals paragraph boundaries sequentially with a
+longer bounded pause while preserving ``*action*`` text. ``created_at`` is
+returned on chat message responses and rendered above each bubble in the
+operator's configured timezone; optimistic user bubbles stamp the send time
+until the persisted response is available.

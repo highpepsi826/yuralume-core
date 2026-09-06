@@ -8,6 +8,8 @@ export const TEXTING_REVEAL_DELAY = {
 
 type SplitAssistantBubblesOptions = {
   stripActionNarration?: boolean
+  /** Stage keeps action narration, but still reveals each paragraph in turn. */
+  splitActionNarration?: boolean
 }
 
 export function stripActionNarration(content: string): string {
@@ -28,7 +30,9 @@ export function splitAssistantBubbles(
     : (content ?? '')
   const trimmed = raw.trim()
   if (!trimmed) return []
-  if (!options.stripActionNarration && trimmed.includes('*')) return [raw]
+  if (!options.stripActionNarration
+    && !options.splitActionNarration
+    && trimmed.includes('*')) return [raw]
 
   const segments = trimmed
     .split(/\n\s*\n+/)
@@ -47,22 +51,41 @@ export function revealDelayMs(segment: string): number {
   )
 }
 
-export function revealDelaysFor(segments: string[]): number[] {
+export interface RevealDelayOptions {
+  baseMs?: number
+  perCharMs?: number
+  minMs?: number
+  maxMs?: number
+  totalCapMs?: number
+}
+
+export function revealDelaysFor(
+  segments: string[],
+  options: RevealDelayOptions = {},
+): number[] {
   if (segments.length <= 1) return []
 
-  const delays = segments.slice(0, -1).map(revealDelayMs)
+  const baseMs = options.baseMs ?? TEXTING_REVEAL_DELAY.baseMs
+  const perCharMs = options.perCharMs ?? TEXTING_REVEAL_DELAY.perCharMs
+  const minMs = options.minMs ?? TEXTING_REVEAL_DELAY.minMs
+  const maxMs = options.maxMs ?? TEXTING_REVEAL_DELAY.maxMs
+  const totalCapMs = options.totalCapMs ?? TEXTING_REVEAL_DELAY.totalCapMs
+  const delays = segments.slice(0, -1).map(segment => Math.max(
+    minMs,
+    Math.min(maxMs, baseMs + [...(segment ?? '')].length * perCharMs),
+  ))
   const total = delays.reduce((sum, delay) => sum + delay, 0)
-  if (total <= TEXTING_REVEAL_DELAY.totalCapMs) return delays
+  if (total <= totalCapMs) return delays
 
-  const minTotal = delays.length * TEXTING_REVEAL_DELAY.minMs
-  if (minTotal >= TEXTING_REVEAL_DELAY.totalCapMs) {
-    return delays.map(() => TEXTING_REVEAL_DELAY.minMs)
+  const minTotal = delays.length * minMs
+  if (minTotal >= totalCapMs) {
+    return delays.map(() => minMs)
   }
 
-  const availableSlack = TEXTING_REVEAL_DELAY.totalCapMs - minTotal
+  const availableSlack = totalCapMs - minTotal
   const originalSlack = total - minTotal
   return delays.map(delay => (
-    TEXTING_REVEAL_DELAY.minMs
-    + Math.floor((delay - TEXTING_REVEAL_DELAY.minMs) * availableSlack / originalSlack)
+    minMs
+    + Math.floor((delay - minMs) * availableSlack / originalSlack)
   ))
 }

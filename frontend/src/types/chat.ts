@@ -30,6 +30,8 @@ export type ChatMessageKind = 'chat' | 'tool_only' | 'scene_narration'
 export interface ChatMessage {
   role: MessageRole
   content: string
+  /** Server-authored UTC timestamp; absent only on legacy payloads. */
+  created_at?: string | null
   attachments?: MessageAttachment[]
   turn_record_id?: string | null
   kind?: ChatMessageKind | null

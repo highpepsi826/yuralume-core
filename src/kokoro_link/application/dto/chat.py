@@ -228,6 +228,7 @@ class MessageAttachmentResponse(BaseModel):
 class ChatMessageResponse(BaseModel):
     role: str
     content: str
+    created_at: datetime | None = None
     attachments: list[MessageAttachmentResponse] = Field(default_factory=list)
     turn_record_id: str | None = None
     kind: str = MessageKind.CHAT.value
@@ -246,6 +247,7 @@ class ChatMessageResponse(BaseModel):
         return cls(
             role=message.role.value,
             content=message.content,
+            created_at=message.created_at,
             attachments=[
                 MessageAttachmentResponse.from_domain(a) for a in message.attachments
             ],

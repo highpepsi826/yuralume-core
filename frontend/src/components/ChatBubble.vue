@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { formatDateTime } from '@/i18n/formatters'
+import { useTimezone } from '@/composables/useTimezone'
 import type { ChatMessage } from '@/types/chat'
 import type { MessageAttachment } from '@/types/tool'
 import {
@@ -27,7 +29,8 @@ import {
   usableImageBox,
 } from '@/utils/offscreenImageRelease'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const { timeZone } = useTimezone()
 const { isAdmin } = useAuth()
 const router = useRouter()
 
@@ -40,6 +43,8 @@ const props = defineProps<{
   ttsAvailable?: boolean
   animateReveal?: boolean
   textMessageMode?: boolean
+  /** Stage mode reveals action-heavy paragraphs one at a time. */
+  roleplayReveal?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -396,6 +401,7 @@ const bubbleTexts = computed<string[]>(() => {
   if (props.message.role !== 'assistant') return [raw]
   return splitAssistantBubbles(raw, {
     stripActionNarration: !!props.textMessageMode,
+    splitActionNarration: !!props.roleplayReveal,
   })
 })
 
@@ -430,7 +436,13 @@ async function runRevealAnimation(): Promise<void> {
 
   visibleBubbleCount.value = 1
   notifyRevealProgress()
-  const revealDelays = revealDelaysFor(texts)
+  const revealDelays = revealDelaysFor(texts, props.roleplayReveal ? {
+    baseMs: 700,
+    perCharMs: 24,
+    minMs: 600,
+    maxMs: 2600,
+    totalCapMs: 9000,
+  } : undefined)
   for (let nextIndex = 1; nextIndex < texts.length; nextIndex += 1) {
     revealingBetweenSegments.value = true
     notifyRevealProgress()
@@ -459,6 +471,12 @@ watch(
 
 <template>
   <div :class="['bubble', message.role]">
+    <time
+      v-if="message.created_at"
+      class="bubble-timestamp"
+      :datetime="message.created_at"
+      :title="formatDateTime(message.created_at, locale, timeZone)"
+    >{{ formatDateTime(message.created_at, locale, timeZone) }}</time>
     <div
       v-for="(bubbleText, bubbleIdx) in displayedBubbleTexts"
       :key="`${bubbleIdx}-${bubbleText.length}`"
@@ -598,6 +616,19 @@ watch(
 
 .bubble.assistant {
   align-self: flex-start;
+}
+
+.bubble-timestamp {
+  align-self: flex-start;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  opacity: 0.78;
+  padding: 0 4px;
+}
+
+.bubble.user .bubble-timestamp {
+  align-self: flex-end;
 }
 
 .bubble-row {

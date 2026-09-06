@@ -22,6 +22,12 @@ describe('splitAssistantBubbles', () => {
     ])
   })
 
+  it('can split stage action narration into paced paragraphs', () => {
+    expect(splitAssistantBubbles('*抬頭看你*\n\n你來啦。', {
+      splitActionNarration: true,
+    })).toEqual(['*抬頭看你*', '你來啦。'])
+  })
+
   it('strips action narration and still splits in text-message mode', () => {
     expect(splitAssistantBubbles(
       '真的好久沒聯絡耶！\n\n*把手機相簿往下滑* 我最近在整理一些照片\n\n你要看嗎？',
