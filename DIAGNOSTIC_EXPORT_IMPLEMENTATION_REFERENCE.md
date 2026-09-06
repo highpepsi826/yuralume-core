@@ -111,6 +111,11 @@ The export also includes an ``inferred_health`` summary with current endpoint
 availability, stale Telegram polling accounts, unresolved receipts, failed or
 pending deliveries, and Turn errors. It is functional evidence, not a
 reconstruction of Zeabur Pod lifecycle history.
+
+If an optional durable source cannot be queried during a rolling deployment,
+the endpoint returns a partial ZIP with ``source_errors`` and a migration hint
+instead of a generic HTTP 500. The Zeabur app service still needs
+``alembic upgrade head`` before the receipt outcome columns are available.
 Receipt outcome migration and dispatcher outcome marks are implemented in
 commit ``e90f15c``. Production deployment remains pending a PostgreSQL backup
 and migration verification. No fallback text behavior was changed yet; the

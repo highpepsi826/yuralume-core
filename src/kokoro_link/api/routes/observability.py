@@ -379,6 +379,7 @@ async def diagnostic_export(
     dispatcher = container.messaging_dispatcher
     inbound_rows: list[object] = []
     outbound_rows: list[object] = []
+    source_errors: dict[str, str] = {}
     sources = (
         ("inbound_receipts", getattr(dispatcher, "_receipts", None), InboundMessageReceiptRow),
         ("outbound_deliveries", getattr(dispatcher, "_outbound_deliveries", None), OutboundMessageDeliveryRow),
@@ -387,11 +388,19 @@ async def diagnostic_export(
         session_factory = getattr(repository, "_session_factory", None)
         if session_factory is None or not account_ids:
             continue
-        async with session_factory() as session:
-            query = (select(row_type).where(row_type.account_id.in_(account_ids))
-                     .where(row_type.created_at >= start)
-                     .where(row_type.created_at <= end).limit(1000))
-            rows = (await session.execute(query)).scalars().all()
+        try:
+            async with session_factory() as session:
+                query = (select(row_type).where(row_type.account_id.in_(account_ids))
+                         .where(row_type.created_at >= start)
+                         .where(row_type.created_at <= end).limit(1000))
+                rows = (await session.execute(query)).scalars().all()
+        except Exception as exc:
+            # A rolling deployment can briefly run the new app against a DB
+            # whose migration command has not run yet. Preserve the useful
+            # Turn/account portion of the bundle and identify the missing
+            # source without returning a generic HTTP 500.
+            source_errors[name] = type(exc).__name__
+            continue
         if name == "inbound_receipts":
             inbound_rows = list(rows)
             payload[name] = [{"platform": r.platform, "account_id": r.account_id,
@@ -444,6 +453,12 @@ async def diagnostic_export(
         "pending_or_terminal_delivery_count": len(failed_deliveries),
         "platform_events": "not included; inspect Zeabur",
     }
+    if source_errors:
+        payload["source_errors"] = source_errors
+        payload["migration_hint"] = (
+            "Run alembic upgrade head in the Zeabur app service if a durable "
+            "source reports a schema error."
+        )
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("summary.json", json.dumps(payload, ensure_ascii=False, indent=2))
