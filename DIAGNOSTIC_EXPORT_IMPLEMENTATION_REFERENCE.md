@@ -127,3 +127,24 @@ and migration verification. No fallback text behavior was changed yet; the
 current evidence shows that only the generic ChatService failure branch sends
 the existing notice, so polling/pre-dispatch and delivery failures still need
 an observed failure sample before changing retry semantics.
+
+## Web chat no-response diagnosis (2026-09-06)
+
+The latest diagnostic export shows the final web ``chat`` turn at
+``2026-09-06T07:23:19Z`` completed with no error, while no subsequent ``chat``
+Turn record exists in the export window. This rules out a global LLM failure
+for the reported follow-up and points to the browser send path being blocked
+before a request was created. ``ChatPanel.runChatTurn`` rendered the assistant
+reply and, for multi-paragraph DM replies, awaited a ``reveal-complete`` event
+before its ``finally`` released ``sending``. If the bubble missed that event,
+the composer could silently reject later sends forever. The reveal wait now
+has a bounded 10-second fallback; activity, credits, and preference refreshes
+remain best-effort and never gate chat-turn settlement.
+
+The follow-up export contains a successful ``chat`` Turn at
+``2026-09-06T07:50:16Z`` with 67.9s latency. A send attempted while that turn
+held the conversation lease correctly received ``conversation_busy``. The
+frontend had already rendered its optimistic user bubble before the 409, so a
+rejected retry appeared as a duplicate user message. Busy, price, credit, and
+session-cap refusals now remove only that unaccepted optimistic bubble while
+preserving messages that were persisted before a later stream failure.

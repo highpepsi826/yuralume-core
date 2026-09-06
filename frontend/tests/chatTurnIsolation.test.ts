@@ -349,6 +349,26 @@ describe('ChatPanel abandons the turn it walks away from', () => {
   })
 })
 
+describe('ChatPanel cannot strand the composer on a missed reveal event', () => {
+  it('bounds the multi-bubble reveal wait', () => {
+    const reveal = section(
+      'function waitForMessageReveal(', '\nfunction handleBubbleRevealComplete',
+    )
+    expect(reveal).toContain('setTimeout(finish, 10_000)')
+    expect(reveal).toContain('clearTimeout(timeout)')
+  })
+})
+
+describe('ChatPanel does not render rejected busy retries as sent messages', () => {
+  it('removes the optimistic bubble on conversation_busy', () => {
+    const runChatTurn = section(
+      'async function runChatTurn(', '\nfunction removeOptimisticMessage',
+    )
+    expect(runChatTurn).toContain('removeOptimisticMessage(optimisticMessage)')
+    expect(runChatTurn).toContain('isConversationBusyError(err)')
+  })
+})
+
 describe('ChatPanel guards the turn across every await', () => {
   const runChatTurn = section(
     'async function runChatTurn(', '\nasync function handleSend()',

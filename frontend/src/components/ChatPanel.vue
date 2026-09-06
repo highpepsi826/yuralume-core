@@ -1202,7 +1202,20 @@ function waitForMessageReveal(index: number, onFirstReveal: () => void): Promise
   revealingMessageIndex.value = index
   pendingFirstRevealRelease = onFirstReveal
   return new Promise(resolve => {
-    pendingRevealResolve = resolve
+    let settled = false
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    const finish = () => {
+      if (settled) return
+      settled = true
+      if (timeout !== null) clearTimeout(timeout)
+      if (pendingRevealResolve === finish) pendingRevealResolve = null
+      resolve()
+    }
+    pendingRevealResolve = finish
+    // A missed child event must not strand the turn lock. The animation itself
+    // is capped at 5s; this extra margin covers render scheduling and keeps a
+    // broken reveal cosmetic rather than a permanently disabled composer.
+    timeout = setTimeout(finish, 10_000)
   })
 }
 
@@ -1408,8 +1421,10 @@ async function runChatTurn(
       // Not a failure to explain away: nothing ran and nothing was charged.
       // The notice card carries that promise plus the top-up CTA, so a
       // generic error bubble here would only muddy it.
+      removeOptimisticMessage(optimisticMessage)
       creditsExhausted.value = true
     } else if (isPriceChangedError(err)) {
+      removeOptimisticMessage(optimisticMessage)
       // The quoted Lume price moved mid-session; nothing was charged. Pull
       // the refreshed list so the composer hint shows the number the next
       // send will actually bind to.
@@ -1419,6 +1434,10 @@ async function runChatTurn(
         content: t('chat.priceChanged'),
       })
     } else if (isConversationBusyError(err)) {
+      // The lease is claimed before the backend persists the user message,
+      // so this request never landed. Remove the pre-send bubble; otherwise a
+      // rejected retry looks like a duplicate message in the transcript.
+      removeOptimisticMessage(optimisticMessage)
       // The character is still answering the previous message — a 409, and
       // an ordinary one now that walking away leaves the server finishing
       // that turn on its own. Same treatment as a moved price: a plain line
@@ -1429,6 +1448,7 @@ async function runChatTurn(
         content: t('chat.conversationBusy'),
       })
     } else if (cloudMode.value && isSessionMessageCapError(err)) {
+      removeOptimisticMessage(optimisticMessage)
       sessionMessageCapReached.value = true
     } else {
       localMessages.value.push({
@@ -1461,6 +1481,16 @@ async function runChatTurn(
       await scrollToBottom()
       focusInput()
     }
+  }
+}
+
+/** Remove only the local bubble that was never accepted by the backend. */
+function removeOptimisticMessage(message: ChatMessage | null) {
+  if (!message) return
+  for (let index = localMessages.value.length - 1; index >= 0; index -= 1) {
+    if (localMessages.value[index] !== message) continue
+    localMessages.value.splice(index, 1)
+    return
   }
 }
 
