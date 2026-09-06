@@ -348,6 +348,7 @@ async def diagnostic_export(
             "completion_tokens": record.completion_tokens,
             "error": record.error, "created_at": record.created_at.isoformat(),
             "response_excerpt": record.response_text[:1000],
+            "post_turn_refs": record.post_turn_refs,
         }
         if include_prompt:
             item["prompt_assembled"] = record.prompt_assembled

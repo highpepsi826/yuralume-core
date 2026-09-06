@@ -158,3 +158,14 @@ longer bounded pause while preserving ``*action*`` text. ``created_at`` is
 returned on chat message responses and rendered above each bubble in the
 operator's configured timezone; optimistic user bubbles stamp the send time
 until the persisted response is available.
+
+## Upstream slow-stream resilience (2026-09-06)
+
+The upstream usage export confirms that some ``gpt-6-astra`` requests receive
+their first token quickly but keep the SSE stream open for tens or hundreds of
+seconds. Add a periodic SSE comment heartbeat so Zeabur / browser intermediates
+do not close an otherwise live response during token silence. Capture stream
+timing and transport outcome on the existing chat Turn record metadata
+(``first_token_at``, ``stream_completed_at``, ``transport_detached`` and
+``client_cancelled``) so the diagnostic ZIP can explain slow or disconnected
+turns without requiring Zeabur's paid log search. Do not add a new log table.

@@ -9360,6 +9360,7 @@ class StreamFinalizer:
         # ``send_message_stream`` — the streaming turn is only paid for once
         # the assistant message lands, so the finalizer owns closing it.
         self._action_charge: ActionChargeHandle | None = None
+        self._stream_metadata: dict[str, object] = {}
 
     @property
     def conversation_id(self) -> str:
@@ -9368,6 +9369,10 @@ class StreamFinalizer:
     def attach_turn_lease(self, session: "StudioLeaseSession | None") -> None:
         """Take ownership of the turn's conversation lease."""
         self._turn_lease_session = session
+
+    def attach_stream_metadata(self, metadata: dict[str, object]) -> None:
+        """Share transport timing metadata with the relay that owns streaming."""
+        self._stream_metadata = metadata
 
     def attach_generation(self, generation: "ChatGenerationResult") -> None:
         """Late-bind the tool cycle's outcome onto this finalizer.
@@ -9622,6 +9627,7 @@ class StreamFinalizer:
                     outcome=self._novelty_outcome,
                 ),
                 "presence_frame": self._presence_frame.to_metadata(),
+                "stream": dict(self._stream_metadata),
                 # SN1 audit trail — see the non-streaming twin.
                 "stage_nudge": self._stage_nudge,
                 **post_turn_refs,

@@ -222,6 +222,7 @@ class _RecordingFinalizer:
     def __init__(self) -> None:
         self.finished: list[str] = []
         self.releases = 0
+        self.stream_metadata: dict[str, object] = {}
 
     @property
     def conversation_id(self) -> str:
@@ -233,6 +234,25 @@ class _RecordingFinalizer:
 
     async def release_turn_lease(self) -> None:
         self.releases += 1
+
+    def attach_stream_metadata(self, metadata: dict[str, object]) -> None:
+        self.stream_metadata = metadata
+
+
+async def test_relay_records_stream_timing_metadata() -> None:
+    finalizer = _RecordingFinalizer()
+
+    async def _one_chunk():  # noqa: ANN202
+        yield "有收到。"
+
+    relay = TurnStreamRelay(_one_chunk(), finalizer).start()
+    assert [event async for event in relay.frames()]
+    await wait_for_pending_turn_completions()
+
+    assert isinstance(finalizer.stream_metadata.get("stream_started_at"), str)
+    assert isinstance(finalizer.stream_metadata.get("first_token_at"), str)
+    assert isinstance(finalizer.stream_metadata.get("stream_completed_at"), str)
+    assert finalizer.stream_metadata.get("transport_detached") is not True
 
 
 async def test_the_timeout_never_double_releases_a_finished_turn() -> None:

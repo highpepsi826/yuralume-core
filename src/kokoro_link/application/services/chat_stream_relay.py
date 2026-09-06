@@ -52,6 +52,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from kokoro_link.application.services.chat_turn_lease import (
@@ -93,6 +94,10 @@ suspends the turn task exactly like a blocked ``yield`` used to. Once the client
 is gone the buffer stops being written to at all, so a detached turn's memory
 cost is its collected reply text and nothing else.
 """
+
+
+def _utc_stamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +196,7 @@ class TurnStreamRelay:
         "_finalize_task",
         "_finalizer",
         "_queue",
+        "_stream_metadata",
         "_timeout",
         "_token_stream",
         "_turn_task",
@@ -223,6 +229,10 @@ class TurnStreamRelay:
         self._turn_task: asyncio.Task[None] | None = None
         self._finalize_task: asyncio.Task[Any] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
+        self._stream_metadata: dict[str, object] = {}
+        attach = getattr(finalizer, "attach_stream_metadata", None)
+        if attach is not None:
+            attach(self._stream_metadata)
 
     # ── lifecycle ──────────────────────────────────────────────────────
 
@@ -238,6 +248,7 @@ class TurnStreamRelay:
         of pinning the conversation until the lease's max lifetime.
         """
         if self._turn_task is None:
+            self._stream_metadata.setdefault("stream_started_at", _utc_stamp())
             task = asyncio.create_task(
                 self._run(),
                 name=f"chat-turn-{self._conversation_id}",
@@ -280,6 +291,7 @@ class TurnStreamRelay:
         if self._detached:
             return
         self._detached = True
+        self._stream_metadata["transport_detached"] = True
         # Wakes a turn task parked on a full buffer so it stops publishing.
         self._detached_event.set()
         task = self._turn_task
@@ -330,10 +342,12 @@ class TurnStreamRelay:
                 # forwarded verbatim and never join ``collected`` — the
                 # finalizer must only ever persist the reply text.
                 if isinstance(item, str):
+                    self._stream_metadata.setdefault("first_token_at", _utc_stamp())
                     collected.append(item)
                     await self._publish(TurnToken(item))
                 else:
                     await self._publish(TurnFrame(item))
+            self._stream_metadata["stream_completed_at"] = _utc_stamp()
             # An explicit task rather than ``shield(coro)`` so the reference
             # survives: a cancellation here (detach timeout) must leave the DB
             # write running and findable, not orphaned. Cancelling a finalize
@@ -382,6 +396,10 @@ class TurnStreamRelay:
             if outcome is not None:
                 await self._publish(outcome)
             self._publish_final()
+
+    def mark_client_cancelled(self) -> None:
+        """Record an HTTP client disconnect separately from transport detach."""
+        self._stream_metadata["client_cancelled"] = True
 
     async def _watch(self, task: asyncio.Task[None]) -> None:
         """Hard cap on a detached turn.

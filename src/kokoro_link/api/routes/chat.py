@@ -57,6 +57,9 @@ from kokoro_link.infrastructure.storage.keys import safe_key_segment
 
 _LOGGER = logging.getLogger(__name__)
 
+_CHAT_SSE_HEARTBEAT_SECONDS = 15.0
+"""Keep long-lived chat streams active through idle-sensitive proxies."""
+
 _CHAT_UPLOAD_SUBDIR = "chat-uploads"
 _CHAT_UPLOAD_MAX_BYTES = 8 * 1024 * 1024  # 8 MB — matches character images
 _CHAT_UPLOAD_ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
@@ -561,8 +564,22 @@ async def send_chat_message_stream(
             # immediately navigating away.
             yield f"data: {json.dumps({'conversation_id': finalizer.conversation_id})}\n\n"
 
-            # Ordered by frequency: every reply is mostly tokens.
-            async for event in relay.frames():
+            # Ordered by frequency: every reply is mostly tokens. A comment
+            # heartbeat keeps the HTTP/SSE connection alive when the upstream
+            # model pauses between chunks; comments are invisible to the
+            # frontend SSE parser but reset idle timers in proxies.
+            frame_iterator = relay.frames().__aiter__()
+            while True:
+                try:
+                    event = await asyncio.wait_for(
+                        anext(frame_iterator),
+                        timeout=_CHAT_SSE_HEARTBEAT_SECONDS,
+                    )
+                except TimeoutError:
+                    yield ": heartbeat\n\n"
+                    continue
+                except StopAsyncIteration:
+                    break
                 if isinstance(event, TurnToken):
                     yield f"data: {json.dumps({'token': event.text})}\n\n"
                 elif isinstance(event, TurnFrame):
@@ -603,6 +620,7 @@ async def send_chat_message_stream(
             # and the turn task keeps going, so the assistant reply still lands
             # and the player sees it when they reload. Re-raise so uvicorn can
             # unwind the request task cleanly.
+            relay.mark_client_cancelled()
             _LOGGER.info(
                 "chat stream cancelled by client for conversation %s",
                 finalizer.conversation_id,
