@@ -48,10 +48,11 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 
-#: Receipts only need to outlive a platform's retry window (minutes). Seven
-#: days matches the background-job / visible-slot retention clock so operators
-#: have one number to reason about, and leaves plenty of forensic headroom.
-DEFAULT_RECEIPT_RETENTION_DAYS = 7
+#: Keep receipt metadata long enough to correlate a delayed Telegram
+#: investigation after a rolling deployment. The row contains no message body
+#: or credential material, only delivery identifiers and bounded outcome data.
+DEFAULT_RECEIPT_RETENTION_DAYS = 14
+RECEIPT_FAILURE_MESSAGE_LIMIT = 500
 
 
 @runtime_checkable
@@ -87,6 +88,19 @@ class InboundReceiptPort(Protocol):
         the delivery produced no side effects — otherwise it would re-open a
         delivery another instance is still processing."""
         ...
+
+    async def mark_outcome(
+        self,
+        platform: str,
+        account_id: str,
+        chat_ref: str,
+        platform_message_id: str,
+        *,
+        state: str,
+        failure_code: str | None = None,
+        failure_message: str | None = None,
+        completed_at: datetime | None = None,
+    ) -> bool: ...
 
     async def prune(
         self,

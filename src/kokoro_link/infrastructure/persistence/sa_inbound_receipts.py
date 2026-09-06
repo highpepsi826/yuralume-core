@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,7 @@ from kokoro_link.contracts.clock import ensure_utc
 from kokoro_link.contracts.inbound_receipts import (
     DEFAULT_RECEIPT_RETENTION_DAYS,
     InboundReceiptPort,
+    RECEIPT_FAILURE_MESSAGE_LIMIT,
 )
 from kokoro_link.infrastructure.persistence.models import InboundMessageReceiptRow
 
@@ -73,6 +74,7 @@ class SAInboundReceiptRepository(InboundReceiptPort):
             "chat_ref": chat_ref,
             "platform_message_id": platform_message_id,
             "created_at": now,
+            "state": "claimed",
         }
         async with self._session_factory() as session:
             bind = session.bind
@@ -121,6 +123,37 @@ class SAInboundReceiptRepository(InboundReceiptPort):
         # removed": the caller only logs it, and claiming otherwise would hide
         # a rollback that silently did not happen.
         return rowcount > 0
+
+    async def mark_outcome(
+        self,
+        platform: str,
+        account_id: str,
+        chat_ref: str,
+        platform_message_id: str,
+        *,
+        state: str,
+        failure_code: str | None = None,
+        failure_message: str | None = None,
+        completed_at: datetime | None = None,
+    ) -> bool:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                update(InboundMessageReceiptRow)
+                .where(
+                    InboundMessageReceiptRow.platform == platform,
+                    InboundMessageReceiptRow.account_id == account_id,
+                    InboundMessageReceiptRow.chat_ref == chat_ref,
+                    InboundMessageReceiptRow.platform_message_id == platform_message_id,
+                )
+                .values(
+                    state=state,
+                    failure_code=(failure_code or "")[:64] or None,
+                    failure_message=(failure_message or "")[:RECEIPT_FAILURE_MESSAGE_LIMIT] or None,
+                    completed_at=completed_at or datetime.now(timezone.utc),
+                ),
+            )
+            await session.commit()
+            return result.rowcount > 0
 
     async def prune(
         self,

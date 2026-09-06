@@ -193,14 +193,17 @@ class MessagingDispatcher:
                 "inbound references missing account %s; ignoring",
                 message.account_id,
             )
+            await self._mark_receipt_outcome(message, state="rejected", failure_code="account_missing")
             return
         if not account.enabled:
+            await self._mark_receipt_outcome(message, state="rejected", failure_code="account_disabled")
             return
         if not account.is_sender_allowed(message.sender_ref):
             _LOGGER.info(
                 "dropping inbound from unauthorised sender %s on account %s",
                 message.sender_ref, account.id,
             )
+            await self._mark_receipt_outcome(message, state="rejected", failure_code="sender_not_allowed")
             return
 
         adapter = self._adapters.get(message.platform.value)
@@ -208,10 +211,12 @@ class MessagingDispatcher:
             _LOGGER.warning(
                 "no adapter registered for platform %s", message.platform.value,
             )
+            await self._mark_receipt_outcome(message, state="rejected", failure_code="adapter_unavailable")
             return
 
         binding = await self._find_or_create_binding(account, message.chat_ref)
         if not binding.enabled:
+            await self._mark_receipt_outcome(message, state="rejected", failure_code="binding_disabled")
             return
 
         binding, conversation_id = await self._ensure_conversation(account, binding)
@@ -272,7 +277,7 @@ class MessagingDispatcher:
                 message.platform_message_id,
             )
             raise
-        except Exception:
+        except Exception as exc:
             # Every other failure keeps the dedup stamps: the turn may have
             # written partial state, and re-running it would double-charge.
             _LOGGER.exception("chat_service failed for binding %s", binding.id)
@@ -282,6 +287,10 @@ class MessagingDispatcher:
                 account=account,
                 locale=operator_language,
             )
+            await self._mark_receipt_outcome(
+                message, state="generation_failed", failure_code="chat_service_error",
+                failure_message=f"{type(exc).__name__}: {str(exc)[:500]}",
+            )
             return
 
         if reply.assistant_message is None:
@@ -290,6 +299,7 @@ class MessagingDispatcher:
                 "binding=%s conversation=%s",
                 binding.id, conversation_id,
             )
+            await self._mark_receipt_outcome(message, state="queued")
             return
 
         await self._deliver_outbound(
@@ -310,6 +320,35 @@ class MessagingDispatcher:
                 reply_context=message.reply_context,
             ),
         )
+        await self._mark_receipt_outcome(message, state="completed")
+
+    async def _mark_receipt_outcome(
+        self,
+        message: InboundMessage,
+        *,
+        state: str,
+        failure_code: str | None = None,
+        failure_message: str | None = None,
+    ) -> None:
+        """Best-effort bounded outcome update for the durable receipt."""
+        if self._receipts is None:
+            return
+        marker = getattr(self._receipts, "mark_outcome", None)
+        if marker is None:
+            return
+        try:
+            await marker(
+                message.platform.value, message.account_id, message.chat_ref,
+                message.platform_message_id, state=state,
+                failure_code=failure_code, failure_message=failure_message,
+                completed_at=datetime.now(timezone.utc),
+            )
+        except Exception:
+            _LOGGER.exception(
+                "inbound receipt outcome update failed %s/%s id=%s",
+                message.platform.value, message.chat_ref,
+                message.platform_message_id,
+            )
 
     async def _send_turn(
         self, request: SendChatMessageRequest, *, binding_id: str,

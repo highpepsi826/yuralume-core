@@ -25,6 +25,7 @@ class InMemoryInboundReceiptRepository(InboundReceiptPort):
     def __init__(self) -> None:
         # {(platform, account_id, chat_ref, platform_message_id): created_at}
         self._claims: dict[tuple[str, str, str, str], datetime] = {}
+        self._outcomes: dict[tuple[str, str, str, str], dict[str, object]] = {}
 
     async def try_claim(
         self,
@@ -49,6 +50,22 @@ class InMemoryInboundReceiptRepository(InboundReceiptPort):
         key = (platform, account_id, chat_ref, platform_message_id)
         return self._claims.pop(key, None) is not None
 
+    async def mark_outcome(
+        self, platform: str, account_id: str, chat_ref: str,
+        platform_message_id: str, *, state: str,
+        failure_code: str | None = None, failure_message: str | None = None,
+        completed_at: datetime | None = None,
+    ) -> bool:
+        key = (platform, account_id, chat_ref, platform_message_id)
+        if key not in self._claims:
+            return False
+        self._outcomes[key] = {
+            "state": state, "failure_code": failure_code,
+            "failure_message": failure_message,
+            "completed_at": completed_at or _utcnow(),
+        }
+        return True
+
     async def prune(
         self,
         *,
@@ -61,4 +78,5 @@ class InMemoryInboundReceiptRepository(InboundReceiptPort):
         ]
         for key in stale:
             del self._claims[key]
+            self._outcomes.pop(key, None)
         return len(stale)

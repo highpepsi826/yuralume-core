@@ -18,20 +18,30 @@ delivery failure by time window.
   source is available; platform-level Zeabur events remain external input.
 - Redact credentials, authorization values, and other secret-shaped fields.
 - Keep raw chat text and full prompts opt-in.
+- Extend the existing inbound receipt retention to 14 days and use the
+  existing Turn, receipt, delivery, and account records for incident diagnosis
+  across app image replacement and Zeabur Pod recreation. Do not add a new
+  application_logs table in this phase.
+- Cover Telegram receive/dispatch/delivery, image sends, chat generation,
+  schedule CRUD, and startup/runtime failures with correlation identifiers.
 
 ## Non-goals
 
 - No production database edits, message repair, replay, resend, or deletion.
 - No automatic Zeabur API access or direct Pod mutation.
 - No change to Telegram polling or delivery semantics.
-- No promise that Zeabur platform events can be reconstructed by the app.
+- Pod restart, OOM, startup probe, and other Zeabur platform events remain
+  external platform input and are intentionally read from the Zeabur console.
+- Do not persist every third-party or access log line, full prompts, or chat
+  bodies as application logs.
 
 ## Data safety and compatibility
 
 The endpoint is admin-only, read-only, bounded by a maximum time window and
-row count, and returns a downloaded ZIP. Existing tables and APIs remain
-compatible; no migration is expected unless implementation discovers a missing
-query surface. Secrets are never included in the export.
+row count, and returns a downloaded ZIP. Inbound receipt retention is extended
+from 7 to 14 days; no new log table is added. Existing tables and APIs remain
+compatible apart from the retention configuration. Secrets are never included
+in the export.
 
 ## Implementation checklist
 
@@ -45,6 +55,44 @@ query surface. Secrets are never included in the export.
    redaction, and ZIP contents.
 5. Run focused tests, compile/type checks, and diff checks.
 6. Record the verified source result; deployment requires a separate review.
+
+## Approved execution changes
+
+- Change ``DEFAULT_RECEIPT_RETENTION_DAYS`` from 7 to 14.
+- Add bounded processing outcome fields to the existing inbound receipt row:
+  state, failure code/message, and completion timestamp. These fields remain
+  metadata only and never store message text or credentials.
+- Mark accepted, rejected, generation-failed, queued, and delivered outcomes
+  from the dispatcher so a Telegram delivery can be followed after restart.
+- Preserve the existing generation-failure fallback, and add deterministic
+  notices only to terminal pre-dispatch failures where retrying would otherwise
+  silently lose the update. Busy/draining paths continue to hand the update
+  back to Telegram.
+- Keep Zeabur platform events outside the application database.
+
+The receipt outcome fields and 14-day default are now implemented in the
+working tree, with migration ``v6r4t2y10055``. Telegram fallback behavior is
+unchanged pending a production log sample that identifies a terminal path.
+
+## Diagnostic event contract
+
+The implementation relies on existing durable rows and focused structured
+fields. It must not persist Zeabur platform events or credentials. Error and
+delivery metadata remain bounded and exclude authorization headers, bot tokens,
+full prompts, and chat text unless an existing record explicitly requires it.
+
+## Retention and Telegram fallback decision
+
+Inbound receipt retention is planned to change from 7 to 14 days; no separate
+application log table is planned. Zeabur Pod lifecycle events remain in the
+Zeabur console.
+
+The existing localized generation-failure notice is only sent when
+``MessagingDispatcher.handle_inbound`` reaches its generic chat-service error
+branch. Busy conversation hand-back, polling/API failures before dispatch,
+sender or binding rejection, and outbound transport failures follow different
+paths. Investigate these paths before changing the fallback behavior so a
+retryable Telegram update is not acknowledged or duplicated incorrectly.
 
 ## Current status
 

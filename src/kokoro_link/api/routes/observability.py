@@ -393,7 +393,11 @@ async def diagnostic_export(
         if name == "inbound_receipts":
             payload[name] = [{"platform": r.platform, "account_id": r.account_id,
                               "chat_ref": r.chat_ref, "platform_message_id": r.platform_message_id,
-                              "created_at": r.created_at.isoformat()} for r in rows]
+                              "state": r.state, "failure_code": r.failure_code,
+                              "failure_message": r.failure_message,
+                              "created_at": r.created_at.isoformat(),
+                              "completed_at": r.completed_at.isoformat() if r.completed_at else None}
+                             for r in rows]
         else:
             payload[name] = [{"id": r.id, "platform": r.platform, "account_id": r.account_id,
                               "chat_ref": r.chat_ref, "state": r.state,
