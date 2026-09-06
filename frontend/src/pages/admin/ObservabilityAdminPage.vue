@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import type { Character } from '@/types/character'
 import { listCharacters } from '@/utils/api/characters'
 import ObservabilityPanel from '@/components/observability/ObservabilityPanel.vue'
-import { UiCard, UiSelect, UiBadge } from '@/components/ui'
+import { UiButton, UiCard, UiSelect, UiBadge } from '@/components/ui'
 import { downloadDiagnosticExport } from '@/utils/api/observability'
 
 const { t } = useI18n()
@@ -18,8 +18,9 @@ const router = useRouter()
 const characters = ref<Character[]>([])
 const selected = ref<string>('')
 const loadError = ref<string | null>(null)
-const exportSince = ref('')
-const exportUntil = ref('')
+const exportNow = new Date()
+const exportSince = ref(toDateTimeLocal(new Date(exportNow.getTime() - 24 * 60 * 60 * 1000)))
+const exportUntil = ref(toDateTimeLocal(exportNow))
 const exportIncludePrompt = ref(false)
 const exportBusy = ref(false)
 const exportError = ref<string | null>(null)
@@ -52,6 +53,12 @@ function toIsoInstant(value: string): string | undefined {
   if (!value) return undefined
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
+function toDateTimeLocal(value: Date): string {
+  const offset = value.getTimezoneOffset()
+  const local = new Date(value.getTime() - offset * 60 * 1000)
+  return local.toISOString().slice(0, 16)
 }
 
 onMounted(async () => {
@@ -119,9 +126,9 @@ watch(selected, (next) => {
         <label class="observability-admin__checkbox"><input v-model="exportIncludePrompt" type="checkbox" /> {{ t('admin.page.observability.includePrompt') }}</label>
       </div>
       <p v-if="exportError" class="observability-admin__error">{{ exportError }}</p>
-      <button class="observability-admin__export-button" :disabled="exportBusy" @click="exportDiagnostic">
-        {{ exportBusy ? t('admin.page.observability.exportBusy') : t('admin.page.observability.exportAction') }}
-      </button>
+      <UiButton size="sm" variant="primary" :loading="exportBusy" @click="exportDiagnostic">
+        {{ t('admin.page.observability.exportAction') }}
+      </UiButton>
     </UiCard>
 
     <ObservabilityPanel
@@ -195,19 +202,6 @@ watch(selected, (next) => {
   flex-direction: row !important;
   align-items: center;
   min-height: 36px;
-}
-.observability-admin__export-button {
-  min-height: 36px;
-  padding: 0 var(--space-3);
-  color: var(--color-text-primary);
-  background: var(--color-accent);
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.observability-admin__export-button:disabled {
-  cursor: wait;
-  opacity: 0.6;
 }
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

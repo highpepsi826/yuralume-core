@@ -327,7 +327,7 @@ async def diagnostic_export(
     container: ServiceContainer = Depends(get_container),
 ) -> Response:
     """Download a bounded, read-only incident bundle for one character."""
-    start = _parse_since(since) if since else datetime.now(timezone.utc) - timedelta(hours=1)
+    start = _parse_since(since) if since else datetime.now(timezone.utc) - timedelta(hours=24)
     end = _parse_since(until) if until else datetime.now(timezone.utc)
     if end <= start:
         raise HTTPException(status_code=400, detail="until must be after since")

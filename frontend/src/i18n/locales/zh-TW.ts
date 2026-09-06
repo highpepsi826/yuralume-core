@@ -4793,7 +4793,7 @@ export const messages = {
         targetLabel: '觀測對象',
         targetHint: '切換角色即時重撈 turn / funnel / emotion；URL query 會同步保留以便分享。',
         diagnosticTitle: '診斷匯出',
-        diagnosticHint: '下載選定角色的 Turn 紀錄摘要。留空會取最近一小時。',
+        diagnosticHint: '下載選定角色的診斷紀錄。預設取最近 24 小時。',
         sinceLabel: '開始時間',
         untilLabel: '結束時間',
         includePrompt: '包含完整 Prompt',
