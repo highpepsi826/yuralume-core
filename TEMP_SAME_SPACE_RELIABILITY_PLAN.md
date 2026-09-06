@@ -159,8 +159,8 @@ application diagnostic export.
 4. Implement frontend status recovery and waiting states. **Complete**
 5. Harden task tracking/shutdown and add probe/event-loop diagnostics. **Partial**
    (chat relay drain, stale-turn reconciliation, recorder flush)
-6. Run focused tests and local deployment verification. **In progress**
+6. Run focused tests and local deployment verification. **Complete**
    Focused checks pass; full frontend suite has one unrelated timeout in
    `uiImage.test.ts` under the local Windows sandbox.
-7. Review schema/backup requirements and deploy app-only or split roles.
+7. Review schema/backup requirements and deploy app-only or split roles. **Blocked pending backup and controlled migration**
 8. Verify health, restart behavior, turn recovery, and one polling owner.

@@ -5,6 +5,18 @@ Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
 database rows.
 
+### 2026-09-07 - Push same-space turn recovery
+
+- Status: source commit `15df8e6` pushed to `origin/local/customizations`.
+- Deployment: not completed. This release adds migration
+  `s7h3k9m10057_turn_lifecycle`; production rollout is gated on a fresh,
+  verified PostgreSQL custom-format backup and one controlled Alembic run.
+- Verification: Python compilation, focused frontend chat tests (70), i18n
+  checks, and the main frontend production build passed. The local full suite
+  has one unrelated Windows sandbox timeout in `uiImage.test.ts`.
+- Blocker: Docker CLI/daemon is unavailable in this environment, so no local
+  migration rehearsal or production compose verification was performed.
+
 ### 2026-09-06 - Recover interrupted web chat streams
 
 - Status: source implementation committed and pushed; deployment pending.
