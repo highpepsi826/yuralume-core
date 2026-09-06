@@ -7,7 +7,7 @@ database rows.
 
 ### 2026-09-06 - Recover interrupted web chat streams
 
-- Status: source implementation complete; deployment pending.
+- Status: source implementation committed and pushed; deployment pending.
 - Fix: when the browser loses an SSE stream before the final `done` frame,
   the same-space chat panel briefly polls the persisted latest conversation and
   restores the assistant reply automatically when it has landed.
@@ -20,6 +20,20 @@ database rows.
   --check` passed. The PWA sub-build was blocked by the workstation sandbox
   denying `C:\Users\high_` metadata access after the main bundle completed.
 - Deployment: not performed; deploy only after reviewing this source change.
+
+### 2026-09-06 - Recover proxy-aborted chat transports
+
+- Status: source implementation committed and pushed; deployment pending.
+- Fix: generic browser/network failures after the SSE conversation id is known
+  now use the same bounded persisted-conversation recovery as a clean stream
+  close, covering the observed approximately two-minute proxy cutoff.
+- Git result: committed `81cbb7e` on `local/customizations` and pushed to the
+  personal fork.
+- Verification: focused chat API tests passed (25 tests), the frontend main
+  production bundle built successfully, Python compilation and `git diff
+  --check` passed. The PWA sub-build remains blocked by the workstation
+  sandbox denying `C:\Users\high_` metadata access.
+- Deployment: pending Zeabur's automatic redeploy from the pushed branch.
 
 ### 2026-09-05 - Adopt `local` moving image tag
 
