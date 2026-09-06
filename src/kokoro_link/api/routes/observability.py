@@ -12,10 +12,14 @@ just do that". Mounted under ``/api/v1/admin/observability``.
 
 from __future__ import annotations
 
+import io
+import json
+import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import select
 from pydantic import BaseModel, Field
 
 from kokoro_link.api.dependencies import get_container, get_current_user, require_admin
@@ -25,6 +29,7 @@ from kokoro_link.domain.entities.emotion_event import EmotionEvent
 from kokoro_link.domain.entities.operator_profile import DEFAULT_OPERATOR_ID, OperatorProfile
 from kokoro_link.domain.entities.persona_curiosity import PersonaCuriosityAttempt
 from kokoro_link.domain.entities.turn_record import TurnRecord
+from kokoro_link.infrastructure.persistence.models import InboundMessageReceiptRow, OutboundMessageDeliveryRow
 
 _ALLOWED_OPERATOR_FEEDBACK_KINDS = {"out_of_character", "felt_human"}
 
@@ -311,6 +316,99 @@ async def list_turns(
         limit=limit,
     )
     return [TurnRecordSummary.from_domain(r) for r in records]
+
+
+@router.get("/admin/observability/diagnostic-export")
+async def diagnostic_export(
+    character_id: str = Query(..., min_length=1),
+    since: str | None = Query(default=None),
+    until: str | None = Query(default=None),
+    include_prompt: bool = Query(default=False),
+    container: ServiceContainer = Depends(get_container),
+) -> Response:
+    """Download a bounded, read-only incident bundle for one character."""
+    start = _parse_since(since) if since else datetime.now(timezone.utc) - timedelta(hours=1)
+    end = _parse_since(until) if until else datetime.now(timezone.utc)
+    if end <= start:
+        raise HTTPException(status_code=400, detail="until must be after since")
+    if end - start > timedelta(hours=24):
+        raise HTTPException(status_code=400, detail="diagnostic window cannot exceed 24 hours")
+    repo = container.turn_record_repository
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Turn record repository is not wired")
+    records = await repo.list_recent(character_id=character_id, since=start, limit=500)
+    records = [r for r in records if r.created_at <= end]
+    turns = []
+    for record in records:
+        item = {
+            "id": record.id, "character_id": record.character_id,
+            "conversation_id": record.conversation_id, "kind": record.kind,
+            "model_id": record.model_id, "latency_ms": record.latency_ms,
+            "prompt_tokens": record.prompt_tokens,
+            "completion_tokens": record.completion_tokens,
+            "error": record.error, "created_at": record.created_at.isoformat(),
+            "response_excerpt": record.response_text[:1000],
+        }
+        if include_prompt:
+            item["prompt_assembled"] = record.prompt_assembled
+        turns.append(item)
+    payload = {
+        "schema_version": 1, "character_id": character_id,
+        "window": {"since": start.isoformat(), "until": end.isoformat(), "timezone": "Asia/Hong_Kong"},
+        "limits": {"max_turns": 500, "include_prompt": include_prompt},
+        "turn_records": turns,
+    }
+    account_service = container.messaging_account_service
+    accounts = []
+    if account_service is not None:
+        accounts = await account_service.list_for_character(character_id)
+        payload["messaging_accounts"] = [
+            {
+                "id": account.id, "platform": account.platform.value,
+                "enabled": account.enabled,
+                "delivery_mode": account.delivery_mode.value,
+                "polling_last_update_at": (
+                    account.polling_last_update_at.isoformat()
+                    if account.polling_last_update_at else None
+                ),
+                "polling_last_error": account.polling_last_error,
+            }
+            for account in accounts
+        ]
+    account_ids = [account.id for account in accounts]
+    dispatcher = container.messaging_dispatcher
+    sources = (
+        ("inbound_receipts", getattr(dispatcher, "_receipts", None), InboundMessageReceiptRow),
+        ("outbound_deliveries", getattr(dispatcher, "_outbound_deliveries", None), OutboundMessageDeliveryRow),
+    )
+    for name, repository, row_type in sources:
+        session_factory = getattr(repository, "_session_factory", None)
+        if session_factory is None or not account_ids:
+            continue
+        async with session_factory() as session:
+            query = (select(row_type).where(row_type.account_id.in_(account_ids))
+                     .where(row_type.created_at >= start)
+                     .where(row_type.created_at <= end).limit(1000))
+            rows = (await session.execute(query)).scalars().all()
+        if name == "inbound_receipts":
+            payload[name] = [{"platform": r.platform, "account_id": r.account_id,
+                              "chat_ref": r.chat_ref, "platform_message_id": r.platform_message_id,
+                              "created_at": r.created_at.isoformat()} for r in rows]
+        else:
+            payload[name] = [{"id": r.id, "platform": r.platform, "account_id": r.account_id,
+                              "chat_ref": r.chat_ref, "state": r.state,
+                              "attempt_count": r.attempt_count, "last_error": r.last_error,
+                              "next_attempt_at": r.next_attempt_at.isoformat(),
+                              "created_at": r.created_at.isoformat(),
+                              "delivered_at": r.delivered_at.isoformat() if r.delivered_at else None}
+                             for r in rows]
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("summary.json", json.dumps(payload, ensure_ascii=False, indent=2))
+        archive.writestr("README.txt", "Zeabur platform logs must be exported separately and can be added to this ZIP.\n")
+    filename = f"yuralume-diagnostic-{character_id}-{start.strftime('%Y%m%d-%H%M')}.zip"
+    return Response(content=buffer.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 # NOTE: this static path must be declared BEFORE the dynamic

@@ -257,6 +257,24 @@ export async function getTurn(turnId: string): Promise<TurnRecordDetail> {
   return data
 }
 
+export async function downloadDiagnosticExport(params: {
+  characterId: string
+  since?: string
+  until?: string
+  includePrompt?: boolean
+}): Promise<Blob> {
+  const { data } = await axios.get<Blob>(`${BASE}/diagnostic-export`, {
+    responseType: 'blob',
+    params: {
+      character_id: params.characterId,
+      since: params.since || undefined,
+      until: params.until || undefined,
+      include_prompt: params.includePrompt || undefined,
+    },
+  })
+  return data
+}
+
 export async function updateTurnOperatorFeedback(
   turnId: string,
   payload: {

@@ -6,6 +6,7 @@ import type { Character } from '@/types/character'
 import { listCharacters } from '@/utils/api/characters'
 import ObservabilityPanel from '@/components/observability/ObservabilityPanel.vue'
 import { UiCard, UiSelect, UiBadge } from '@/components/ui'
+import { downloadDiagnosticExport } from '@/utils/api/observability'
 
 const { t } = useI18n()
 
@@ -17,6 +18,41 @@ const router = useRouter()
 const characters = ref<Character[]>([])
 const selected = ref<string>('')
 const loadError = ref<string | null>(null)
+const exportSince = ref('')
+const exportUntil = ref('')
+const exportIncludePrompt = ref(false)
+const exportBusy = ref(false)
+const exportError = ref<string | null>(null)
+
+async function exportDiagnostic() {
+  if (!selected.value || exportBusy.value) return
+  exportBusy.value = true
+  exportError.value = null
+  try {
+    const blob = await downloadDiagnosticExport({
+      characterId: selected.value,
+      since: toIsoInstant(exportSince.value),
+      until: toIsoInstant(exportUntil.value),
+      includePrompt: exportIncludePrompt.value,
+    })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `yuralume-diagnostic-${selected.value}.zip`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    exportError.value = err instanceof Error ? err.message : '診斷匯出失敗'
+  } finally {
+    exportBusy.value = false
+  }
+}
+
+function toIsoInstant(value: string): string | undefined {
+  if (!value) return undefined
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
 
 onMounted(async () => {
   try {
@@ -72,6 +108,22 @@ watch(selected, (next) => {
       />
     </UiCard>
 
+    <UiCard v-if="selected" size="lg">
+      <template #header>
+        <h2 class="observability-admin__card-title">診斷匯出</h2>
+      </template>
+      <p class="observability-admin__hint">下載選定角色的 Turn 紀錄摘要。時間使用 ISO 8601；留空會取最近一小時。</p>
+      <div class="observability-admin__export-fields">
+        <label>開始時間 <input v-model="exportSince" type="datetime-local" /></label>
+        <label>結束時間 <input v-model="exportUntil" type="datetime-local" /></label>
+        <label class="observability-admin__checkbox"><input v-model="exportIncludePrompt" type="checkbox" /> 包含完整 Prompt</label>
+      </div>
+      <p v-if="exportError" class="observability-admin__error">{{ exportError }}</p>
+      <button class="observability-admin__export-button" :disabled="exportBusy" @click="exportDiagnostic">
+        {{ exportBusy ? '匯出中…' : '下載診斷包' }}
+      </button>
+    </UiCard>
+
     <ObservabilityPanel
       v-if="selected"
       :character-id="selected"
@@ -116,6 +168,46 @@ watch(selected, (next) => {
   font-size: var(--font-sm);
   color: var(--color-text-secondary);
   line-height: 1.6;
+}
+.observability-admin__export-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: end;
+  margin: var(--space-3) 0;
+}
+.observability-admin__export-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+}
+.observability-admin__export-fields input[type="datetime-local"] {
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  color: var(--color-text-primary);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+.observability-admin__checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  min-height: 36px;
+}
+.observability-admin__export-button {
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  color: var(--color-text-primary);
+  background: var(--color-accent);
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.observability-admin__export-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
