@@ -100,4 +100,9 @@ Backend export endpoint and frontend download control are implemented in the
 working tree. The bundle contains Turn-record summaries, selected-character
 messaging account status, inbound receipts, and outbound delivery/retry rows.
 Full prompts remain opt-in; Zeabur platform logs are still supplied separately.
-Production deployment remains pending verification.
+Receipt outcome migration and dispatcher outcome marks are implemented in
+commit ``e90f15c``. Production deployment remains pending a PostgreSQL backup
+and migration verification. No fallback text behavior was changed yet; the
+current evidence shows that only the generic ChatService failure branch sends
+the existing notice, so polling/pre-dispatch and delivery failures still need
+an observed failure sample before changing retry semantics.
