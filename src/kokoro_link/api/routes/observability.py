@@ -30,6 +30,8 @@ from kokoro_link.domain.entities.operator_profile import DEFAULT_OPERATOR_ID, Op
 from kokoro_link.domain.entities.persona_curiosity import PersonaCuriosityAttempt
 from kokoro_link.domain.entities.turn_record import TurnRecord
 from kokoro_link.infrastructure.persistence.models import InboundMessageReceiptRow, OutboundMessageDeliveryRow
+from kokoro_link.infrastructure.build_info import get_build_info
+from kokoro_link.infrastructure.runtime_identity import PROCESS_STARTED_AT, instance_id
 
 _ALLOWED_OPERATOR_FEEDBACK_KINDS = {"out_of_character", "felt_human"}
 
@@ -358,6 +360,15 @@ async def diagnostic_export(
         "window": {"since": start.isoformat(), "until": end.isoformat(), "timezone": "Asia/Hong_Kong"},
         "limits": {"max_turns": 500, "include_prompt": include_prompt},
         "turn_records": turns,
+        "deployment": {
+            "instance_id": instance_id(),
+            "process_started_at": PROCESS_STARTED_AT.isoformat(),
+            "build": {
+                "image_tag": get_build_info().build.image_tag,
+                "commit_sha": get_build_info().build.commit_sha,
+                "built_at": get_build_info().build.built_at,
+            },
+        },
     }
     account_service = container.messaging_account_service
     accounts = []

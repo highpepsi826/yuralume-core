@@ -169,3 +169,8 @@ timing and transport outcome on the existing chat Turn record metadata
 (``first_token_at``, ``stream_completed_at``, ``transport_detached`` and
 ``client_cancelled``) so the diagnostic ZIP can explain slow or disconnected
 turns without requiring Zeabur's paid log search. Do not add a new log table.
+
+The diagnostic payload also carries a non-sensitive ``deployment`` block with
+the process/pod label, process start time, and build image/commit metadata.
+This identifies restarts and confirms which image produced a bundle without
+pretending to reconstruct Zeabur lifecycle events.
