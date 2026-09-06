@@ -436,6 +436,7 @@ async def diagnostic_export(
     unresolved_receipts = [
         row for row in inbound_rows if row.state in ("claimed", "queued")
     ]
+    legacy_receipts = [row for row in inbound_rows if row.state == "legacy"]
     turn_errors = [record for record in records if record.error]
     health_status = "healthy"
     if not accounts and not records:
@@ -450,6 +451,7 @@ async def diagnostic_export(
         "stale_polling_account_ids": stale_accounts,
         "turn_error_count": len(turn_errors),
         "unresolved_receipt_count": len(unresolved_receipts),
+        "legacy_receipt_count": len(legacy_receipts),
         "pending_or_terminal_delivery_count": len(failed_deliveries),
         "platform_events": "not included; inspect Zeabur",
     }

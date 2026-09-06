@@ -112,6 +112,11 @@ availability, stale Telegram polling accounts, unresolved receipts, failed or
 pending deliveries, and Turn errors. It is functional evidence, not a
 reconstruction of Zeabur Pod lifecycle history.
 
+Receipts created before outcome tracking was deployed are classified as
+``legacy`` during migration and are reported as historical/unknown rather than
+as currently unresolved work. Only new ``claimed`` or ``queued`` rows affect
+the degraded health verdict.
+
 If an optional durable source cannot be queried during a rolling deployment,
 the endpoint returns a partial ZIP with ``source_errors`` and a migration hint
 instead of a generic HTTP 500. The Zeabur app service still needs
