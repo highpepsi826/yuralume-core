@@ -157,6 +157,9 @@ application diagnostic export.
    background task owner. **Complete**
 3. Implement durable turn lifecycle and status API. **Complete**
 4. Implement frontend status recovery and waiting states. **Complete**
+   Follow-up fix: recovery now checks the persisted assistant reply directly,
+   including the short window before lifecycle status becomes `completed`, and
+   the input area shows the active reply/reconnect state.
 5. Harden task tracking/shutdown and add probe/event-loop diagnostics. **Partial**
    (chat relay drain, stale-turn reconciliation, recorder flush)
 6. Run focused tests and local deployment verification. **Complete**

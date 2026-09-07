@@ -1447,6 +1447,7 @@ async function runChatTurn(
         ticket,
         localMessages.value.length,
         liveTurnId.value,
+        request.message,
       )
       if (recovered) return
     }
@@ -1540,6 +1541,7 @@ async function recoverInterruptedTurn(
   ticket: ChatTurnTicket,
   localLength: number,
   turnId: string | null,
+  userMessage: string,
 ): Promise<boolean> {
   if (!turnId) {
     if (!conversationId) return false
@@ -1553,8 +1555,13 @@ async function recoverInterruptedTurn(
       try {
         const snapshot = await getLatestConversation(characterId)
         if (!snapshot || snapshot.id !== conversationId) continue
-        const last = snapshot.messages[snapshot.messages.length - 1]
-        if (snapshot.messages.length <= localLength || last?.role !== 'assistant') continue
+        const userIndex = snapshot.messages.findLastIndex(message => (
+          message.role === 'user' && message.content === userMessage
+        ))
+        const assistantReply = snapshot.messages.find((message, index) => (
+          message.role === 'assistant' && index > userIndex
+        ))
+        if (!assistantReply || snapshot.messages.length <= localLength) continue
         localMessages.value = [...snapshot.messages]
         emit('conversationUpdate', snapshot.id, [...localMessages.value], props.character!)
         return true
@@ -1574,6 +1581,29 @@ async function recoverInterruptedTurn(
     }
     try {
       const status = await getChatTurnStatus(turnId)
+        if (conversationId) {
+          const snapshot = await getLatestConversation(characterId)
+          const lastUserIndex = snapshot?.id === conversationId
+            ? snapshot.messages.findLastIndex(message => (
+              message.role === 'user' && message.content === userMessage
+            ))
+            : -1
+          const assistantReply = snapshot?.id === conversationId
+            ? snapshot.messages.find((message, index) => (
+              message.role === 'assistant'
+              && index > lastUserIndex
+              && (message.turn_record_id === turnId || lastUserIndex >= 0)
+            ))
+            : null
+          if (assistantReply && turnGuard.isCurrent(ticket)) {
+            localMessages.value = [...snapshot!.messages]
+            streamingText.value = ''
+            turnRecoveryStatus.value = null
+            emit('conversationUpdate', snapshot!.id, [...localMessages.value], props.character!)
+            await scrollToBottom()
+            return true
+          }
+        }
       if (status.status === 'processing') {
         turnRecoveryStatus.value = 'processing'
         continue
@@ -2261,6 +2291,18 @@ onUnmounted(() => {
       </div>
 
       <div class="chat-input-area">
+        <div v-if="sending" class="chat-turn-status" role="status" aria-live="polite">
+          <span class="chat-turn-status__dot" aria-hidden="true" />
+          <span v-if="turnRecoveryStatus === 'reconnecting'">
+            {{ t('chat.input.streamReconnecting') }}
+          </span>
+          <span v-else-if="turnRecoveryStatus === 'processing'">
+            {{ t('chat.input.streamStillProcessing') }}
+          </span>
+          <span v-else>
+            {{ t('chat.input.replying', { name: characterDisplayName }) }}
+          </span>
+        </div>
         <!-- 起幕：放在輸入框正上方，讓「想不到要說什麼」的玩家一眼看到。 -->
         <StorySceneControl
           :scene-open="storySceneActive"
@@ -2988,6 +3030,25 @@ onUnmounted(() => {
   border-top: 1px solid var(--color-border);
   background: rgba(0, 0, 0, 0.2);
   flex-shrink: 0;
+}
+
+.chat-turn-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chat-turn-status__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--color-accent, #8b6cff);
+  animation: tool-activity-pulse 1.6s ease-in-out infinite;
 }
 
 .chat-assist-panel {
