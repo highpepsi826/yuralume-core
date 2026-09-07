@@ -1555,9 +1555,14 @@ async function recoverInterruptedTurn(
       try {
         const snapshot = await getLatestConversation(characterId)
         if (!snapshot || snapshot.id !== conversationId) continue
-        const userIndex = snapshot.messages.findLastIndex(message => (
-          message.role === 'user' && message.content === userMessage
-        ))
+        let userIndex = -1
+        for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
+          const message = snapshot.messages[index]
+          if (message.role === 'user' && message.content === userMessage) {
+            userIndex = index
+            break
+          }
+        }
         const assistantReply = snapshot.messages.find((message, index) => (
           message.role === 'assistant' && index > userIndex
         ))
@@ -1581,29 +1586,34 @@ async function recoverInterruptedTurn(
     }
     try {
       const status = await getChatTurnStatus(turnId)
-        if (conversationId) {
-          const snapshot = await getLatestConversation(characterId)
-          const lastUserIndex = snapshot?.id === conversationId
-            ? snapshot.messages.findLastIndex(message => (
-              message.role === 'user' && message.content === userMessage
-            ))
-            : -1
-          const assistantReply = snapshot?.id === conversationId
-            ? snapshot.messages.find((message, index) => (
-              message.role === 'assistant'
-              && index > lastUserIndex
-              && (message.turn_record_id === turnId || lastUserIndex >= 0)
-            ))
-            : null
-          if (assistantReply && turnGuard.isCurrent(ticket)) {
-            localMessages.value = [...snapshot!.messages]
-            streamingText.value = ''
-            turnRecoveryStatus.value = null
-            emit('conversationUpdate', snapshot!.id, [...localMessages.value], props.character!)
-            await scrollToBottom()
-            return true
+      if (conversationId) {
+        const snapshot = await getLatestConversation(characterId)
+        let lastUserIndex = -1
+        if (snapshot?.id === conversationId) {
+          for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
+            const message = snapshot.messages[index]
+            if (message.role === 'user' && message.content === userMessage) {
+              lastUserIndex = index
+              break
+            }
           }
         }
+        const assistantReply = snapshot?.id === conversationId
+          ? snapshot.messages.find((message, index) => (
+            message.role === 'assistant'
+            && index > lastUserIndex
+            && (message.turn_record_id === turnId || lastUserIndex >= 0)
+          ))
+          : null
+        if (assistantReply && turnGuard.isCurrent(ticket)) {
+          localMessages.value = [...snapshot!.messages]
+          streamingText.value = ''
+          turnRecoveryStatus.value = null
+          emit('conversationUpdate', snapshot!.id, [...localMessages.value], props.character!)
+          await scrollToBottom()
+          return true
+        }
+      }
       if (status.status === 'processing') {
         turnRecoveryStatus.value = 'processing'
         continue
