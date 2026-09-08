@@ -1,5 +1,11 @@
 # Update and Progress Log
 
+### 2026-09-08 - Preserve diagnostic token counters
+
+- Status: pushed as `e0049ec` on `local/customizations`; fixes redaction that
+  treated numeric `prompt_tokens` and `completion_tokens` fields as secrets.
+- Verification: focused diagnostic and observability tests passed (18).
+
 ### 2026-09-08 - Complete bounded diagnostic sources
 
 - Status: source implementation committed and pushed as `2eab10d` on
