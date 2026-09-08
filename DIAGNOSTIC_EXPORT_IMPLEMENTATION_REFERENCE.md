@@ -194,3 +194,23 @@ The recovery is additive and does not change billing, conversation ownership,
 same-space semantics, or the durable turn record contract. A future async-turn
 API remains the long-term option if the hosting edge enforces a hard request
 duration regardless of heartbeats.
+
+## Planned: tiered diagnostic download UI (2026-09-08)
+
+- Offer time ranges: recent 1 hour by default, recent 2 hours, and custom;
+  deployment/migration incidents may use 30 minutes before deployment through
+  2 hours after it.
+- Provide incident-type presets for Telegram delivery, Web Chat/SSE,
+  proactive scheduler, deployment/migration, and storage/images.
+- Presets only select fields; advanced checkboxes control detailed exports such
+  as full messages, prompts, application logs, storage object metadata, and
+  provider raw errors. Full prompts, chat bodies, and credentials remain
+  opt-in. Show estimated size and sensitivity before download.
+- Provide quick, standard, and full-diagnostic shortcuts. If the first bundle
+  is insufficient, use ``incident_summary.json`` to request only the missing
+  detail at the same time range.
+- Debug integration may allow Codex to sign in to and authorize the Yuralume
+  diagnostic page, then fetch a bounded bundle through a protected,
+  read-only API. Restrict authorization to admin, short-lived tokens, and
+  explicit export scopes; fall back to manual download or shared workspace
+  when the connector/session is unavailable.

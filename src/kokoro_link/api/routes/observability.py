@@ -29,7 +29,9 @@ from kokoro_link.domain.entities.emotion_event import EmotionEvent
 from kokoro_link.domain.entities.operator_profile import DEFAULT_OPERATOR_ID, OperatorProfile
 from kokoro_link.domain.entities.persona_curiosity import PersonaCuriosityAttempt
 from kokoro_link.domain.entities.turn_record import TurnRecord
-from kokoro_link.infrastructure.persistence.models import InboundMessageReceiptRow, OutboundMessageDeliveryRow
+from kokoro_link.infrastructure.persistence.models import (
+    ConversationRow, InboundMessageReceiptRow, MessageRow, OutboundMessageDeliveryRow,
+)
 from kokoro_link.infrastructure.build_info import get_build_info
 from kokoro_link.infrastructure.runtime_identity import PROCESS_STARTED_AT, instance_id
 
@@ -336,10 +338,13 @@ async def diagnostic_export(
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     include_prompt: bool = Query(default=False),
+    include_messages: bool = Query(default=False),
+    include_logs: bool = Query(default=False),
+    include_storage_metadata: bool = Query(default=False),
     container: ServiceContainer = Depends(get_container),
 ) -> Response:
     """Download a bounded, read-only incident bundle for one character."""
-    start = _parse_since(since) if since else datetime.now(timezone.utc) - timedelta(hours=24)
+    start = _parse_since(since) if since else datetime.now(timezone.utc) - timedelta(hours=1)
     end = _parse_since(until) if until else datetime.now(timezone.utc)
     if end <= start:
         raise HTTPException(status_code=400, detail="until must be after since")
@@ -368,7 +373,10 @@ async def diagnostic_export(
     payload = {
         "schema_version": 2, "character_id": character_id,
         "window": {"since": start.isoformat(), "until": end.isoformat(), "timezone": "Asia/Hong_Kong"},
-        "limits": {"max_turns": 500, "include_prompt": include_prompt},
+        "limits": {"max_turns": 500, "include_prompt": include_prompt,
+                   "include_messages": include_messages,
+                   "include_logs": include_logs,
+                   "include_storage_metadata": include_storage_metadata},
         "turn_records": turns,
         "deployment": {
             "instance_id": instance_id(),
@@ -398,10 +406,34 @@ async def diagnostic_export(
             for account in accounts
         ]
     account_ids = [account.id for account in accounts]
+    source_errors: dict[str, str] = {}
+    messages: list[dict[str, Any]] = []
+    if include_messages:
+        conversation_repo = getattr(container, "conversation_repository", None)
+        session_factory = getattr(conversation_repo, "_session_factory", None)
+        if session_factory is not None:
+            try:
+                async with session_factory() as session:
+                    query = (select(MessageRow)
+                             .join(ConversationRow, ConversationRow.id == MessageRow.conversation_id)
+                             .where(ConversationRow.character_id == character_id)
+                             .where(MessageRow.created_at >= start)
+                             .where(MessageRow.created_at <= end)
+                             .order_by(MessageRow.created_at).limit(2000))
+                    rows = (await session.execute(query)).scalars().all()
+                messages = [{"id": r.id, "conversation_id": r.conversation_id,
+                             "position": r.position, "role": r.role, "kind": r.kind,
+                             "content": r.content[:4000], "created_at": r.created_at.isoformat()}
+                            for r in rows]
+            except Exception as exc:
+                source_errors["messages"] = type(exc).__name__
+    if include_logs:
+        source_errors["application_logs"] = "not_wired"
+    if include_storage_metadata:
+        source_errors["storage_metadata"] = "object_listing_not_supported"
     dispatcher = container.messaging_dispatcher
     inbound_rows: list[object] = []
     outbound_rows: list[object] = []
-    source_errors: dict[str, str] = {}
     sources = (
         ("inbound_receipts", getattr(dispatcher, "_receipts", None), InboundMessageReceiptRow),
         ("outbound_deliveries", getattr(dispatcher, "_outbound_deliveries", None), OutboundMessageDeliveryRow),
@@ -486,6 +518,8 @@ async def diagnostic_export(
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("summary.json", json.dumps(payload, ensure_ascii=False, indent=2))
+        if include_messages:
+            archive.writestr("conversation_messages.jsonl", "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in messages))
         archive.writestr("README.txt", "Zeabur platform logs must be exported separately and can be added to this ZIP.\n")
     filename = f"yuralume-diagnostic-{character_id}-{start.strftime('%Y%m%d-%H%M')}.zip"
     return Response(content=buffer.getvalue(), media_type="application/zip",

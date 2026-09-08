@@ -4871,7 +4871,7 @@ export const messages: MessageSchema = {
         targetLabel: '観測対象',
         targetHint: 'キャラクターを切り替えると turn / funnel / emotion を即時再読み込みします。共有しやすいよう URL query も同期します。',
         diagnosticTitle: '診断エクスポート',
-        diagnosticHint: '選択したキャラクターの診断記録をダウンロードします。初期値は直近 24 時間です。',
+        diagnosticHint: '選択したキャラクターの診断記録をダウンロードします。初期値は直近 1 時間で、詳細データは任意です。',
         sinceLabel: '開始時刻',
         untilLabel: '終了時刻',
         includePrompt: '完全な Prompt を含める',

@@ -19,9 +19,13 @@ const characters = ref<Character[]>([])
 const selected = ref<string>('')
 const loadError = ref<string | null>(null)
 const exportNow = new Date()
-const exportSince = ref(toDateTimeLocal(new Date(exportNow.getTime() - 24 * 60 * 60 * 1000)))
+const exportSince = ref(toDateTimeLocal(new Date(exportNow.getTime() - 60 * 60 * 1000)))
 const exportUntil = ref(toDateTimeLocal(exportNow))
 const exportIncludePrompt = ref(false)
+const exportIncludeMessages = ref(false)
+const exportIncludeLogs = ref(false)
+const exportIncludeStorageMetadata = ref(false)
+const exportPreset = ref('quick')
 const exportBusy = ref(false)
 const exportError = ref<string | null>(null)
 
@@ -35,6 +39,9 @@ async function exportDiagnostic() {
       since: toIsoInstant(exportSince.value),
       until: toIsoInstant(exportUntil.value),
       includePrompt: exportIncludePrompt.value,
+      includeMessages: exportIncludeMessages.value,
+      includeLogs: exportIncludeLogs.value,
+      includeStorageMetadata: exportIncludeStorageMetadata.value,
     })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -47,6 +54,14 @@ async function exportDiagnostic() {
   } finally {
     exportBusy.value = false
   }
+}
+
+function applyPreset(value: string) {
+  exportPreset.value = value
+  exportIncludePrompt.value = value === 'full'
+  exportIncludeMessages.value = value !== 'quick'
+  exportIncludeLogs.value = value === 'full'
+  exportIncludeStorageMetadata.value = value === 'full'
 }
 
 function toIsoInstant(value: string): string | undefined {
@@ -121,9 +136,19 @@ watch(selected, (next) => {
       </template>
       <p class="observability-admin__hint">{{ t('admin.page.observability.diagnosticHint') }}</p>
       <div class="observability-admin__export-fields">
+        <label>排查類型
+          <select v-model="exportPreset" @change="applyPreset(exportPreset)">
+            <option value="quick">快速排查</option>
+            <option value="standard">標準排查</option>
+            <option value="full">完整診斷</option>
+          </select>
+        </label>
         <label>{{ t('admin.page.observability.sinceLabel') }} <input v-model="exportSince" type="datetime-local" /></label>
         <label>{{ t('admin.page.observability.untilLabel') }} <input v-model="exportUntil" type="datetime-local" /></label>
         <label class="observability-admin__checkbox"><input v-model="exportIncludePrompt" type="checkbox" /> {{ t('admin.page.observability.includePrompt') }}</label>
+        <label class="observability-admin__checkbox"><input v-model="exportIncludeMessages" type="checkbox" /> 完整 conversation messages</label>
+        <label class="observability-admin__checkbox"><input v-model="exportIncludeLogs" type="checkbox" /> application logs</label>
+        <label class="observability-admin__checkbox"><input v-model="exportIncludeStorageMetadata" type="checkbox" /> storage object metadata</label>
       </div>
       <p v-if="exportError" class="observability-admin__error">{{ exportError }}</p>
       <UiButton size="sm" variant="primary" :loading="exportBusy" @click="exportDiagnostic">

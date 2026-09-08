@@ -4801,7 +4801,7 @@ export const messages: MessageSchema = {
         targetLabel: 'Target',
         targetHint: 'Switching characters reloads turn, funnel, and emotion data immediately. The URL query is kept in sync for sharing.',
         diagnosticTitle: 'Diagnostic export',
-        diagnosticHint: 'Download diagnostic records for the selected character. Defaults to the latest 24 hours.',
+        diagnosticHint: 'Download diagnostic records for the selected character. Defaults to the latest 1 hour; detailed data is optional.',
         sinceLabel: 'Start time',
         untilLabel: 'End time',
         includePrompt: 'Include full prompt',

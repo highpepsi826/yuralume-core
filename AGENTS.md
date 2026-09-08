@@ -160,3 +160,7 @@ operation runbook.
   explicitly asks for that data change.
 - Do not expose secrets in `.env.container`, provider connections, logs, or
   command output.
+## Diagnostic export debugging
+
+- The diagnostic download UI should support time ranges (default: recent 1 hour), incident-type presets, and advanced checkboxes for detailed data. Keep full prompts, chat bodies, and credentials opt-in; show estimated size and sensitivity.
+- A debug integration may let Codex sign in to and authorize the Yuralume diagnostic page, then fetch a bounded bundle through a protected, read-only diagnostic export API. Scope authorization to admin, short-lived tokens, and explicit export scopes. Fall back to manual download or shared workspace when the connector/session is unavailable.

@@ -262,6 +262,9 @@ export async function downloadDiagnosticExport(params: {
   since?: string
   until?: string
   includePrompt?: boolean
+  includeMessages?: boolean
+  includeLogs?: boolean
+  includeStorageMetadata?: boolean
 }): Promise<Blob> {
   const { data } = await axios.get<Blob>(`${BASE}/diagnostic-export`, {
     responseType: 'blob',
@@ -270,6 +273,9 @@ export async function downloadDiagnosticExport(params: {
       since: params.since || undefined,
       until: params.until || undefined,
       include_prompt: params.includePrompt || undefined,
+      include_messages: params.includeMessages || undefined,
+      include_logs: params.includeLogs || undefined,
+      include_storage_metadata: params.includeStorageMetadata || undefined,
     },
   })
   return data
