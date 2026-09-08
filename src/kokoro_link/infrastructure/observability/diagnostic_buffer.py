@@ -11,7 +11,11 @@ from threading import Lock
 from typing import Any
 
 _MAX_RECORDS = 2000
-_SECRET_KEY = re.compile(r"(?:token|secret|password|authorization|api[_-]?key|connection[_-]?string)", re.I)
+_SECRET_KEY = re.compile(
+    r"(?:api[_-]?key|access[_-]?token|refresh[_-]?token|bot[_-]?token|"
+    r"authorization|password|secret|connection[_-]?string)",
+    re.I,
+)
 _SECRET_VALUE = re.compile(r"(?i)(bearer\s+|sk-[A-Za-z0-9_-]{12,}|bot\d+:[A-Za-z0-9_-]{20,})")
 
 

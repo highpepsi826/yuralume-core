@@ -10,8 +10,18 @@ from kokoro_link.infrastructure.observability.diagnostic_buffer import (
 
 
 def test_redact_removes_secret_shaped_fields_and_values() -> None:
-    value = redact({"api_key": "sk-test-secret-value", "nested": {"ok": "visible"}})
-    assert value == {"api_key": "[REDACTED]", "nested": {"ok": "visible"}}
+    value = redact({
+        "api_key": "sk-test-secret-value",
+        "access_token": "hidden",
+        "prompt_tokens": 123,
+        "nested": {"ok": "visible"},
+    })
+    assert value == {
+        "api_key": "[REDACTED]",
+        "access_token": "[REDACTED]",
+        "prompt_tokens": 123,
+        "nested": {"ok": "visible"},
+    }
 
 
 def test_buffer_snapshots_bounded_warning_records() -> None:
