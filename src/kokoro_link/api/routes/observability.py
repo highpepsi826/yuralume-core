@@ -34,6 +34,12 @@ from kokoro_link.infrastructure.persistence.models import (
 )
 from kokoro_link.infrastructure.build_info import get_build_info
 from kokoro_link.infrastructure.runtime_identity import PROCESS_STARTED_AT, instance_id
+from kokoro_link.infrastructure.observability.diagnostic_sources import (
+    factory_for, read_messages, read_storage, read_turns, utc,
+)
+from kokoro_link.infrastructure.observability.diagnostic_buffer import (
+    get_diagnostic_buffer, redact,
+)
 
 _ALLOWED_OPERATOR_FEEDBACK_KINDS = {"out_of_character", "felt_human"}
 
@@ -353,8 +359,7 @@ async def diagnostic_export(
     repo = container.turn_record_repository
     if repo is None:
         raise HTTPException(status_code=503, detail="Turn record repository is not wired")
-    records = await repo.list_recent(character_id=character_id, since=start, limit=500)
-    records = [r for r in records if r.created_at <= end]
+    records, turns_truncated = await read_turns(repo, character_id, start, end)
     turns = []
     for record in records:
         item = {
@@ -364,14 +369,14 @@ async def diagnostic_export(
             "prompt_tokens": record.prompt_tokens,
             "completion_tokens": record.completion_tokens,
             "error": record.error, "created_at": record.created_at.isoformat(),
-            "response_excerpt": record.response_text[:1000],
+            "response_excerpt": record.response_text[:1000] if include_messages else "",
             "post_turn_refs": record.post_turn_refs,
         }
         if include_prompt:
             item["prompt_assembled"] = record.prompt_assembled
         turns.append(item)
     payload = {
-        "schema_version": 2, "character_id": character_id,
+        "schema_version": 3, "character_id": character_id,
         "window": {"since": start.isoformat(), "until": end.isoformat(), "timezone": "Asia/Hong_Kong"},
         "limits": {"max_turns": 500, "include_prompt": include_prompt,
                    "include_messages": include_messages,
@@ -407,48 +412,47 @@ async def diagnostic_export(
         ]
     account_ids = [account.id for account in accounts]
     source_errors: dict[str, str] = {}
+    sources_status = {
+        "turn_records": {"status": "partial" if turns_truncated else "complete",
+                         "row_count": len(turns), "truncated": turns_truncated},
+        **{name: {"status": "not_requested"} for name in (
+            "messages", "application_logs", "storage_metadata")},
+    }
     messages: list[dict[str, Any]] = []
-    if include_messages:
-        conversation_repo = getattr(container, "conversation_repository", None)
-        session_factory = getattr(conversation_repo, "_session_factory", None)
-        if session_factory is not None:
-            try:
-                async with session_factory() as session:
-                    query = (select(MessageRow)
-                             .join(ConversationRow, ConversationRow.id == MessageRow.conversation_id)
-                             .where(ConversationRow.character_id == character_id)
-                             .where(MessageRow.created_at >= start)
-                             .where(MessageRow.created_at <= end)
-                             .order_by(MessageRow.created_at).limit(2000))
-                    rows = (await session.execute(query)).scalars().all()
-                messages = [{"id": r.id, "conversation_id": r.conversation_id,
-                             "position": r.position, "role": r.role, "kind": r.kind,
-                             "content": r.content[:4000], "created_at": r.created_at.isoformat()}
-                            for r in rows]
-            except Exception as exc:
-                source_errors["messages"] = type(exc).__name__
-    payload_storage: list[dict[str, Any]] | None = None
-    if include_logs:
-        source_errors["application_logs"] = "not_wired"
-    if include_storage_metadata:
-        storage = getattr(container, "object_storage", None)
-        list_objects = getattr(storage, "list_metadata", None)
-        if list_objects is None:
-            source_errors["storage_metadata"] = "object_listing_not_supported"
+    attachments: list[str] = []
+    factory = factory_for(container)
+    if include_messages or include_storage_metadata:
+        if factory is None:
+            source_errors["messages"] = "database_source_not_available"
+            sources_status["messages"] = {"status": "unavailable"}
         else:
             try:
-                listed = await list_objects(prefix=f"characters/{character_id}/", limit=2000)
-                payload_storage = [{"object_key": item.object_key,
-                                    "content_type": item.content_type,
-                                    "size_bytes": item.size_bytes,
-                                    "sha256": item.sha256,
-                                    "metadata": dict(item.metadata or {})}
-                                   for item in listed]
+                messages, attachments, messages_truncated = await read_messages(factory, character_id, start, end)
+                sources_status["messages"] = {
+                    "status": "partial" if messages_truncated or any(m["content_truncated"] for m in messages) else "complete",
+                    "row_count": len(messages), "truncated": messages_truncated,
+                    "content_truncated_count": sum(m["content_truncated"] for m in messages),
+                    "max_rows": 2000, "max_content_chars": 16000,
+                    "exported": include_messages,
+                }
             except Exception as exc:
-                source_errors["storage_metadata"] = type(exc).__name__
-                payload_storage = []
-    else:
-        payload_storage = None
+                source_errors["messages"] = type(exc).__name__
+                sources_status["messages"] = {"status": "unavailable"}
+    application_logs = None
+    if include_logs:
+        application_logs, coverage = get_diagnostic_buffer().snapshot(start, end)
+        sources_status["application_logs"] = coverage
+    payload_storage = None
+    if include_storage_metadata:
+        if factory is None:
+            source_errors["storage_metadata"] = "reference_database_not_available"
+            sources_status["storage_metadata"] = {"status": "unavailable"}
+        else:
+            payload_storage, coverage = await read_storage(container, factory, character_id, start, end, attachments)
+            if sources_status["messages"]["status"] != "complete":
+                coverage["status"] = "partial"
+                coverage["message_reference_coverage"] = sources_status["messages"]["status"]
+            sources_status["storage_metadata"] = coverage
     dispatcher = container.messaging_dispatcher
     inbound_rows: list[object] = []
     outbound_rows: list[object] = []
@@ -458,13 +462,19 @@ async def diagnostic_export(
     )
     for name, repository, row_type in sources:
         session_factory = getattr(repository, "_session_factory", None)
-        if session_factory is None or not account_ids:
+        if not account_ids:
+            payload[name] = []
+            sources_status[name] = {"status": "complete", "row_count": 0}
+            continue
+        if session_factory is None:
+            source_errors[name] = "repository_not_available"
+            sources_status[name] = {"status": "unavailable"}
             continue
         try:
             async with session_factory() as session:
                 query = (select(row_type).where(row_type.account_id.in_(account_ids))
                          .where(row_type.created_at >= start)
-                         .where(row_type.created_at <= end).limit(1000))
+                         .where(row_type.created_at <= end).order_by(row_type.created_at).limit(1001))
                 rows = (await session.execute(query)).scalars().all()
         except Exception as exc:
             # A rolling deployment can briefly run the new app against a DB
@@ -472,7 +482,11 @@ async def diagnostic_export(
             # Turn/account portion of the bundle and identify the missing
             # source without returning a generic HTTP 500.
             source_errors[name] = type(exc).__name__
+            sources_status[name] = {"status": "unavailable"}
             continue
+        sources_status[name] = {"status": "partial" if len(rows) > 1000 else "complete",
+                                "truncated": len(rows) > 1000, "row_count": min(len(rows), 1000)}
+        rows = rows[:1000]
         if name == "inbound_receipts":
             inbound_rows = list(rows)
             payload[name] = [{"platform": r.platform, "account_id": r.account_id,
@@ -500,7 +514,7 @@ async def diagnostic_export(
     stale_accounts = [
         account.id for account in polling_accounts
         if account.polling_last_update_at is None
-        or (now - account.polling_last_update_at).total_seconds() > 120
+        or (now - utc(account.polling_last_update_at)).total_seconds() > 120
     ]
     failed_deliveries = [
         row for row in outbound_rows if row.state in ("pending", "terminal")
@@ -527,23 +541,43 @@ async def diagnostic_export(
         "pending_or_terminal_delivery_count": len(failed_deliveries),
         "platform_events": "not included; inspect Zeabur",
     }
-    if source_errors:
-        payload["source_errors"] = source_errors
-        payload["migration_hint"] = (
-            "Run alembic upgrade head in the Zeabur app service if a durable "
-            "source reports a schema error."
-        )
+    payload["inferred_health"]["scope"] = "sampled_runtime_signals_only_not_export_completeness"
+    if any(sources_status.get(k, {}).get("status") in ("unavailable", "partial")
+           for k in ("turn_records", "inbound_receipts", "outbound_deliveries")) and health_status == "healthy":
+        payload["inferred_health"]["status"] = "unknown"
+    payload["source_errors"] = source_errors
+    payload["diagnostic_completeness"] = {
+        "status": "partial" if source_errors or any(v["status"] in ("partial", "unavailable") for v in sources_status.values()) else "complete",
+        "sources": sources_status,
+    }
+    # Never instruct migration merely because optional diagnostics are absent.
+    payload = redact(payload)
+    messages = redact(messages)
+    payload_storage = redact(payload_storage)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("summary.json", json.dumps(payload, ensure_ascii=False, indent=2))
+        archive.writestr("incident_summary.json", json.dumps({
+            k: payload[k] for k in ("schema_version", "character_id", "window", "limits", "deployment",
+                                   "inferred_health", "diagnostic_completeness", "source_errors")
+        }, ensure_ascii=False, indent=2))
         if include_messages:
             archive.writestr("conversation_messages.jsonl", "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in messages))
+        if application_logs is not None:
+            archive.writestr("application_logs.jsonl", "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in application_logs))
         if payload_storage is not None:
             archive.writestr("storage_metadata.json", json.dumps(payload_storage, ensure_ascii=False, indent=2))
-        archive.writestr("README.txt", "Zeabur platform logs must be exported separately and can be added to this ZIP.\n")
+        archive.writestr("README.txt", (
+            "Read incident_summary.json first: runtime health and export completeness differ.\n"
+            "Application logs: app-wide WARN/ERROR only, current process, bounded memory; see coverage.\n"
+            "Storage: current metadata of selected character's referenced objects, not a historical inventory.\n"
+            "Zeabur restart/OOM/probe events remain external. No migration is implied by a missing source.\n"
+        ))
     filename = f"yuralume-diagnostic-{character_id}-{start.strftime('%Y%m%d-%H%M')}.zip"
     return Response(content=buffer.getvalue(), media_type="application/zip",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"',
+                             "Cache-Control": "no-store",
+                             "X-Diagnostic-Completeness": payload["diagnostic_completeness"]["status"]})
 
 
 # NOTE: this static path must be declared BEFORE the dynamic

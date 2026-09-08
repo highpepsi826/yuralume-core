@@ -95,6 +95,7 @@ from kokoro_link.api.routes.messaging import router as messaging_router
 from kokoro_link.api.routes.nsfw_mode import router as nsfw_mode_router
 from kokoro_link.api.routes.experiments import router as experiments_router
 from kokoro_link.api.routes.observability import router as observability_router
+from kokoro_link.infrastructure.observability.diagnostic_buffer import install_diagnostic_buffer
 from kokoro_link.api.routes.operator import overage_router
 from kokoro_link.api.routes.operator import router as operator_router
 from kokoro_link.api.routes.operator_persona import (
@@ -178,14 +179,15 @@ def _configure_logging() -> None:
     # calls are filtered by Python's WARNING default. Driven by
     # KOKORO_LOG_LEVEL so `make dev` can opt into INFO while a prod
     # entry can stay quiet.
-    if logging.getLogger().handlers:
-        return
-    level_name = os.getenv("KOKORO_LOG_LEVEL", "WARNING").upper()
-    level = getattr(logging, level_name, logging.WARNING)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-    )
+    root = logging.getLogger()
+    if not root.handlers:
+        level_name = os.getenv("KOKORO_LOG_LEVEL", "WARNING").upper()
+        level = getattr(logging, level_name, logging.WARNING)
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        )
+    install_diagnostic_buffer()
 
 
 def _log_prompt_pack_overlay_status() -> None:

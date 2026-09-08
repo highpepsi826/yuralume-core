@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import io
+import json
+import zipfile
 
 import pytest
 from fastapi import FastAPI
@@ -69,6 +72,24 @@ def _build_container_with_observability():
         ttl_seconds=600,
     )
     return harness, container
+
+
+def test_diagnostic_export_full_scope_is_bounded_and_reports_sources():
+    _, container = _build_container_with_observability()
+    client = _client(container)
+    response = client.get(
+        "/api/v1/admin/observability/diagnostic-export"
+        "?character_id=c1&include_prompt=true&include_messages=true"
+        "&include_logs=true&include_storage_metadata=true"
+    )
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        summary = json.loads(archive.read("summary.json"))
+        assert "incident_summary.json" in archive.namelist()
+        assert "conversation_messages.jsonl" in archive.namelist()
+        assert "application_logs.jsonl" in archive.namelist()
+        assert "diagnostic_completeness" in summary
+        assert summary["limits"]["include_storage_metadata"] is True
 
 
 @pytest.mark.asyncio

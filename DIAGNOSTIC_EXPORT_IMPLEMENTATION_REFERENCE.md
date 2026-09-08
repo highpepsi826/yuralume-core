@@ -217,6 +217,30 @@ duration regardless of heartbeats.
 
 ## Planned: storage and application diagnostics (2026-09-08)
 
+### Completion design and acceptance
+
+- Use the existing storage `stat` port against character portraits plus message
+  attachments and album references in the incident window. Do not assume an
+  invented `characters/{id}/` key prefix or scan every tenant's objects. Report
+  this as current metadata for referenced objects, not historical storage state.
+  Cap 100 objects, use bounded concurrency/timeouts; missing objects and source
+  failures remain visible. No storage service rollout or database migration.
+- Install the bounded WARN/ERROR application buffer during app creation. Export
+  redacted JSONL with process-local coverage and eviction metadata. This source
+  is application-wide (admin-only), not character-specific; it cannot recover
+  logs before restart. No changes to data, polling, schedulers or credentials.
+- Keep credentials always redacted, even for full exports. Retain bounded text
+  with explicit truncation flags and byte budgets; full messages are opt-in.
+- Separate `diagnostic_completeness` from `inferred_health`; remove automatic
+  migration advice for missing sources. Add a small `incident_summary.json`.
+- Tests must download and parse real ZIPs: messages with bodies, storage stat
+  success/missing/timeout, captured warning, opt-out, date and character scope,
+  authentication, row truncation, and the previous full-export 500 regression.
+- UI must describe real coverage and show post-download completeness. Run actual
+  frontend build (there is no `typecheck` npm script), backend tests, and i18n.
+- Deployment: app-only source push after verification. Live operator acceptance
+  follows only after the new static assets are verified; no migration commands.
+
 - Extend the storage diagnostic surface with a bounded metadata listing scoped
   to a character's referenced objects where possible; export key, content type,
   size, SHA-256, and metadata only, never object bytes. If the adapter cannot
@@ -227,3 +251,8 @@ duration regardless of heartbeats.
   Zeabur Pod lifecycle events as external input.
 - Preserve hard caps on rows, bytes, and time window; expose truncation and
   unavailable-source reasons in ``summary.json``.
+
+Implementation status: bounded in-process application diagnostics and
+reference-based storage metadata are now wired into the export. The storage
+scope is intentionally not a full historical inventory, and Zeabur Pod events
+remain external platform input.
