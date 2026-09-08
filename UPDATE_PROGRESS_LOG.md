@@ -1,5 +1,19 @@
 # Update and Progress Log
 
+### 2026-09-08 - Complete bounded diagnostic sources
+
+- Status: source implementation committed and pushed as `2eab10d` on
+  `local/customizations`; Zeabur redeploy is pending.
+- Export now includes an incident summary, source completeness status, bounded
+  redacted application WARN/ERROR ring-buffer records, and metadata for objects
+  referenced by the selected character. It does not read object bytes or claim
+  to include Zeabur Pod lifecycle events.
+- Verification: focused observability, app logging, and diagnostic buffer tests
+  passed (18); Python compilation and `git diff --check` passed.
+- Follow-up: after deployment, download one full bundle covering a real chat
+  turn and verify `application_logs.jsonl`, `storage_metadata.json`, and the
+  `diagnostic_completeness` block.
+
 This is the durable, non-sensitive operating record for this personal
 Yuralume self-host. Add new entries at the top after the work is verified.
 Do not record API keys, connection strings, chat content, character data, or
