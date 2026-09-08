@@ -427,6 +427,7 @@ async def diagnostic_export(
                             for r in rows]
             except Exception as exc:
                 source_errors["messages"] = type(exc).__name__
+    payload_storage: list[dict[str, Any]] | None = None
     if include_logs:
         source_errors["application_logs"] = "not_wired"
     if include_storage_metadata:
