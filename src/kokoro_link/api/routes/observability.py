@@ -430,7 +430,24 @@ async def diagnostic_export(
     if include_logs:
         source_errors["application_logs"] = "not_wired"
     if include_storage_metadata:
-        source_errors["storage_metadata"] = "object_listing_not_supported"
+        storage = getattr(container, "object_storage", None)
+        list_objects = getattr(storage, "list_metadata", None)
+        if list_objects is None:
+            source_errors["storage_metadata"] = "object_listing_not_supported"
+        else:
+            try:
+                listed = await list_objects(prefix=f"characters/{character_id}/", limit=2000)
+                payload_storage = [{"object_key": item.object_key,
+                                    "content_type": item.content_type,
+                                    "size_bytes": item.size_bytes,
+                                    "sha256": item.sha256,
+                                    "metadata": dict(item.metadata or {})}
+                                   for item in listed]
+            except Exception as exc:
+                source_errors["storage_metadata"] = type(exc).__name__
+                payload_storage = []
+    else:
+        payload_storage = None
     dispatcher = container.messaging_dispatcher
     inbound_rows: list[object] = []
     outbound_rows: list[object] = []
@@ -520,6 +537,8 @@ async def diagnostic_export(
         archive.writestr("summary.json", json.dumps(payload, ensure_ascii=False, indent=2))
         if include_messages:
             archive.writestr("conversation_messages.jsonl", "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in messages))
+        if payload_storage is not None:
+            archive.writestr("storage_metadata.json", json.dumps(payload_storage, ensure_ascii=False, indent=2))
         archive.writestr("README.txt", "Zeabur platform logs must be exported separately and can be added to this ZIP.\n")
     filename = f"yuralume-diagnostic-{character_id}-{start.strftime('%Y%m%d-%H%M')}.zip"
     return Response(content=buffer.getvalue(), media_type="application/zip",

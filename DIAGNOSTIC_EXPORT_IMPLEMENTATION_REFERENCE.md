@@ -214,3 +214,16 @@ duration regardless of heartbeats.
   read-only API. Restrict authorization to admin, short-lived tokens, and
   explicit export scopes; fall back to manual download or shared workspace
   when the connector/session is unavailable.
+
+## Planned: storage and application diagnostics (2026-09-08)
+
+- Extend the storage diagnostic surface with a bounded metadata listing scoped
+  to a character's referenced objects where possible; export key, content type,
+  size, SHA-256, and metadata only, never object bytes. If the adapter cannot
+  list objects, record an explicit source error.
+- Export application diagnostics from an in-process bounded ring buffer when
+  available, filtered to the requested time window and redacted before ZIP
+  creation. Do not persist arbitrary third-party or access logs, and keep
+  Zeabur Pod lifecycle events as external input.
+- Preserve hard caps on rows, bytes, and time window; expose truncation and
+  unavailable-source reasons in ``summary.json``.
