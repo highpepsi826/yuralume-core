@@ -72,6 +72,13 @@ def test_the_baseline_still_permits_fiction_and_future_promises() -> None:
     assert body.count("✅") >= 3
 
 
+def test_the_baseline_keeps_airp_device_actions_inside_the_shared_fiction() -> None:
+    body = _text(None)
+    assert "登入虛構遊戲" in body
+    assert "按下場景中的答錄機" in body
+    assert "computer-use 工具" in body
+
+
 def test_the_baseline_text_does_not_vary_with_the_offered_tools() -> None:
     """Constant bytes are what let this block sit in the cached prefix.
 

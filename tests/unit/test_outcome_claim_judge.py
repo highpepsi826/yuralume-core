@@ -134,6 +134,30 @@ def test_prompt_names_the_three_admissible_shapes() -> None:
     assert "引用玩家自己給的素材" in prompt
 
 
+def test_prompt_treats_airp_device_actions_as_in_fiction() -> None:
+    """Device words alone must not turn an AIRP scene into computer use."""
+    prompt = render_outcome_claim_judge_prompt(
+        message_text=(
+            "我登入遊戲走到你旁邊，再按下答錄機，聽見裡面喊著淑貞。"
+        ),
+        evidence=_evidence(),
+    )
+    assert "登入虛構遊戲" in prompt
+    assert "按下答錄機" in prompt
+    assert "真實 computer-use" in prompt
+    assert "現實副作用" in prompt
+
+
+def test_prompt_keeps_real_tool_side_effects_evidence_bound() -> None:
+    prompt = render_outcome_claim_judge_prompt(
+        message_text="我把圖片附上，也替你改好產品行程表了。",
+        evidence=_evidence(),
+    )
+    assert "現實附件" in prompt
+    assert "改動了產品資料" in prompt
+    assert "附件數量：0" in prompt
+
+
 def test_prompt_states_the_zero_call_fact_when_no_tool_ran() -> None:
     prompt = render_outcome_claim_judge_prompt(
         message_text="查好了", evidence=_evidence(offered_tools=("web_search",)),

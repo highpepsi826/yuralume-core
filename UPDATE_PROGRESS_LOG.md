@@ -943,3 +943,14 @@ database rows.
 - Follow-up: the Zeabur memory request/limit and end-to-end backup streaming
   work are recorded in `PENDING_ZEABUR_STABILITY_AND_ADMIN_MENU.md` and remain
   deferred to a separately approved implementation/deployment pass.
+# 2026-09-16 - AIRP honesty boundary source repair
+
+- Clarified the composer and outcome-claim judge prompts so actions inside the
+  shared roleplay world, including fictional game interaction and in-scene
+  recordings, are not treated as real computer or external-system operations.
+- Kept real attachments, web access, and persistent product-data claims bound
+  to matching tool evidence.
+- Verification: `tests/unit/prompt_sections/test_honesty_section.py` and
+  `tests/unit/test_outcome_claim_judge.py` (55 passed); `tests/unit/prompt_golden`
+  (85 passed); `git diff --check` passed.
+- Deployment: not performed.
