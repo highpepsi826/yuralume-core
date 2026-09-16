@@ -32,8 +32,10 @@ must remain evidence-bound.
 ## Compatibility And Data
 
 This is a prompt-only behavior correction. It adds no schema or migration and
-does not rewrite existing messages or pending follow-ups. Existing repair rows
-created before deployment remain unchanged.
+does not rewrite existing messages or pending follow-ups. Existing rows already
+queued before deployment may still be delivered under their original intent;
+the scheduled-promise composer must apply the same roleplay boundary when it
+renders those rows after deployment.
 
 ## Acceptance Cases
 
@@ -45,6 +47,9 @@ created before deployment remain unchanged.
 3. Claims that a real image was attached, a web page was fetched, or persisted
    data was changed still require matching tool evidence.
 4. Focused prompt and honesty-judge tests pass.
+5. Scheduled promises to continue an AIRP game, inspect an in-world object, or
+   listen to an in-world recording continue the scene without requesting a
+   real file or asserting that the character lacks physical hardware.
 
 ## Implementation Checklist
 
@@ -54,3 +59,5 @@ created before deployment remain unchanged.
 - [x] Regenerate and review affected prompt golden snapshots.
 - [x] Run focused tests and `git diff --check`.
 - [x] Record verified source progress; leave deployment pending.
+- [x] Clarify the scheduled-promise composer boundary and add a regression
+  assertion for in-world recordings.

@@ -244,6 +244,26 @@ def test_prompt_covers_rendezvous_and_report_promise_shapes() -> None:
     assert "不能假裝已送達" in prompt
 
 
+def test_prompt_keeps_airp_recording_promises_inside_the_shared_fiction() -> None:
+    payload = ScheduledPromiseComposeInput(
+        character=_character(),
+        promise_intent="聽完整段答錄機錄音後回頭告訴對方聽見了什麼",
+        promise_text="你聽完再跟我說，我在",
+        scheduled_for=datetime(2026, 9, 16, 14, 20, tzinfo=timezone.utc),
+        current_activity=None,
+        just_finished_activity=None,
+        recent_dialogue_summary="兩人正在共同劇情中聽陳婆婆留下的答錄機。",
+        now=datetime(2026, 9, 16, 14, 20, tzinfo=timezone.utc),
+    )
+
+    prompt = _build_prompt(payload)
+
+    assert "在場景中聽答錄機" in prompt
+    assert "可直接履行的劇情行動" in prompt
+    assert "沒有實體設備、錄音檔或 computer-use 工具" in prompt
+    assert "現實附件、網頁資料、外部服務或產品資料變更" in prompt
+
+
 def test_prompt_injects_operator_local_current_time() -> None:
     payload = ScheduledPromiseComposeInput(
         character=_character(),

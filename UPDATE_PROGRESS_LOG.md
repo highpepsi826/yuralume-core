@@ -954,3 +954,14 @@ database rows.
   `tests/unit/test_outcome_claim_judge.py` (55 passed); `tests/unit/prompt_golden`
   (85 passed); `git diff --check` passed.
 - Deployment: not performed.
+# 2026-09-16 - AIRP scheduled-promise boundary source repair
+
+- Extended the AIRP roleplay boundary to scheduled-promise composition. A
+  deferred in-world game, object, or recording scene now continues as fiction
+  instead of requesting real hardware or files.
+- Real attachment delivery, web access, external services, and product-data
+  changes remain tied to tool evidence.
+- Verification: scheduled-promise, dispatcher, and honesty-loop tests (93
+  passed); prompt-loader tests (25 passed with an explicit writable pytest
+  base directory); `git diff --check` passed.
+- Deployment: not performed.
