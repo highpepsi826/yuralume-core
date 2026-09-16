@@ -965,3 +965,16 @@ database rows.
   passed); prompt-loader tests (25 passed with an explicit writable pytest
   base directory); `git diff --check` passed.
 - Deployment: not performed.
+# 2026-09-16 - AIRP boundary coverage audit
+
+- Audited all player-visible composition paths. The AIRP roleplay exception now
+  covers chat honesty, scheduled promises, busy follow-ups, proactive messages,
+  feed output via the shared role boundary, and tool-enabled compose passes.
+- Post-turn promise extraction remains unchanged by design; explicit promises
+  still enter the shared scheduled-promise path and are rendered with the
+  repaired boundary.
+- Verification: 200 focused tests passed; the broader affected set had 290
+  passes. Four pre-existing schedule-planner tests remain outside this change
+  (one undefined `operator_primary_language`, three unrelated planner
+  assertions).
+- Deployment: not performed.

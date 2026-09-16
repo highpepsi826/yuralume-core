@@ -19,6 +19,8 @@ must remain evidence-bound.
 
 - Clarify the always-on chat honesty boundary.
 - Clarify the outcome-claim judge's definition and admissible examples.
+- Apply the same boundary to busy follow-ups, ordinary proactive messages, and
+  the shared tool-use guidance.
 - Add prompt regression tests for the two observed AIRP cases and the retained
   real-world evidence boundary.
 
@@ -50,6 +52,11 @@ renders those rows after deployment.
 5. Scheduled promises to continue an AIRP game, inspect an in-world object, or
    listen to an in-world recording continue the scene without requesting a
    real file or asserting that the character lacks physical hardware.
+6. Busy follow-ups, ordinary proactive messages, and tool-enabled composers
+   distinguish shared-scene actions from real tool-backed side effects.
+7. The post-turn promise extractor continues to schedule only explicit
+   time-based, bilateral, or user-requested completion callbacks; it does not
+   need a roleplay exception because the repaired composer renders those rows.
 
 ## Implementation Checklist
 
@@ -61,3 +68,5 @@ renders those rows after deployment.
 - [x] Record verified source progress; leave deployment pending.
 - [x] Clarify the scheduled-promise composer boundary and add a regression
   assertion for in-world recordings.
+- [x] Add the shared boundary to busy follow-ups, proactive output, and the
+  tool-use rail; add focused regression coverage.

@@ -80,6 +80,8 @@ def test_honesty_rule_is_shared_by_every_tool() -> None:
         block = _render(*names)
         assert "沒有實際輸出工具 JSON，就不准在回覆裡表現得好像用過工具" in block
         assert "也不要在文字裡假裝你使用過任何工具" in block
+        assert "共同角色扮演裡的場景行動不需要工具" in block
+        assert "劇情中的答錄機" in block
 
 
 def test_fabricated_search_claim_is_called_out_by_example() -> None:

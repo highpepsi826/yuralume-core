@@ -215,6 +215,9 @@ def _render_shared_anti_patterns(tools: list[PromptToolDescriptor]) -> list[str]
         "❌ 不要在自然語言回覆中夾 JSON；也不要在 JSON 前後補「好的我來查」這類解釋。",
         "✅ 正確：要用工具 → 這回合整個輸出就是一段 JSON；"
         "要聊天 → 完全不出現 JSON，也不出現任何暗示你剛用過工具的說法。",
+        "✅ 共同角色扮演裡的場景行動不需要工具：虛構遊戲、劇情中的答錄機、"
+        "道具與故事工作可直接延續。只有真實附件、外部資料、外部服務或產品資料"
+        "變更，才算需要工具結果的對外操作。",
     ]
     for tool in tools:
         guidance = _TOOL_GUIDANCE.get(tool.name)

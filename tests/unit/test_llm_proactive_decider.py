@@ -403,6 +403,8 @@ async def test_prompt_has_role_knowledge_boundary_for_user_related_events() -> N
     prompt = model.captured_prompt or ""
     assert "認知範圍與誠實表達" in prompt
     assert "不要假裝專家" in prompt
+    assert "這條認知界線不會取消你和對方共享的角色扮演情境" in prompt
+    assert "沒有實體設備、錄音檔或 computer-use 工具" in prompt
     assert "主要是因為對方可能在意" in prompt
     assert "Cloudflare" in prompt
 

@@ -108,6 +108,24 @@ def test_prompt_includes_operator_persona_lines() -> None:
     assert "不要裝熟" in prompt
 
 
+def test_prompt_keeps_airp_scene_actions_out_of_the_tool_requirement() -> None:
+    payload = _input_with(
+        queued_messages=(
+            PendingFollowUpMessage.new(
+                content="你繼續聽答錄機，聽完跟我說。",
+                queued_at=_now() - timedelta(minutes=5),
+            ),
+        ),
+        recent_dialogue_summary="兩人正在共同劇情中聽陳婆婆留下的答錄機。",
+    )
+
+    prompt = _build_prompt(payload)
+
+    assert "共同角色扮演裡的遊戲、錄音、道具或故事工作" in prompt
+    assert "不是要你操作現實電腦或取得實體檔案" in prompt
+    assert "真實附件、外部資料、外部服務或產品資料變更" in prompt
+
+
 def test_prompt_includes_schedule_activity_knowledge_boundary() -> None:
     """KB9: an activity description can name a companion/place the player
     has never heard of — pin the schedule-block rider that covers it."""
