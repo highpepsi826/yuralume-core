@@ -244,6 +244,19 @@ def test_health_worker_role_200_when_worker_running() -> None:
     assert resp.status_code == 200
 
 
+def test_health_worker_role_503_when_durable_chat_worker_exited() -> None:
+    app = _app_for_role("worker")
+    app.state.container.background_shadow_worker = _StubScheduler(
+        started=True, is_running=True,
+    )
+    app.state.container.durable_chat_worker = _StubScheduler(
+        started=True, is_running=False,
+    )
+    resp = TestClient(app).get("/health")
+    assert resp.status_code == 503
+    assert resp.json()["reason"] == "scheduler_exited"
+
+
 def test_health_connector_role_ignores_dead_background_loops() -> None:
     # A connector process owns neither coordinator nor worker → dead objects of
     # those cannot 503 it.

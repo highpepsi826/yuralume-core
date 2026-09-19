@@ -174,3 +174,16 @@ class ExternalChatTurnExecutionPort(Protocol):
         pipeline runs — comfortably inside the lease TTL (a third of it) so a
         long generation never lets the lease lapse into a takeover."""
         ...
+
+    async def record_effect_intent(
+        self,
+        *,
+        effect_kind: str,
+        payload_json: str,
+        completed: bool,
+        enqueued: bool = False,
+        recovery_required: bool = False,
+        error: str | None = None,
+    ) -> None:
+        """Persist a stable post-commit effect intent before the turn completes."""
+        ...

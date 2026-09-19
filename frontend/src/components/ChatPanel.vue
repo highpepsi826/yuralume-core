@@ -12,6 +12,7 @@ import {
   ChatRuntimeLimitError,
   ChatStreamProtocolError,
   getChatTurnStatus,
+  getActiveChatTurn,
   getLatestConversation,
   isChatStreamAbortedError,
   sendChatMessage,
@@ -19,6 +20,11 @@ import {
   uploadChatAttachments,
   undoLastTurn,
 } from '@/utils/api/chat'
+import {
+  DurableChatClient,
+  DurableChatSyncAbortedError,
+} from '@/utils/durableChatClient'
+import { createChatDurableOutboxStore } from '@/utils/chatDurableOutbox'
 import { ChatTurnGuard, type ChatTurnTicket } from '@/utils/chatTurnGuard'
 import { nextActiveTool, toolActivityDisplay } from '@/utils/toolActivity'
 import {
@@ -101,6 +107,7 @@ const { timeZone } = useTimezone()
 const confirmDialog = useConfirmDialog()
 const { chatAssistEnabled, loadChatAssistPreference } = useChatAssistPreference()
 const { cloudMode, portalUrl } = useAuth()
+const auth = useAuth()
 const { pt } = usePlayerCopy()
 const cloudCredits = useCloudCredits()
 const actionPricing = useActionPricing()
@@ -222,6 +229,25 @@ const loadingOlder = ref(false)
 const streamingText = ref('')
 const liveTurnId = ref<string | null>(null)
 const turnRecoveryStatus = ref<'reconnecting' | 'processing' | null>(null)
+const durableChatEnabled = import.meta.env.VITE_DURABLE_CHAT_ENABLED === 'true'
+const durableOutboxStore = createChatDurableOutboxStore()
+const durableOwnerKey = computed(() => {
+  if (!auth.authProbed.value) return null
+  if (auth.authEnabled.value) return auth.currentUser.value?.id ?? null
+  return 'default'
+})
+const durableSessionEnabled = computed(
+  () => durableChatEnabled && durableOwnerKey.value !== null,
+)
+const durableChatClient = computed(() => new DurableChatClient({
+  // The computed client is only used after ``durableSessionEnabled`` proves
+  // that this is either a settled authenticated owner or the single-user
+  // self-host identity.
+  ownerKey: durableOwnerKey.value ?? '__unavailable__',
+  store: durableOutboxStore,
+}))
+let durableWaitAbortController: AbortController | null = null
+let durableRestoreAbortController: AbortController | null = null
 /** Which tool the character is running right now (SSE tool_activity
  * frames), or null. Drives the typing indicator's icon + diegetic
  * line; transitions live in utils/toolActivity (pure, unit-tested). */
@@ -411,6 +437,10 @@ function beginChatTurn(characterId: string): ChatTurnHandle {
  */
 function abandonInFlightTurn(nextCharacterId: string | null) {
   turnGuard.interrupt(nextCharacterId)
+  durableWaitAbortController?.abort()
+  durableWaitAbortController = null
+  durableRestoreAbortController?.abort()
+  durableRestoreAbortController = null
   streamingText.value = ''
   activeToolName.value = null
   liveTurnId.value = null
@@ -1151,6 +1181,8 @@ watch(() => props.character?.id ?? null, (characterId) => {
     // player left, not to a button that would refuse them.
     restoreStoryScene(characterId)
     refreshCurrentActivity()
+    void restoreActiveDurableTurn(props.conversationId)
+    void syncDurableOutbox()
     activityTimer = setInterval(() => {
       refreshCurrentActivity()
     }, 60_000)
@@ -1158,6 +1190,16 @@ watch(() => props.character?.id ?? null, (characterId) => {
     currentActivity.value = null
   }
 }, { immediate: true })
+
+watch(() => props.conversationId, (conversationId) => {
+  void restoreActiveDurableTurn(conversationId)
+  void syncDurableOutbox()
+})
+
+watch(durableOwnerKey, () => {
+  void restoreActiveDurableTurn(props.conversationId)
+  void syncDurableOutbox()
+})
 
 watch(chatAssistEnabled, (enabled) => {
   if (!enabled) {
@@ -1664,6 +1706,315 @@ function removeOptimisticMessage(message: ChatMessage | null) {
   }
 }
 
+async function runDurableChatTurn(
+  request: SendChatMessageRequest,
+  optimisticMessage: ChatMessage | null,
+  turn: ChatTurnHandle,
+  clearComposer = true,
+): Promise<void> {
+  const { ticket, lockId } = turn
+  if (optimisticMessage) localMessages.value.push(optimisticMessage)
+  streamingText.value = ''
+  turnRecoveryStatus.value = 'processing'
+  const client = durableChatClient.value
+  const waitController = new AbortController()
+  durableWaitAbortController = waitController
+  let savedRecord: Awaited<ReturnType<DurableChatClient['save']>> | null = null
+  let keepGate = false
+  try {
+    const saved = await client.save(request)
+    savedRecord = saved
+    if (clearComposer && turnGuard.isCurrent(ticket)) inputText.value = ''
+    const completed = await client.waitForCompletion(saved, {
+      intervalMs: 1000,
+      timeoutMs: null,
+      signal: waitController.signal,
+    })
+    liveTurnId.value = completed.status.turn_id
+    if (completed.status.conversation_id) {
+      emit('conversationIdLearned', completed.status.conversation_id)
+    }
+    if (!turnGuard.isCurrent(ticket)) return
+    if (completed.status.status === 'completed') {
+      try {
+        const snapshot = await getLatestConversation(request.character_id)
+        if (snapshot && snapshot.id === completed.status.conversation_id) {
+          localMessages.value = [...snapshot.messages]
+          emit('conversationUpdate', snapshot.id, [...localMessages.value], props.character!)
+        }
+      } catch {
+        // The durable receipt is terminal even if this history refresh is
+        // temporarily unavailable. The next visibility/online wake-up will
+        // reseed the conversation from the server.
+      }
+      try {
+        await client.forget(completed.record)
+      } catch {
+        // Local cleanup can be retried on the next wake-up; it must not turn
+        // a server-completed turn back into a sending error.
+      }
+    } else if (
+      completed.status.status === 'failed'
+      || completed.status.status === 'cancelled'
+    ) {
+      inputText.value = request.message
+      localMessages.value.push({
+        role: 'assistant',
+        content: completed.status.failure_message || t('chat.errors.streamFailed'),
+      })
+    } else if (
+      completed.status.status === 'recovery_required'
+      || completed.status.post_turn_effect_state === 'recovery_required'
+    ) {
+      turnRecoveryStatus.value = 'processing'
+      keepGate = true
+      localMessages.value.push({
+        role: 'assistant',
+        content: completed.status.failure_message || t('chat.errors.streamStillProcessing'),
+      })
+    }
+    liveTurnId.value = null
+    if (completed.status.status !== 'recovery_required') {
+      turnRecoveryStatus.value = null
+    }
+  } catch (error) {
+    if (!turnGuard.isCurrent(ticket)) return
+    if (!(error instanceof DurableChatSyncAbortedError)) {
+      if (savedRecord === null) {
+        // IndexedDB could not durably capture the input. It has not been
+        // cleared from the composer, so release the gate and let the player
+        // retry instead of pretending the server owns this turn.
+        removeOptimisticMessage(optimisticMessage)
+        inputText.value = request.message
+        turnRecoveryStatus.value = null
+        localMessages.value.push({
+          role: 'assistant',
+          content: error instanceof Error ? error.message : t('chat.errors.streamFailed'),
+        })
+      } else {
+      // A 4xx refusal means the command was never accepted. Keep the draft in
+      // the composer so the player can correct or resend it; transport errors
+      // stay in IndexedDB and continue with the same client id on wake-up.
+      const saved = await durableOutboxStore.get(
+        durableOwnerKey.value ?? '__unavailable__',
+        savedRecord?.clientMessageId ?? request.client_message_id ?? '',
+      )
+      if (saved?.state === 'needs_input') {
+        removeOptimisticMessage(optimisticMessage)
+        inputText.value = request.message
+        turnRecoveryStatus.value = null
+        localMessages.value.push({
+          role: 'assistant',
+          content: error instanceof Error ? error.message : t('chat.errors.streamFailed'),
+        })
+      } else {
+        turnRecoveryStatus.value = 'reconnecting'
+      }
+      }
+    }
+  } finally {
+    if (durableWaitAbortController === waitController) {
+      durableWaitAbortController = null
+    }
+    if (turnGuard.ownsScreen(ticket)) {
+      if (!keepGate && turnRecoveryStatus.value !== 'reconnecting') {
+        releaseSendingLock(lockId)
+      }
+      await scrollToBottom()
+    }
+  }
+}
+
+let durableRestoreSeq = 0
+
+async function restoreActiveDurableTurn(conversationId: string | null): Promise<void> {
+  if (!durableSessionEnabled.value || !conversationId || !props.character) return
+  // A foreground send already owns the gate and its own durable wait loop.
+  if (sending.value) return
+  const seq = ++durableRestoreSeq
+  durableRestoreAbortController?.abort()
+  const controller = new AbortController()
+  durableRestoreAbortController = controller
+  const lockId = beginSendingLock()
+  let keepGate = false
+  try {
+    const status = await getActiveChatTurn(conversationId)
+    if (seq !== durableRestoreSeq || !status) return
+    liveTurnId.value = status.turn_id
+    turnRecoveryStatus.value = 'processing'
+    let attempt = 0
+    while (seq === durableRestoreSeq && !controller.signal.aborted) {
+      let refreshed = status
+      try {
+        if (attempt > 0) {
+          await waitForDurableRecovery(1000, attempt, controller.signal)
+        }
+        refreshed = await getChatTurnStatus(status.turn_id)
+        attempt = 0
+      } catch (error) {
+        if (error instanceof DurableChatSyncAbortedError) return
+        turnRecoveryStatus.value = 'reconnecting'
+        attempt += 1
+        continue
+      }
+      if (refreshed.status === 'completed') {
+        const snapshot = await getLatestConversation(props.character.id)
+        if (
+          snapshot
+          && snapshot.id === conversationId
+          && seq === durableRestoreSeq
+        ) {
+          localMessages.value = [...snapshot.messages]
+          emit('conversationUpdate', snapshot.id, [...localMessages.value], props.character!)
+        }
+        return
+      }
+      if (refreshed.status === 'failed' || refreshed.status === 'cancelled') {
+        localMessages.value.push({
+          role: 'assistant',
+          content: refreshed.failure_message || t('chat.errors.streamFailed'),
+        })
+        return
+      }
+      if (
+        refreshed.status === 'recovery_required'
+        || refreshed.post_turn_effect_state === 'recovery_required'
+      ) {
+        // The canonical reply is already committed. Keep the conversation
+        // gate visible until an operator/reconciliation action resolves the
+        // outstanding effect; never silently turn it into a new send window.
+        turnRecoveryStatus.value = 'processing'
+        keepGate = true
+        return
+      }
+      turnRecoveryStatus.value = 'processing'
+      attempt += 1
+    }
+  } catch (error) {
+    if (!(error instanceof DurableChatSyncAbortedError) && seq === durableRestoreSeq) {
+      turnRecoveryStatus.value = 'reconnecting'
+    }
+  } finally {
+    if (durableRestoreAbortController === controller) {
+      durableRestoreAbortController = null
+    }
+    if (seq === durableRestoreSeq && !keepGate) {
+      liveTurnId.value = null
+      turnRecoveryStatus.value = null
+      releaseSendingLock(lockId)
+    }
+  }
+}
+
+async function waitForDurableRecovery(
+  baseMs: number,
+  attempt: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) throw new DurableChatSyncAbortedError()
+  const delay = Math.min(30_000, baseMs * 2 ** Math.min(attempt, 5))
+  const jitter = Math.floor(Math.random() * Math.max(100, delay * 0.2))
+  await new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(done, delay + jitter)
+    const onAbort = () => {
+      window.clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+      reject(new DurableChatSyncAbortedError())
+    }
+    function done() {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+async function syncDurableOutbox(): Promise<void> {
+  if (!durableSessionEnabled.value || !props.character || sending.value) return
+  const client = durableChatClient.value
+  let records
+  try {
+    records = await client.pending()
+  } catch {
+    return
+  }
+  const record = records.find((item) => (
+    item.payload.character_id === props.character?.id
+    && (
+      item.payload.conversation_id === props.conversationId
+      || !item.payload.conversation_id
+    )
+  ))
+  if (!record || sending.value) return
+  const lockId = beginSendingLock()
+  const controller = new AbortController()
+  durableWaitAbortController = controller
+  turnRecoveryStatus.value = 'processing'
+  let keepGate = false
+  try {
+    const result = await client.waitForCompletion(record, {
+      intervalMs: 1000,
+      timeoutMs: null,
+      signal: controller.signal,
+    })
+    if (result.status.status === 'completed') {
+      try {
+        const snapshot = await getLatestConversation(props.character.id)
+        if (snapshot && (!props.conversationId || snapshot.id === props.conversationId)) {
+          localMessages.value = [...snapshot.messages]
+          emit('conversationUpdate', snapshot.id, [...localMessages.value], props.character)
+        }
+      } catch {
+        // Receipt completion remains authoritative; a later wake-up reloads
+        // the history without holding the composer hostage.
+      }
+      try {
+        await client.forget(result.record)
+      } catch {
+        // Keep the terminal record if local deletion is temporarily blocked;
+        // ``pending`` excludes it and a later maintenance pass may clean it.
+      }
+    } else if (result.status.status === 'failed' || result.status.status === 'cancelled') {
+      inputText.value = result.record.payload.message
+      localMessages.value.push({
+        role: 'assistant',
+        content: result.status.failure_message || t('chat.errors.streamFailed'),
+      })
+    } else if (
+      result.status.status === 'recovery_required'
+      || result.status.post_turn_effect_state === 'recovery_required'
+    ) {
+      turnRecoveryStatus.value = 'processing'
+      keepGate = true
+    }
+  } catch (error) {
+    if (!(error instanceof DurableChatSyncAbortedError)) {
+      const latest = await durableOutboxStore.get(
+        durableOwnerKey.value ?? '__unavailable__',
+        record.clientMessageId,
+      )
+      const needsInput = latest?.state === 'needs_input'
+      if (needsInput) {
+        inputText.value = record.payload.message
+        localMessages.value.push({
+          role: 'assistant',
+          content: error instanceof Error ? error.message : t('chat.errors.streamFailed'),
+        })
+        turnRecoveryStatus.value = null
+        releaseSendingLock(lockId)
+      } else {
+        turnRecoveryStatus.value = 'reconnecting'
+      }
+    }
+  } finally {
+    if (durableWaitAbortController === controller) durableWaitAbortController = null
+    if (!keepGate && turnRecoveryStatus.value !== 'reconnecting') {
+      turnRecoveryStatus.value = null
+      releaseSendingLock(lockId)
+    }
+  }
+}
+
 async function handleSend() {
   if (!props.character || sending.value) return
   const hasText = inputText.value.trim().length > 0
@@ -1679,7 +2030,6 @@ async function handleSend() {
 
   const userText = inputText.value.trim() || t('chat.input.attachWithImage')
   const toUpload = stagedAttachments.value.slice()
-  inputText.value = ''
   uploadError.value = null
   creditsExhausted.value = false
   creditsRequiredCr.value = null
@@ -1732,6 +2082,22 @@ async function handleSend() {
     return
   }
 
+  if (durableSessionEnabled.value) {
+    await runDurableChatTurn(
+      { ...request, conversation_id: props.conversationId },
+      {
+        role: 'user',
+        content: userText,
+        created_at: new Date().toISOString(),
+        attachments: uploadedUrls.map(url => ({
+          kind: 'image', url, mime_type: 'image/*', caption: null,
+        })),
+      },
+      turn,
+    )
+    return
+  }
+  inputText.value = ''
   await runChatTurn(
     // Still on screen, so the live thread id wins over the snapshot: the
     // parent can have learned or reseeded the conversation while the bytes
@@ -1801,17 +2167,24 @@ async function handleStageNudgeSubmit(rawText: string) {
   setStorySceneChips([])
   const turn = beginChatTurn(props.character.id)
 
+  const request: SendChatMessageRequest = {
+    character_id: props.character.id,
+    conversation_id: props.conversationId,
+    message,
+    attachment_urls: [],
+    // Only ever reachable in stage mode (the control only renders there),
+    // so this is always the same-space frame — never the DM one.
+    presence_frame: currentPresenceFrame(false),
+    stage_nudge: true,
+  }
+
+  if (durableSessionEnabled.value) {
+    await runDurableChatTurn(request, optimisticMessage, turn, false)
+    return
+  }
+
   await runChatTurn(
-    {
-      character_id: props.character.id,
-      conversation_id: props.conversationId,
-      message,
-      attachment_urls: [],
-      // Only ever reachable in stage mode (the control only renders there),
-      // so this is always the same-space frame — never the DM one.
-      presence_frame: currentPresenceFrame(false),
-      stage_nudge: true,
-    },
+    request,
     optimisticMessage,
     turn,
   )
@@ -2075,6 +2448,16 @@ function updateAppHeight() {
   }
 }
 
+function wakeDurableChatSync() {
+  if (!durableSessionEnabled.value) return
+  void restoreActiveDurableTurn(props.conversationId)
+  void syncDurableOutbox()
+}
+
+function handleDurableVisibilityChange() {
+  if (document.visibilityState === 'visible') wakeDurableChatSync()
+}
+
 onMounted(() => {
   void resolveTTSAvailability().then((available) => {
     ttsAvailable.value = available
@@ -2094,6 +2477,9 @@ onMounted(() => {
     vv.addEventListener('scroll', updateAppHeight)
     updateAppHeight()
   }
+  window.addEventListener('online', wakeDurableChatSync)
+  document.addEventListener('visibilitychange', handleDurableVisibilityChange)
+  wakeDurableChatSync()
 })
 
 onUnmounted(() => {
@@ -2104,6 +2490,8 @@ onUnmounted(() => {
     vv.removeEventListener('scroll', updateAppHeight)
   }
   document.documentElement.style.removeProperty('--app-height')
+  window.removeEventListener('online', wakeDurableChatSync)
+  document.removeEventListener('visibilitychange', handleDurableVisibilityChange)
 })
 </script>
 

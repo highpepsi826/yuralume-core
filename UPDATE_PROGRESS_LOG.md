@@ -1,5 +1,119 @@
 # Update and Progress Log
 
+### 2026-09-19 - Complete isolated PostgreSQL rehearsal
+
+- Docker Desktop was made available and a temporary `pgvector/pgvector:pg16`
+  container was started on localhost port `5545` with rehearsal-only
+  credentials. It was never connected to Prod and was removed after testing.
+- Full Alembic `upgrade head` passed through `u9e7b2a11059`; PostgreSQL
+  confirmed the `vector` extension, both durable-chat tables, all expected
+  indexes, and head revision `u9e7b2a11059`.
+- `u9e7b2a11059` downgrade to `t8d6f1a10058` removed only the effect ledger;
+  re-upgrade restored it successfully.
+- Real PostgreSQL adapter rehearsal passed acceptance duplicate, hash conflict,
+  conversation busy, claim race, lease heartbeat/fencing, generated/
+  committed/completed transitions, effect pending/enqueued/running/completed,
+  and executor completion/recovery fencing. Temporary rows were deleted.
+- Production status remains unchanged: no backup, migration, Zeabur setting,
+  deployment, flag, commit, push, or user data was changed.
+
+### 2026-09-19 - Complete durable recovery and frontend outbox slice
+
+- P2-2 completed source-only: post-turn effect intents now have a durable
+  `running` checkpoint. A worker reclaimed after entering that state is fenced
+  into `recovery_required`; it is never blindly replayed because memory,
+  emotion, promise, and schedule writes are not all individually idempotent.
+- Committed-turn recovery now uses the stable post-turn queue idempotency key
+  only. A pending or unknown enqueue outcome becomes an explicit
+  `recovery_required` effect; it does not call the post-turn implementation
+  directly a second time.
+- The durable frontend client now preserves `acceptance_unknown` on transport
+  failure, classifies explicit 4xx refusals as `needs_input`, retries status
+  reads with bounded jitter/backoff, accepts an abort signal, records terminal
+  outbox states, and removes completed records after canonical history refresh.
+- `ChatPanel` now gates durable storage on a settled owner identity, keeps the
+  composer text until IndexedDB save succeeds, holds the sending gate while a
+  cross-device active turn is processing, and wakes durable synchronization on
+  login, conversation changes, `online`, and visibility resume. The legacy SSE
+  path remains the default because `VITE_DURABLE_CHAT_ENABLED` is still off.
+- Verification: backend durable/recovery/post-turn suite 81 passed; chat and
+  external-turn compatibility suite 86 passed; frontend durable suite 7
+  passed; production frontend/PWA build passed with `TEMP`/`TMP` redirected to
+  an allowed workspace temp directory; Python compileall and `git diff
+  --check` passed.
+- Migration verification: direct isolated SQLite execution of `t8d6f1a10058`
+  and `u9e7b2a11059` upgrade/inspect/downgrade/re-upgrade passed. After Docker
+  Desktop became available, a real PostgreSQL/pgvector rehearsal completed the
+  full Alembic chain, new migration downgrade/re-upgrade, adapter claim race,
+  lease fencing, effect lifecycle, and executor recovery checks. No production
+  schema or deployment operation was attempted.
+- Production status is unchanged: acceptance, worker, and frontend flags are
+  off; no commit, push, Zeabur setting, migration, backup, or user data was
+  changed.
+
+### 2026-09-19 - Record durable same-space chat design and verify hosted version
+
+- Added `SAME_SPACE_DURABLE_CHAT_IMPLEMENTATION_REFERENCE.md`: durable receipt,
+  dedicated PostgreSQL foreground worklist, independent worker, client outbox,
+  cross-device recovery, billing/effect boundaries, staged rollout/rollback,
+  and 25 acceptance scenarios. This is a plan-only change; implementation has
+  not started.
+- Read-only Zeabur API metadata confirms the active app deployment is `RUNNING`
+  at `8d4d827dd71367a8d40a901e6dbf81c151409261`, matching local and GitHub
+  `local/customizations`. The deployment finished at
+  `2026-09-16T15:00:15.014Z`; one `READY` pod is observed. Desired replicas were
+  not confirmed because the API field returned null.
+- Public health returned HTTP 200 with `status=ok` and DB overlay. The public
+  system/version build fields are null, so deployment SHA evidence comes from
+  Zeabur metadata. No production DB/Alembic query was run; schema revision
+  remains unverified.
+- The September 7 app-deployment pending note is historical and does not
+  describe the current app deployment. No redeploy or migration was repeated.
+- Files changed are documentation only; no application code, cloud settings,
+  credentials, user data, commit, or push was changed by this work.
+- Verification: design review, UTF-8/local-link/numbering/whitespace checks,
+  and `git diff --check` passed. Product acceptance tests remain future work.
+
+### 2026-09-19 - Start durable same-space chat P1-1
+
+- User approved starting implementation from the durable-chat reference.
+- Current source-only slice: durable command receipt contract and repository
+  parity; no production endpoint is enabled until a foreground worker can
+  execute accepted commands.
+- Migration execution, cloud settings, deployment, commit, and push remain
+  outside this slice.
+- P1-1 source checkpoint completed: command contract, owner/client idempotency,
+  canonical payload hash, active conversation admission, in-memory and
+  SQLAlchemy adapters, ORM model, additive migration `t8d6f1a10058`, and
+  ServiceContainer wiring. The production submission endpoint remains closed.
+- Verification: focused P1-1 suite passed 11 tests; SQLite adapter smoke,
+  compileall, `.venv` Alembic heads/history, and `git diff --check` passed.
+- Follow-up: implement and test the short acceptance/status API, then add worker
+  claim/lease before switching the frontend or running a production migration.
+- P1-2 completed: added the dark-by-default `POST /api/v1/chat/turns` and
+  owner-scoped durable status lookup. The route fixes the conversation target,
+  requires `client_message_id`, and returns explicit duplicate, busy, and hash
+  conflict outcomes. `YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED` stays off until
+  the foreground worker and migration are deployed; the existing UI is unchanged.
+- Verification: P1-1/P1-2 tests passed (13), existing stage/stream focused tests
+  passed (39), compileall and `git diff --check` passed. The stale stream-relay
+  expectation was updated to assert the existing terminal error frame and lease
+  release behavior; the combined focused run passed 59 tests.
+- P2 preparation: added server-only `durable_turn_id` propagation so a future
+  worker can bind the command ID to the non-stream ChatService turn record and
+  billing interaction without changing legacy web payloads. Compatibility,
+  billing, stage, and acceptance focused tests passed 54; serialization hides
+  the server-only field.
+
+### 2026-09-19 - Start durable chat P2-1 lifecycle
+
+- P2-1 scope: add phase/attempt/lease/recovery fields and fenced command
+  transitions. Expired processing work is recorded as `recovery_required` and
+  is never blindly re-run; no provider or billing effect is retried by this
+  slice.
+- The acceptance flag remains disabled. No worker process, migration execution,
+  deployment, or production data operation is performed here.
+
 ### 2026-09-08 - Preserve diagnostic token counters
 
 - Status: pushed as `e0049ec` on `local/customizations`; fixes redaction that
@@ -978,3 +1092,126 @@ database rows.
   (one undefined `operator_primary_language`, three unrelated planner
   assertions).
 - Deployment: not performed.
+
+# 2026-09-19 - Same-space durable chat lifecycle and run-once executor
+
+- Status: source implementation extended; no migration execution, deployment,
+  production DB operation, commit, or push performed.
+- Added SQL/in-memory durable command lifecycle transitions with atomic claim,
+  strict lease deadline fencing, heartbeat, retry upper bound, terminal
+  completion, and lease-expiry `recovery_required` handling. Unknown provider
+  or billing outcomes are never auto-replayed.
+- Added `DurableChatCommandExecutor.run_once` plus a ChatService adapter that
+  reconstructs the accepted payload, injects server-owned `durable_turn_id`,
+  publishes preparing/model/commit phases, maps conversation busy to bounded
+  retry, and maps unknown exceptions to recovery.
+- Status API now exposes phase, attempt count, max attempts, and next attempt
+  time for durable receipts. `YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED` remains
+  disabled; no frontend or process-role worker wiring is active.
+- Verification: durable lifecycle, SQL smoke, executor, adapter, and API
+  focused suite — 24 passed; compileall and `git diff --check` passed. The
+  existing P1/P2 compatibility suites remain green from the preceding slice.
+- Next: wire the executor into a dedicated worker process role, then add
+  generated/effect checkpoints and isolated migration/worker rehearsal before
+  enabling any production traffic.
+
+# 2026-09-19 - Same-space durable worker loop and generated checkpoint
+
+- Status: source implementation extended; no migration execution, deployment,
+  production DB operation, commit, or push performed.
+- Added generated snapshot JSON/hash and fenced `generated -> committed ->
+  completed` transitions to the durable command repositories and ORM/migration.
+  The ChatService adapter serializes the returned `ChatReplyResponse` as a
+  canonical snapshot; provider/billing unknown failures still enter recovery.
+- Added `DurableChatWorker` start/stop/run-once loop and wired it into the
+  existing `worker` process role behind `YURALUME_DURABLE_CHAT_WORKER_ENABLED`
+  (default false). Lease and poll seconds are explicit env overrides, and the
+  role-aware `/health` probe reports a started-then-dead durable chat worker as
+  unhealthy.
+- Verification: durable lifecycle, SQL checkpoint, executor, adapter, worker
+  loop, migration, API, and health focused suite — 43 passed; compileall and
+  `git diff --check` passed. Existing chat/service compatibility remains to be
+  rerun after this wiring slice.
+- Verification detail: after stamping an isolated SQLite database at the
+  existing parent `s7h3k9m10057`, the new migration upgraded to
+  `t8d6f1a10058`, downgraded, and upgraded again successfully. A full-chain
+  SQLite rehearsal remains unsupported because the pre-existing
+  `h9b6e3a20005` migration executes PostgreSQL-only `CREATE EXTENSION vector`.
+- Compatibility verification: app role/process, health, ChatService, and busy
+  route regression suite — 107 passed; compileall and `git diff --check` passed.
+- Next: define effect-specific idempotency/finalizer boundaries. Acceptance
+  flag and durable worker opt-in remain closed in the deployed environment.
+
+# 2026-09-19 - Same-space P2-2 durable execution seam and effect ledger
+
+- Status: source implementation extended; no commit, push, production migration,
+  deployment, or production DB operation performed.
+- Added `DurableChatTurnAdapter` for the foreground worker. User and assistant
+  message appends use stable `{turn_id}:user` / `{turn_id}:assistant` keys and
+  record exact row IDs and positions on the command receipt.
+- ChatService durable execution now passes `external_turn`; generated snapshots
+  are checkpointed immediately after model/tool generation and before assistant
+  append. A lease takeover in `generated` or `committed` state finalizes from
+  durable data without another ChatService/model call.
+- Added `chat_turn_effects` SQL/in-memory ledger and `u9e7b2a11059` migration.
+  Post-turn intent is recorded before enqueue/inline processing; the worker
+  marks it completed. A crash after assistant commit can rebuild the post-turn
+  intent from command payload plus assistant anchor.
+- Status route exposes exact message anchors and `post_turn_effect_state` when
+  available. Acceptance and worker flags remain closed.
+- Verification: durable/effect/SQL suites 33 passed; executor including
+  generated and committed recovery 7 passed; external-chat and scene seam
+  regression 40 passed; ChatService/health/acceptance regression 56 passed;
+  post-turn/background queue regression 44 passed; compileall and diff checks
+  passed. Isolated SQLite stamp at `s7h3k9m10057` upgraded through
+  `t8d6f1a10058` and `u9e7b2a11059`, downgraded to `t8d6f1a10058`, and
+  re-upgraded successfully.
+- Next: add PostgreSQL isolation/concurrency rehearsal and frontend IndexedDB
+  outbox/active-turn recovery. Keep all production flags closed until those
+  rehearsals and manual operational checks are complete.
+
+# 2026-09-19 - Same-space durable client outbox and cross-device lookup
+
+- Status: source implementation extended; no commit, push, production migration,
+  deployment, or production DB operation performed.
+- Added frontend IndexedDB outbox with per-owner isolation, stable
+  `client_message_id`, `saved_local` / `submitting` / `acceptance_unknown` /
+  `accepted` states, memory fallback for SSR/private browsing, and a short
+  request `DurableChatClient` that can resubmit or refresh the original receipt
+  without changing the client ID.
+- Added `GET /api/v1/conversations/{conversation_id}/active-turn`, owner-scoped
+  active-turn lookup, status fields for phases/leases/message anchors/effect
+  state, and a feature-flagged ChatPanel durable path. The existing SSE path
+  remains the default because `VITE_DURABLE_CHAT_ENABLED` is unset.
+- The feature-flagged path saves locally before submission, treats a lost ACK as
+  `acceptance_unknown`, polls durable status, then reloads the authoritative
+  conversation. Reopening a conversation probes the active turn so another
+  device can display processing state without sharing browser memory.
+- Verification: frontend durable outbox/client tests 4 passed; existing chat
+  API/turn-isolation tests in the same run 74 passed; `vue-tsc -b` passed;
+  backend durable/acceptance/effect tests 15 passed; ChatService/external-chat/
+  post-turn regressions 72 passed; compileall and diff checks passed.
+- Frontend production build compiled the application bundle but the PWA service
+  worker step is blocked in this Windows sandbox by Node `22.9.0` being below
+  Vite's `22.12+` requirement and `EPERM lstat C:\Users\high_`; rerun with the
+  supported Node version and normal filesystem permissions before deployment.
+- Next: PostgreSQL isolation/concurrency rehearsal and a review of the durable
+  UI copy/UX under the flag. Keep acceptance and worker flags closed.
+- PostgreSQL integration rehearsal was attempted with the repository's
+  testcontainers suites; the relevant tests were skipped because Docker is not
+  available in this environment. No production or remote database was touched.
+
+# 2026-09-20 - Same-space durable Zeabur backup and process-role rehearsal
+
+- Created and verified Zeabur PostgreSQL backup job `6aaeac60f5be144f77d6724f`;
+  native archive restored into disposable PostgreSQL 18/pgvector, then a
+  derived custom-format dump passed `pg_restore --list` and a second restore.
+- Live Prod read-only schema gate returned Alembic `s7h3k9m10057`, pgvector
+  `0.8.6`, and no durable chat tables. No Prod migration or flag change ran.
+- Isolated `api`, `coordinator`, `worker`, and `connector` roles passed health,
+  headless-route, pause/drain/distributed ownership, resource, restart, and
+  durable acceptance/duplicate/status/worker recovery checks. Synthetic test
+  data only; no real provider or connector call was used.
+- Evidence: `deploy/zeabur/SAME_SPACE_DURABLE_CHAT_REHEARSAL_20260920.md`.
+- Next: rebuild the rehearsal image from a committed SHA before any new Prod
+  migration or role-cutover confirmation.

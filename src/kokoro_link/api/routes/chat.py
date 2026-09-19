@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import uuid4
@@ -30,6 +31,15 @@ from kokoro_link.application.dto.chat import (
     ConversationResponse,
     SendChatMessageRequest,
 )
+from kokoro_link.contracts.durable_chat_commands import (
+    AcceptedCommand,
+    ChatTurnCommandSubmission,
+    ConversationBusy,
+    IdempotencyConflict,
+    canonical_payload_hash,
+    canonical_payload_json,
+)
+from kokoro_link.domain.entities.conversation import Conversation
 from kokoro_link.application.services.chat_service import (
     ChatCharacterContractEndedError,
     ChatCharacterRestoringError,
@@ -79,13 +89,82 @@ class ChatTurnStatusResponse(BaseModel):
     turn_id: str
     conversation_id: str | None
     status: str
+    phase: str | None = None
+    attempt_count: int | None = None
+    max_attempts: int | None = None
+    next_attempt_at: str | None = None
+    lease_until: str | None = None
+    lease_generation: int | None = None
+    generated_snapshot_hash: str | None = None
+    duplicate: bool = False
+    client_message_id: str | None = None
+    result_message_id: int | None = None
+    accepted_at: str | None = None
+    conversation_revision: int | None = None
+    user_message_id: int | None = None
+    user_message_position: int | None = None
+    assistant_message_id: int | None = None
+    assistant_message_position: int | None = None
+    failure_message: str | None = None
     failure_code: str | None = None
     started_at: str | None = None
     updated_at: str | None = None
     last_heartbeat_at: str | None = None
+    post_turn_effect_state: str | None = None
 
 
 router = APIRouter(tags=["chat"])
+
+
+def _durable_chat_acceptance_enabled() -> bool:
+    """The new route stays dark until its worker and schema are deployed."""
+
+    return os.getenv("YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _durable_status_response(
+    command,
+    *,
+    duplicate: bool = False,
+    post_turn_effect_state: str | None = None,
+) -> ChatTurnStatusResponse:
+    return ChatTurnStatusResponse(
+        turn_id=command.turn_id,
+        conversation_id=command.conversation_id,
+        status=command.state.value,
+        phase=command.phase.value,
+        attempt_count=command.attempt_count,
+        max_attempts=command.max_attempts,
+        next_attempt_at=(
+            command.next_attempt_at.isoformat()
+            if command.next_attempt_at else None
+        ),
+        lease_until=(
+            command.lease_until.isoformat()
+            if command.lease_until else None
+        ),
+        lease_generation=command.lease_generation,
+        generated_snapshot_hash=command.generated_snapshot_hash,
+        duplicate=duplicate,
+        client_message_id=command.client_message_id,
+        result_message_id=command.result_message_id,
+        accepted_at=command.accepted_at.isoformat(),
+        conversation_revision=command.conversation_revision,
+        user_message_id=command.user_message_id,
+        user_message_position=command.user_message_position,
+        assistant_message_id=command.assistant_message_id,
+        assistant_message_position=command.assistant_message_position,
+        failure_code=command.failure_code,
+        failure_message=command.failure_message,
+        updated_at=command.updated_at.isoformat(),
+        last_heartbeat_at=(
+            command.last_heartbeat_at.isoformat()
+            if command.last_heartbeat_at else None
+        ),
+        post_turn_effect_state=post_turn_effect_state,
+    )
 
 
 @router.get("/chat/turns/{turn_id}", response_model=ChatTurnStatusResponse)
@@ -94,6 +173,23 @@ async def get_chat_turn_status(
     container: ServiceContainer = Depends(get_container),
     current_user_id: str = Depends(get_current_user_id),
 ) -> ChatTurnStatusResponse:
+    if _durable_chat_acceptance_enabled():
+        durable_repo = getattr(container, "durable_chat_command_repository", None)
+        if durable_repo is not None:
+            command = await durable_repo.get(turn_id, owner_id=current_user_id)
+            if command is not None:
+                effects = getattr(container, "durable_chat_effect_ledger", None)
+                effect_state = None
+                if effects is not None:
+                    effect = await effects.get(
+                        turn_id=command.turn_id,
+                        effect_kind="post_turn",
+                    )
+                    effect_state = effect.state.value if effect is not None else None
+                return _durable_status_response(
+                    command,
+                    post_turn_effect_state=effect_state,
+                )
     repo = container.turn_record_repository
     if repo is None:
         raise HTTPException(
@@ -120,6 +216,206 @@ async def get_chat_turn_status(
             if record.last_heartbeat_at else None
         ),
     )
+
+
+@router.get(
+    "/conversations/{conversation_id}/active-turn",
+    response_model=ChatTurnStatusResponse | None,
+)
+async def get_active_durable_chat_turn(
+    conversation_id: str,
+    container: ServiceContainer = Depends(get_container),
+    current_user_id: str = Depends(get_current_user_id),
+) -> ChatTurnStatusResponse | None:
+    """Find a durable foreground turn from any authorized device."""
+
+    if not _durable_chat_acceptance_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "durable_chat_acceptance_disabled",
+                "message": "Durable chat acceptance is not enabled",
+            },
+        )
+    durable_repo = getattr(container, "durable_chat_command_repository", None)
+    if durable_repo is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Durable chat command repository is not wired",
+        )
+    command = await durable_repo.active_for_conversation(
+        conversation_id,
+        owner_id=current_user_id,
+    )
+    if command is None:
+        return None
+    return _durable_status_response(command)
+
+
+@router.post("/chat/turns", response_model=ChatTurnStatusResponse, status_code=202)
+async def submit_durable_chat_turn(
+    payload: SendChatMessageRequest,
+    container: ServiceContainer = Depends(get_container),
+    current_user_id: str = Depends(get_current_user_id),
+    _drain_gate: None = Depends(ensure_not_draining),
+) -> ChatTurnStatusResponse:
+    """Persist a foreground command and return its durable acceptance receipt.
+
+    This route intentionally does not execute the model.  It remains disabled
+    until the dedicated foreground worker and the additive migration are both
+    deployed; enabling it earlier would create honest but permanently queued
+    work, which is not a useful user experience.
+    """
+
+    if not _durable_chat_acceptance_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "durable_chat_acceptance_disabled",
+                "message": "Durable chat acceptance is not enabled",
+            },
+        )
+    if not payload.client_message_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "client_message_id_required",
+                "message": "client_message_id is required for durable chat",
+            },
+        )
+    durable_repo = getattr(container, "durable_chat_command_repository", None)
+    if durable_repo is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Durable chat command repository is not wired",
+        )
+    existing = await durable_repo.get_by_client_message_id(
+        payload.client_message_id,
+        owner_id=current_user_id,
+    )
+    if existing is not None:
+        if (
+            existing.character_id != payload.character_id
+            or (
+                payload.conversation_id is not None
+                and payload.conversation_id != existing.conversation_id
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "idempotency_conflict",
+                    "message": "client_message_id was already used for different content",
+                    "turn_id": existing.turn_id,
+                },
+            )
+        existing_payload_data = payload.model_dump(
+            mode="json",
+            exclude={"client_message_id"},
+        )
+        existing_payload_data["conversation_id"] = existing.conversation_id
+        if canonical_payload_hash(existing_payload_data) != existing.payload_hash:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "idempotency_conflict",
+                    "message": "client_message_id was already used for different content",
+                    "turn_id": existing.turn_id,
+                },
+            )
+        return _durable_status_response(existing, duplicate=True)
+    character = await _safe_get_character_entity(
+        container, payload.character_id, current_user_id,
+    )
+    if character is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Character not found",
+        )
+    conversation = await _resolve_durable_conversation(
+        container=container,
+        payload=payload,
+        current_user_id=current_user_id,
+    )
+    payload_data = payload.model_dump(
+        mode="json",
+        exclude={"client_message_id"},
+    )
+    payload_data["conversation_id"] = conversation.id
+    payload_json = canonical_payload_json(payload_data)
+    result = await durable_repo.submit(
+        ChatTurnCommandSubmission(
+            owner_id=current_user_id,
+            client_message_id=payload.client_message_id,
+            character_id=payload.character_id,
+            conversation_id=conversation.id,
+            payload_hash=canonical_payload_hash(payload_data),
+            payload_json=payload_json,
+            conversation_revision=conversation.version,
+        ),
+    )
+    if isinstance(result, IdempotencyConflict):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "idempotency_conflict",
+                "message": "client_message_id was already used for different content",
+                "turn_id": result.command.turn_id,
+            },
+        )
+    if isinstance(result, ConversationBusy):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "conversation_busy",
+                "message": "conversation already has an active durable turn",
+                "turn_id": result.command.turn_id,
+                "conversation_id": result.command.conversation_id,
+            },
+        )
+    assert isinstance(result, AcceptedCommand)
+    return _durable_status_response(result.command, duplicate=result.duplicate)
+
+
+async def _resolve_durable_conversation(
+    *,
+    container: ServiceContainer,
+    payload: SendChatMessageRequest,
+    current_user_id: str,
+) -> Conversation:
+    """Fix the conversation target before a command can be accepted."""
+
+    repository = container.conversation_repository
+    if repository is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Conversation repository is not wired",
+        )
+    if payload.conversation_id:
+        conversation = await repository.get(payload.conversation_id)
+        if (
+            conversation is None
+            or conversation.character_id != payload.character_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="conversation not found",
+            )
+        await _ensure_conversation_owner(
+            container=container,
+            conversation_id=conversation.id,
+            current_user_id=current_user_id,
+        )
+        return conversation
+    latest = await repository.latest_for_character(
+        payload.character_id,
+        source="web",
+    )
+    if latest is not None:
+        return latest
+    conversation = Conversation.start(character_id=payload.character_id)
+    await repository.save(conversation)
+    return conversation
 
 
 @router.get(
@@ -606,7 +902,7 @@ async def send_chat_message_stream(
             # it. The window is small (one frame) but it is a disconnect at
             # exactly the moment disconnects cluster: the user hitting send and
             # immediately navigating away.
-            yield f"data: {json.dumps({'conversation_id': finalizer.conversation_id, 'turn_id': finalizer.turn_record_id})}\n\n"
+            yield f"data: {json.dumps({'conversation_id': finalizer.conversation_id, 'turn_id': getattr(finalizer, 'turn_record_id', None)})}\n\n"
 
             # Ordered by frequency: every reply is mostly tokens. A comment
             # heartbeat keeps the HTTP/SSE connection alive when the upstream

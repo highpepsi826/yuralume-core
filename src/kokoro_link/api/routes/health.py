@@ -12,7 +12,8 @@ So the probe is loop-liveness-aware: a role that STARTS a core loop it owns
 the world-event scheduler under ``start_world_event_scheduler``;
 the durable coordinator/worker under ``run_background_coordinator`` /
 ``run_background_worker`` — ``all`` / ``background`` / the dedicated
-``coordinator`` / ``worker`` roles) 503s when that loop was started and its task
+``coordinator`` / ``worker`` roles), including the opt-in durable chat worker,
+503s when that loop was started and its task
 has since exited/crashed. Every non-started shape stays 200 to avoid false
 negatives before boot: the ``api`` / ``connector`` roles (own no such loop),
 bare containers (loops ``None``), and lifespan-not-run TestClients (the task was
@@ -50,6 +51,7 @@ def health(request: Request) -> JSONResponse:
             owned.append(getattr(container, "background_shadow_coordinator", None))
         if matrix.run_background_worker:
             owned.append(getattr(container, "background_shadow_worker", None))
+            owned.append(getattr(container, "durable_chat_worker", None))
         for scheduler in owned:
             if _scheduler_exited(scheduler):
                 return JSONResponse(

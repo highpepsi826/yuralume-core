@@ -1,5 +1,21 @@
 # Same-Space Reliability Improvement Plan
 
+## Current Reference and Deployment Note (2026-09-19)
+
+The next-stage durable-chat design is now recorded in
+[SAME_SPACE_DURABLE_CHAT_IMPLEMENTATION_REFERENCE.md](SAME_SPACE_DURABLE_CHAT_IMPLEMENTATION_REFERENCE.md).
+Use that document for new implementation scope, acceptance tests, and deployment
+planning. The entries below retain the earlier investigation and implementation
+history; they are not a current deployment checklist.
+
+Read-only Zeabur metadata on 2026-09-19 confirms the active app deployment is
+`RUNNING` at `8d4d827dd71367a8d40a901e6dbf81c151409261`, with one observed
+`READY` pod. Public health is HTTP 200, `status=ok`, and
+`site_settings_overlay=db`. Earlier app-deployment blockers below are historical.
+The production Alembic revision was not queried; this note neither claims a
+verified schema head nor calls for repeating a migration. No deployment or
+runtime change was made during this verification.
+
 ## Purpose
 
 Investigate and repair the hosted same-space chat path when a long-running

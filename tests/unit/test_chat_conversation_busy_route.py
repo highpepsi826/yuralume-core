@@ -151,9 +151,11 @@ def test_stream_that_never_finishes_releases_the_turn_lease() -> None:
     finalizer = _RecordingFinalizer()
     client = _client(_FailingStreamChatService(finalizer))
 
-    with pytest.raises(RuntimeError, match="upstream exploded mid-stream"):
-        client.post("/api/v1/chat/messages/stream", json=_payload())
+    response = client.post("/api/v1/chat/messages/stream", json=_payload())
 
+    assert response.status_code == 200
+    assert "stream_failed" in response.text
+    assert "[DONE]" in response.text
     assert finalizer.finished == 0
     # Without this the conversation would stay claimed until the lease TTL.
     assert finalizer.releases == 1

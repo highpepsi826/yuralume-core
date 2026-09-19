@@ -10,6 +10,7 @@ the character's medium-term goals.
 """
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -2126,7 +2127,8 @@ class ChatService:
                     quoted_price_cr=payload.quoted_price_cr,
                     interaction_id=(
                         external_turn.stable_turn_id()
-                        if external_turn is not None else None
+                        if external_turn is not None
+                        else payload.durable_turn_id
                     ),
                     character_origin=prelude.character.origin_official_card_id,
                 ):
@@ -2502,7 +2504,7 @@ class ChatService:
         # real intent (e.g. ``我想看你在咖啡廳的樣子``) that's worth
         # capturing.
         if external_turn is None:
-            turn_record_id = str(uuid4())
+            turn_record_id = payload.durable_turn_id or str(uuid4())
             assistant_index = len(updated_conversation.messages) - 1
         else:
             # ``turn_record_id`` was resolved from the stable receipt id above.
@@ -2510,6 +2512,33 @@ class ChatService:
             # the receipt rather than the in-memory ``len(...) - 1`` guess.
             _anchors = external_turn.post_turn_anchors()
             assistant_index = _anchors.assistant_position
+        effect_payload_json = json.dumps(
+            {
+                "turn_record_id": turn_record_id,
+                "conversation_id": updated_conversation.id,
+                "character_id": character.id,
+                "assistant_index": assistant_index,
+                "persona_enabled": payload.operator_persona_enabled,
+                "content_mode": content_mode.value,
+                "has_user_message": user_message is not None,
+                "private_memory_ids": [
+                    item.id for item in select_private_candidates(memories)
+                ],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        record_effect_intent = (
+            getattr(external_turn, "record_effect_intent", None)
+            if external_turn is not None else None
+        )
+        if callable(record_effect_intent):
+            await record_effect_intent(
+                effect_kind="post_turn",
+                payload_json=effect_payload_json,
+                completed=False,
+            )
         post_turn_refs = await self._run_post_turn(
             character=character,
             conversation_id=updated_conversation.id,
@@ -2534,7 +2563,27 @@ class ChatService:
             private_memory_ids=tuple(
                 item.id for item in select_private_candidates(memories)
             ),
+            force_inline=callable(record_effect_intent),
         )
+        if callable(record_effect_intent):
+            recovery_required = bool(
+                post_turn_refs.get("post_turn_recovery_required")
+            )
+            await record_effect_intent(
+                effect_kind="post_turn",
+                payload_json=effect_payload_json,
+                completed=(
+                    not bool(post_turn_refs.get("post_turn_enqueued"))
+                    and not recovery_required
+                ),
+                enqueued=bool(post_turn_refs.get("post_turn_enqueued")),
+                recovery_required=recovery_required,
+                error=(
+                    "Post-turn enqueue outcome is unknown; automatic replay "
+                    "is disabled"
+                    if recovery_required else None
+                ),
+            )
         # HV4 — the reply is already with the player, so this can only
         # audit and owe a repair, never withhold. Scheduled after the
         # post-turn so the two background tails start in the order their
@@ -6987,6 +7036,7 @@ class ChatService:
         content_mode: str = CONTENT_MODE_NORMAL,
         has_user_message: bool = True,
         private_memory_ids: tuple[str, ...] = (),
+        force_inline: bool = False,
     ) -> dict:
         # ``private_memory_ids`` (KB8) are the memories this turn's prompt
         # carried that the player has never been told. They ride the job
@@ -7005,7 +7055,8 @@ class ChatService:
         # through to the in-process path below so the work is NEVER dropped.
         if self._post_turn_enqueuer is not None:
             outcome = await self._maybe_enqueue_post_turn(
-                character=character,
+                character_id=character.id,
+                operator_id=getattr(character, "user_id", None) or None,
                 conversation_id=conversation_id,
                 turn_record_id=turn_record_id,
                 assistant_index=assistant_index,
@@ -7019,6 +7070,11 @@ class ChatService:
             # drops this best-effort post-turn rather than risk a double run of its
             # non-idempotent emotion / promise / schedule writes.
             if not outcome.should_fallback:
+                if outcome is PostTurnEnqueueOutcome.AMBIGUOUS:
+                    return {
+                        "post_turn_recovery_required": True,
+                        "post_turn_enqueue_outcome": outcome.value,
+                    }
                 return {
                     "post_turn_enqueued": True,
                     "post_turn_enqueue_outcome": outcome.value,
@@ -7037,7 +7093,7 @@ class ChatService:
             content_mode=content_mode,
             private_memory_ids=private_memory_ids,
         )
-        if self._extract_in_background:
+        if self._extract_in_background and not force_inline:
             self._schedule_background(coro)
             return {"post_turn_background": True}
         else:
@@ -7046,7 +7102,8 @@ class ChatService:
     async def _maybe_enqueue_post_turn(
         self,
         *,
-        character: Character,
+        character_id: str,
+        operator_id: str | None,
         conversation_id: str,
         turn_record_id: str,
         assistant_index: int,
@@ -7063,12 +7120,11 @@ class ChatService:
         enqueuer = self._post_turn_enqueuer
         if enqueuer is None:
             return PostTurnEnqueueOutcome.NO_LEADER
-        operator_id = getattr(character, "user_id", None) or None
         try:
             return await enqueuer.enqueue(
                 turn_record_id=turn_record_id,
                 conversation_id=conversation_id,
-                character_id=character.id,
+                character_id=character_id,
                 assistant_index=assistant_index,
                 persona_enabled=persona_enabled,
                 content_mode=content_mode,
@@ -7080,9 +7136,41 @@ class ChatService:
         except Exception:
             _LOGGER.exception(
                 "post-turn enqueue raised turn=%s character=%s",
-                turn_record_id, character.id,
+                turn_record_id, character_id,
             )
             return PostTurnEnqueueOutcome.NO_LEADER
+
+    async def enqueue_post_turn_for_record(
+        self,
+        *,
+        turn_record_id: str,
+        conversation_id: str,
+        character_id: str,
+        assistant_index: int,
+        persona_enabled: bool = True,
+        content_mode: str = CONTENT_MODE_NORMAL,
+        has_user_message: bool = True,
+        private_memory_ids: tuple[str, ...] = (),
+        operator_id: str | None = None,
+    ) -> PostTurnEnqueueOutcome:
+        """Durably hand off a recovered effect without direct replay.
+
+        The stable background-job key can reconcile a lost enqueue response.
+        A committed-turn recovery cannot safely use the normal in-process
+        fallback because an older process may already have started the same
+        non-idempotent post-turn writes.
+        """
+        return await self._maybe_enqueue_post_turn(
+            character_id=character_id,
+            operator_id=operator_id,
+            conversation_id=conversation_id,
+            turn_record_id=turn_record_id,
+            assistant_index=assistant_index,
+            persona_enabled=persona_enabled,
+            content_mode=content_mode,
+            has_user_message=has_user_message,
+            private_memory_ids=private_memory_ids,
+        )
 
     async def run_post_turn_for_record(
         self,

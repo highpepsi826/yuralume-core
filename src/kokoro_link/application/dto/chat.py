@@ -90,6 +90,18 @@ class PresenceFramePayload(BaseModel):
 
 
 class SendChatMessageRequest(BaseModel):
+    client_message_id: str | None = Field(default=None, min_length=1, max_length=128)
+    """Stable client-generated id used by the durable acceptance route.
+
+    Legacy ``/chat/messages`` callers may omit it.  The durable route requires
+    it so a lost HTTP response can be retried without creating a second turn.
+    """
+    durable_turn_id: str | None = Field(default=None, exclude=True)
+    """Server-only stable turn id used by the foreground worker.
+
+    It never enters the client payload hash or the public JSON contract. Legacy
+    web callers leave it unset and keep the existing UUID allocation path.
+    """
     character_id: str
     conversation_id: str | None = None
     provider_id: str | None = None

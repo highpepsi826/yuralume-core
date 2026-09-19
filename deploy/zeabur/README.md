@@ -122,6 +122,113 @@ separate release operation:
 
 Never run a migration simultaneously from local and cloud environments.
 
+### Zeabur native backup format
+
+Zeabur's PostgreSQL `createBackup` result is a platform archive, not a direct
+`pg_dump -Fc` file. The presigned object name may end in `.sql.gz`, but the
+download can be a ZIP containing `data/_manifest.json` and `data/data.sql`.
+Treat the backup as unverified until all of these gates pass:
+
+1. Poll the Zeabur backup job to `SUCCESS` and record its ID, reported size,
+   timestamp, and SHA-256 of the downloaded archive.
+2. Inspect the archive and manifest without placing plaintext SQL on the host
+   filesystem. Restore `data/data.sql` into a new PostgreSQL 18/pgvector
+   disposable cluster.
+3. Run the schema/revision queries against that restored database.
+4. Create a derived PostgreSQL custom-format dump from the restored database,
+   run `pg_restore --list`, and restore that derived dump into a second
+   disposable database. Preserve both hashes and the restore logs.
+
+The native archive itself must not be passed directly to `pg_restore --list`.
+A successful Zeabur backup job without a successful disposable restore is a
+no-go for migration.
+
+## Production Schema Revision Verification
+
+The public `/health` endpoint does not prove the Alembic revision. Verify the
+revision from a shell that uses the same `DATABASE_URL` as the app, or from a
+temporary database client attached to the private PostgreSQL hostname. This is
+a read-only check and must happen after the backup has been created, but before
+any migration command:
+
+```sql
+SELECT version_num FROM alembic_version ORDER BY version_num;
+
+SELECT tablename
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename IN ('chat_turn_commands', 'chat_turn_effects')
+ORDER BY tablename;
+
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE schemaname = 'public'
+  AND tablename IN ('chat_turn_commands', 'chat_turn_effects')
+ORDER BY tablename, indexname;
+```
+
+The source head expected by this implementation is `u9e7b2a11059`, with
+`t8d6f1a10058` immediately before it. The local source can show the expected
+chain without touching a database:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic heads
+.\.venv\Scripts\python.exe -m alembic history | Select-Object -First 3
+```
+
+Run the same read-only queries against the restored disposable backup. The
+following cases stop the rollout and require review: more than one unexpected
+head, a production revision that is ahead of the image, a missing or divergent
+migration branch, a backup restore whose revision differs from the source
+snapshot, or an existing `chat_turn_commands` / `chat_turn_effects` table with
+an incompatible definition. Do not use `alembic downgrade` to make Prod match
+the source. Resolve the revision difference and prepare a separate controlled
+migration plan first.
+
+`alembic current` is an equivalent application-level check when run with the
+production image and private `DATABASE_URL`; it must be executed in a one-off
+read-only command context, never by starting a second scheduler or worker.
+
+## Durable Same-Space Chat Rollout
+
+The durable same-space chat implementation is currently source-only. The
+production app, database schema, and feature flags must remain unchanged until
+the following evidence exists in an isolated or maintenance window:
+
+1. A fresh Zeabur native backup is created and restored into a disposable
+   PostgreSQL 18/pgvector instance. Verify the archive manifest and real SQL
+   restore, then create a derived custom-format dump and verify it with
+   `pg_restore --list` plus a second restore. Do not pass the native Zeabur
+   archive directly to `pg_restore`.
+2. Alembic revisions `t8d6f1a10058` and `u9e7b2a11059` are applied once to the
+   target database. Confirm the two tables, the owner/client idempotency
+   constraint, the active-conversation partial index, and the effect indexes.
+3. A compatible app image is deployed with the new schema while both
+   `YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED` and
+   `YURALUME_DURABLE_CHAT_WORKER_ENABLED` remain `false`. The legacy SSE route
+   must still pass its health and chat regression checks.
+4. A separate `worker` service is prepared from the same image with
+   `YURALUME_PROCESS_ROLE=worker`, `YURALUME_BACKGROUND_BACKEND=postgres`, and
+   `YURALUME_DURABLE_CHAT_WORKER_ENABLED=true`. It must have no public API
+   domain, must report private health, and must be the only foreground worker
+   owner during the rehearsal. Do not enable the flag on the existing `all`
+   replica at the same time.
+5. Run authorized test turns against a test character: submit, lose the ACK,
+   restart the API, stop/restart the worker at each phase, reconnect from a
+   second device, and verify one command, one user append, one assistant
+   append, and one post-turn effect intent. Leave
+   `VITE_DURABLE_CHAT_ENABLED=false` until these checks pass.
+6. Enable the backend acceptance flag first, then the frontend build flag for
+   a small authorized cohort. Keep the legacy route available for rollback,
+   but never fall back to it after a durable submission has an unknown ACK.
+
+Rollback closes the durable acceptance flag and frontend build flag, keeps the
+worker available until all accepted commands are terminal or explicitly fenced
+for reconciliation, and leaves the additive schema in place. It does not run a
+destructive Alembic downgrade. Any production backup, migration, Zeabur
+service creation, secret entry, or flag change requires a fresh operator
+decision immediately before that operation.
+
 ## Required Confirmation Points
 
 - Creating the four services and volumes can create Zeabur charges.

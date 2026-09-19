@@ -2588,6 +2588,158 @@ class TurnRecordRow(Base):
     )
 
 
+class ChatTurnCommandRow(Base):
+    """Durable acceptance receipt for a foreground web/native chat turn.
+
+    This is intentionally separate from ``turn_records``: the latter is an
+    audit projection of an LLM call, while this row exists before any worker or
+    provider call.  The partial conversation index keeps the P1 admission rule
+    atomic without making terminal history rows block future turns.
+    """
+
+    __tablename__ = "chat_turn_commands"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id",
+            "client_message_id",
+            name="uq_chat_turn_commands_owner_client_message",
+        ),
+        Index(
+            "uq_chat_turn_commands_active_conversation",
+            "owner_id",
+            "conversation_id",
+            unique=True,
+            postgresql_where=text(
+                "state IN ('queued', 'claimed', 'processing', "
+                "'generated', 'committed', 'retry_wait', 'recovery_required')",
+            ),
+            sqlite_where=text(
+                "state IN ('queued', 'claimed', 'processing', "
+                "'generated', 'committed', 'retry_wait', 'recovery_required')",
+            ),
+        ),
+        Index(
+            "ix_chat_turn_commands_owner_state_updated",
+            "owner_id",
+            "state",
+            "updated_at",
+        ),
+    )
+
+    turn_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    client_message_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    character_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    conversation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1",
+    )
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="queued", server_default="queued",
+    )
+    phase: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="accepted", server_default="accepted",
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default="3",
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    conversation_revision: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+    user_message_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+    user_message_position: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+    assistant_message_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+    assistant_message_position: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+    result_message_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+    generated_snapshot_json: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+    )
+    generated_snapshot_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True,
+    )
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    lease_generation: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+
+class ChatTurnEffectRow(Base):
+    """Idempotent side-effect intent attached to a durable chat command."""
+
+    __tablename__ = "chat_turn_effects"
+    __table_args__ = (
+        UniqueConstraint(
+            "turn_id", "effect_kind",
+            name="uq_chat_turn_effects_turn_kind",
+        ),
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_chat_turn_effects_idempotency_key",
+        ),
+        Index(
+            "ix_chat_turn_effects_turn_state",
+            "turn_id", "state", "updated_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    turn_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    effect_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", server_default="pending",
+    )
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+
 class AccountRuntimeEventRow(Base):
     """Account-level runtime policy ledger.
 

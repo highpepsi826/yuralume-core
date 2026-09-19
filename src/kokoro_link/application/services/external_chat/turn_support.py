@@ -436,3 +436,20 @@ class TurnExecutionAdapter(ExternalChatTurnExecutionPort):
     def heartbeat_interval_seconds(self) -> float:
         # A third of the lease TTL: three chances to refresh before a lapse.
         return max(1.0, self._lease_seconds / 3.0)
+
+    async def record_effect_intent(
+        self, *, effect_kind: str, payload_json: str, completed: bool,
+        enqueued: bool = False, recovery_required: bool = False,
+        error: str | None = None,
+    ) -> None:
+        # The LINE receipt has its own post-turn state machine. This hook keeps
+        # the shared ChatService seam compatible while the foreground ledger is
+        # owned by the durable web/native adapter.
+        _ = (
+            effect_kind,
+            payload_json,
+            completed,
+            enqueued,
+            recovery_required,
+            error,
+        )

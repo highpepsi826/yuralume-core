@@ -39,6 +39,7 @@ its post-turn stays the in-process ``_do_post_turn`` task off the chat write poi
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -54,6 +55,10 @@ from kokoro_link.contracts.background_jobs import (
 )
 from kokoro_link.contracts.clock import ClockPort, ensure_utc
 from kokoro_link.contracts.due_jobs import POST_TURN_KIND, kind_spec
+from kokoro_link.contracts.durable_chat_effects import (
+    ChatTurnEffectState,
+    DurableChatEffectLedgerPort,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -337,9 +342,11 @@ class PostTurnHandler:
         *,
         runner: PostTurnRunnerCallback,
         clock: ClockPort | None = None,
+        effects: DurableChatEffectLedgerPort | None = None,
     ) -> None:
         self._runner = runner
         self._clock = clock
+        self._effects = effects
 
     async def handle(
         self, job: ClaimedJob, *, now: datetime | None = None,
@@ -357,21 +364,99 @@ class PostTurnHandler:
             or not isinstance(assistant_index, int)
         ):
             return PostTurnHandlerResult(executed=False, reason="bad_payload")
+        effect = None
+        if self._effects is not None:
+            effect = await self._effects.ensure(
+                turn_id=turn_record_id,
+                effect_kind="post_turn",
+                idempotency_key=f"{turn_record_id}:post_turn",
+                payload_json=json.dumps(
+                    payload, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"), default=str,
+                ),
+                now=resolved_now,
+            )
+            if effect.state.value == "completed":
+                return PostTurnHandlerResult(
+                    executed=False, reason="already_completed",
+                )
+            if effect.state in {
+                ChatTurnEffectState.FAILED,
+                ChatTurnEffectState.RECOVERY_REQUIRED,
+            }:
+                return PostTurnHandlerResult(
+                    executed=False, reason="effect_recovery_required",
+                )
+            if effect.state is ChatTurnEffectState.RUNNING:
+                await self._effects.mark_failed(
+                    turn_id=turn_record_id,
+                    effect_kind="post_turn",
+                    error=(
+                        "A previous post-turn execution ended without a "
+                        "completion checkpoint; automatic replay is disabled"
+                    ),
+                    recovery_required=True,
+                    now=resolved_now,
+                )
+                return PostTurnHandlerResult(
+                    executed=False, reason="effect_recovery_required",
+                )
+            claimed = await self._effects.mark_running(
+                turn_id=turn_record_id,
+                effect_kind="post_turn",
+                now=resolved_now,
+            )
+            if not claimed:
+                return PostTurnHandlerResult(
+                    executed=False, reason="effect_recovery_required",
+                )
         persona_enabled = bool(payload.get("persona_enabled", True))
         content_mode = payload.get("content_mode")
         if not isinstance(content_mode, str) or not content_mode:
             content_mode = "normal"
-        result = await self._runner(
-            turn_record_id=turn_record_id,
-            conversation_id=conversation_id,
-            character_id=character_id,
-            assistant_index=assistant_index,
-            persona_enabled=persona_enabled,
-            content_mode=content_mode,
-            has_user_message=bool(payload.get("has_user_message", True)),
-            private_memory_ids=_payload_ids(payload.get("private_memory_ids")),
-            now=resolved_now,
-        )
+        try:
+            result = await self._runner(
+                turn_record_id=turn_record_id,
+                conversation_id=conversation_id,
+                character_id=character_id,
+                assistant_index=assistant_index,
+                persona_enabled=persona_enabled,
+                content_mode=content_mode,
+                has_user_message=bool(payload.get("has_user_message", True)),
+                private_memory_ids=_payload_ids(payload.get("private_memory_ids")),
+                now=resolved_now,
+            )
+        except Exception as exc:  # noqa: BLE001 - effect outcome is unknown
+            if self._effects is None:
+                raise
+            _LOGGER.exception(
+                "post-turn effect stopped without a completion checkpoint "
+                "turn=%s",
+                turn_record_id,
+            )
+            await self._effects.mark_failed(
+                turn_id=turn_record_id,
+                effect_kind="post_turn",
+                error=(
+                    "Post-turn execution stopped after it began: "
+                    f"{type(exc).__name__}"
+                ),
+                recovery_required=True,
+                now=resolved_now,
+            )
+            return PostTurnHandlerResult(
+                executed=False, reason="effect_recovery_required",
+            )
+        if self._effects is not None:
+            completed = await self._effects.mark_completed(
+                turn_id=turn_record_id,
+                effect_kind="post_turn",
+                now=resolved_now,
+            )
+            if not completed:
+                return PostTurnHandlerResult(
+                    executed=False, reason="effect_recovery_required",
+                )
         reason = str((result or {}).get("post_turn_skipped") or "executed")
         return PostTurnHandlerResult(
             executed=reason == "executed", reason=reason,

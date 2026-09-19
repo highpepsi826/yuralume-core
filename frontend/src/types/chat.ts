@@ -66,6 +66,8 @@ export interface PresenceFramePayload {
 }
 
 export interface SendChatMessageRequest {
+  /** Stable client id used by the durable acceptance route and its outbox. */
+  client_message_id?: string
   character_id: string
   conversation_id?: string | null
   provider_id?: string

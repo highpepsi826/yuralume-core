@@ -104,14 +104,56 @@ export interface ChatTurnStatus {
   conversation_id: string | null
   status: 'processing' | 'completed' | 'failed' | 'aborted_by_restart' | string
   failure_code?: string | null
+  failure_message?: string | null
   started_at?: string | null
   updated_at?: string | null
   last_heartbeat_at?: string | null
+  phase?: string | null
+  attempt_count?: number | null
+  max_attempts?: number | null
+  next_attempt_at?: string | null
+  lease_until?: string | null
+  lease_generation?: number | null
+  generated_snapshot_hash?: string | null
+  duplicate?: boolean
+  client_message_id?: string | null
+  result_message_id?: number | null
+  accepted_at?: string | null
+  conversation_revision?: number | null
+  user_message_id?: number | null
+  user_message_position?: number | null
+  assistant_message_id?: number | null
+  assistant_message_position?: number | null
+  post_turn_effect_state?: string | null
 }
 
 export async function getChatTurnStatus(turnId: string): Promise<ChatTurnStatus> {
   const res = await authedFetch(`/api/v1/chat/turns/${encodeURIComponent(turnId)}`)
   if (!res.ok) throw new Error(`Failed to load chat turn status: ${res.status}`)
+  return res.json() as Promise<ChatTurnStatus>
+}
+
+export async function getActiveChatTurn(
+  conversationId: string,
+): Promise<ChatTurnStatus | null> {
+  const res = await authedFetch(
+    `/api/v1/conversations/${encodeURIComponent(conversationId)}/active-turn`,
+  )
+  if (!res.ok) throw new Error(`Failed to load active chat turn: ${res.status}`)
+  const text = await res.text()
+  if (!text || text === 'null') return null
+  return JSON.parse(text) as ChatTurnStatus
+}
+
+export async function submitDurableChatTurn(
+  req: SendChatMessageRequest,
+): Promise<ChatTurnStatus> {
+  const res = await authedFetch('/api/v1/chat/turns', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(withQuotedPrices(req)),
+  })
+  if (!res.ok) throw await chatErrorFromResponse(res, 'Chat acceptance failed')
   return res.json() as Promise<ChatTurnStatus>
 }
 
@@ -568,7 +610,11 @@ async function chatErrorFromResponse(
       statusCode: response.status,
     })
   }
-  return new Error(`${prefix}: ${response.status}`)
+  const error = new Error(`${prefix}: ${response.status}`) as Error & {
+    statusCode?: number
+  }
+  error.statusCode = response.status
+  return error
 }
 
 function detailCodeIs(detail: unknown, code: string): boolean {

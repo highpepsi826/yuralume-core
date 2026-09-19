@@ -32,6 +32,7 @@ from kokoro_link.contracts.background_jobs import (
     JobStatus,
 )
 from kokoro_link.contracts.due_jobs import POST_TURN_KIND
+from kokoro_link.contracts.durable_chat_effects import ChatTurnEffectState
 from kokoro_link.contracts.post_turn import PostTurnResult
 from kokoro_link.domain.entities.conversation import (
     Conversation, Message, MessageRole,
@@ -50,6 +51,9 @@ from kokoro_link.infrastructure.repositories.in_memory_characters import (
 )
 from kokoro_link.infrastructure.repositories.in_memory_conversations import (
     InMemoryConversationRepository,
+)
+from kokoro_link.infrastructure.repositories.in_memory_durable_chat_effects import (
+    InMemoryDurableChatEffectLedger,
 )
 from kokoro_link.infrastructure.state.simple import SimpleStateEngine
 
@@ -349,6 +353,86 @@ async def test_handler_rejects_bad_payload() -> None:
 
     assert result.executed is False and result.reason == "bad_payload"
     assert runner.calls == []  # never delegated
+
+
+async def test_handler_checkpoints_running_before_effect_and_completion() -> None:
+    effects = InMemoryDurableChatEffectLedger()
+    await effects.ensure(
+        turn_id="turn-1",
+        effect_kind="post_turn",
+        idempotency_key="turn-1:post_turn",
+        payload_json="{}",
+        now=NOW,
+    )
+    await effects.mark_enqueued(
+        turn_id="turn-1", effect_kind="post_turn", now=NOW,
+    )
+    runner = _SpyRunner(result={"memory_ids": []})
+    handler = PostTurnHandler(runner=runner, effects=effects)
+
+    result = await handler.handle(_claimed_post_turn(), now=NOW)
+
+    assert result == PostTurnHandlerResult(executed=True, reason="executed")
+    effect = await effects.get(turn_id="turn-1", effect_kind="post_turn")
+    assert effect is not None
+    assert effect.state is ChatTurnEffectState.COMPLETED
+    assert effect.attempt_count == 3
+
+
+async def test_handler_does_not_replay_an_interrupted_running_effect() -> None:
+    effects = InMemoryDurableChatEffectLedger()
+    await effects.ensure(
+        turn_id="turn-1",
+        effect_kind="post_turn",
+        idempotency_key="turn-1:post_turn",
+        payload_json="{}",
+        now=NOW,
+    )
+    await effects.mark_enqueued(
+        turn_id="turn-1", effect_kind="post_turn", now=NOW,
+    )
+    await effects.mark_running(
+        turn_id="turn-1", effect_kind="post_turn", now=NOW,
+    )
+    runner = _SpyRunner()
+    handler = PostTurnHandler(runner=runner, effects=effects)
+
+    result = await handler.handle(_claimed_post_turn(), now=NOW)
+
+    assert result == PostTurnHandlerResult(
+        executed=False, reason="effect_recovery_required",
+    )
+    assert runner.calls == []
+    effect = await effects.get(turn_id="turn-1", effect_kind="post_turn")
+    assert effect is not None
+    assert effect.state is ChatTurnEffectState.RECOVERY_REQUIRED
+
+
+async def test_handler_records_unknown_effect_failure_without_retrying() -> None:
+    class _FailingRunner:
+        async def __call__(self, **kwargs):  # noqa: ANN003
+            raise RuntimeError("stopped after an additive write")
+
+    effects = InMemoryDurableChatEffectLedger()
+    await effects.ensure(
+        turn_id="turn-1",
+        effect_kind="post_turn",
+        idempotency_key="turn-1:post_turn",
+        payload_json="{}",
+        now=NOW,
+    )
+    await effects.mark_enqueued(
+        turn_id="turn-1", effect_kind="post_turn", now=NOW,
+    )
+    handler = PostTurnHandler(runner=_FailingRunner(), effects=effects)
+
+    result = await handler.handle(_claimed_post_turn(), now=NOW)
+
+    assert result.reason == "effect_recovery_required"
+    effect = await effects.get(turn_id="turn-1", effect_kind="post_turn")
+    assert effect is not None
+    assert effect.state is ChatTurnEffectState.RECOVERY_REQUIRED
+    assert effect.last_error is not None
 
 
 # --------------------------------------------------------------------------- #

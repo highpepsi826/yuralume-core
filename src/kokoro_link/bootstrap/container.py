@@ -708,6 +708,9 @@ from kokoro_link.contracts.disposition_drift import (
     DispositionDriftHistoryRepositoryPort,
 )
 from kokoro_link.contracts.observability import TurnRecordRepositoryPort
+from kokoro_link.contracts.durable_chat_commands import (
+    DurableChatCommandRepositoryPort,
+)
 from kokoro_link.contracts.emotion import EmotionEventRepositoryPort
 from kokoro_link.contracts.self_reflection import (
     SelfReflectionRepositoryPort,
@@ -1404,6 +1407,11 @@ class ServiceContainer:
     ) = None
     album_repository: AlbumRepositoryPort | None = None
     turn_record_repository: "TurnRecordRepositoryPort | None" = None
+    durable_chat_command_repository: (
+        DurableChatCommandRepositoryPort | None
+    ) = None
+    durable_chat_effect_ledger: "DurableChatEffectLedgerPort | None" = None
+    durable_chat_worker: "DurableChatWorker | None" = None
     turn_recorder: "TurnRecorderPort | None" = None
     usage_event_repository: "UsageEventRepositoryPort | None" = None
     emotion_event_repository: "EmotionEventRepositoryPort | None" = None
@@ -4336,6 +4344,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         AccountRuntimeUsageRepositoryPort,
     )
     from kokoro_link.contracts.emotion import EmotionEventRepositoryPort
+    from kokoro_link.contracts.durable_chat_effects import DurableChatEffectLedgerPort
     from kokoro_link.infrastructure.observability.turn_recorder import (
         BackgroundTurnRecorder,
     )
@@ -4346,12 +4355,20 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         StaticPriceEstimator,
     )
     turn_record_repository: TurnRecordRepositoryPort
+    durable_chat_command_repository: DurableChatCommandRepositoryPort
+    durable_chat_effect_ledger: DurableChatEffectLedgerPort
     usage_event_repository: UsageEventRepositoryPort
     account_runtime_usage_repository: AccountRuntimeUsageRepositoryPort
     emotion_event_repository: EmotionEventRepositoryPort
     if db_session_factory is not None:
         from kokoro_link.infrastructure.persistence.sa_turn_record_repository import (
             SATurnRecordRepository,
+        )
+        from kokoro_link.infrastructure.persistence.sa_durable_chat_commands import (
+            SADurableChatCommandRepository,
+        )
+        from kokoro_link.infrastructure.persistence.sa_durable_chat_effects import (
+            SADurableChatEffectLedger,
         )
         from kokoro_link.infrastructure.persistence.sa_generation_usage_repository import (
             SAGenerationUsageRepository,
@@ -4363,6 +4380,10 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             SAEmotionEventRepository,
         )
         turn_record_repository = SATurnRecordRepository(db_session_factory)
+        durable_chat_command_repository = SADurableChatCommandRepository(
+            db_session_factory,
+        )
+        durable_chat_effect_ledger = SADurableChatEffectLedger(db_session_factory)
         usage_event_repository = SAGenerationUsageRepository(db_session_factory)
         account_runtime_usage_repository = SAAccountRuntimeUsageRepository(
             db_session_factory,
@@ -4400,6 +4421,12 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         from kokoro_link.infrastructure.repositories.in_memory_turn_records import (
             InMemoryTurnRecordRepository,
         )
+        from kokoro_link.infrastructure.repositories.in_memory_durable_chat_commands import (
+            InMemoryDurableChatCommandRepository,
+        )
+        from kokoro_link.infrastructure.repositories.in_memory_durable_chat_effects import (
+            InMemoryDurableChatEffectLedger,
+        )
         from kokoro_link.infrastructure.repositories.in_memory_generation_usage import (
             InMemoryGenerationUsageRepository,
         )
@@ -4425,6 +4452,8 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             InMemoryMemoirPinRepository,
         )
         turn_record_repository = InMemoryTurnRecordRepository()
+        durable_chat_command_repository = InMemoryDurableChatCommandRepository()
+        durable_chat_effect_ledger = InMemoryDurableChatEffectLedger()
         usage_event_repository = InMemoryGenerationUsageRepository()
         account_runtime_usage_repository = InMemoryAccountRuntimeUsageRepository()
         emotion_event_repository = InMemoryEmotionEventRepository()
@@ -4987,6 +5016,47 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         world_event_repository=world_event_repository,
         clock=clock,
     )
+
+    # Durable foreground chat worker is an explicit process-role opt-in. The
+    # default remains dormant even when the receipt repository is wired, so a
+    # source/schema rollout cannot accidentally execute queued commands before
+    # the isolated worker rehearsal is complete.
+    durable_chat_worker = None
+    if (
+        process_matrix.run_background_worker
+        and _env_flag("YURALUME_DURABLE_CHAT_WORKER_ENABLED", False)
+    ):
+        from kokoro_link.application.services.durable_chat_executor import (
+            DurableChatCommandExecutor,
+            DurableChatWorker,
+        )
+        from kokoro_link.application.services.durable_chat_handler import (
+            ChatServiceDurableCommandHandler,
+        )
+
+        durable_chat_worker = DurableChatWorker(
+            executor=DurableChatCommandExecutor(
+                repository=durable_chat_command_repository,
+                handler=ChatServiceDurableCommandHandler(
+                    chat_service,
+                    repository=durable_chat_command_repository,
+                    conversation_repository=conversation_repository,
+                    effects=durable_chat_effect_ledger,
+                    lease_seconds=max(
+                        1,
+                        _env_int("YURALUME_DURABLE_CHAT_LEASE_SECONDS", 180),
+                    ),
+                ),
+                worker_id=_runtime_lease_owner_id("chat-worker"),
+                lease_seconds=max(
+                    1,
+                    _env_int("YURALUME_DURABLE_CHAT_LEASE_SECONDS", 180),
+                ),
+            ),
+            loop_seconds=float(
+                max(1, _env_int("YURALUME_DURABLE_CHAT_POLL_SECONDS", 2)),
+            ),
+        )
 
     # LH2 external-chat turn state machine (DR-LH0-004): the durable receipt
     # store + the recoverable orchestrator that drives ChatService through the
@@ -6021,6 +6091,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         _post_turn_handler = PostTurnHandler(
             runner=chat_service.run_post_turn_for_record,
             clock=clock,
+            effects=durable_chat_effect_ledger,
         )
         # CV4: the worker-side poll delegates to the SAME pipeline object the
         # embedded sweep drives (抽共用而非複製) — one implementation of
@@ -6789,8 +6860,11 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         preferences_repository=preferences_repository,
         schedule_memorializer=schedule_memorializer,
         schedule_weather_drift_service=schedule_weather_drift_service,
-        active_llm_provider=active_llm_provider,
-        turn_record_repository=turn_record_repository,
+         active_llm_provider=active_llm_provider,
+         turn_record_repository=turn_record_repository,
+         durable_chat_command_repository=durable_chat_command_repository,
+         durable_chat_effect_ledger=durable_chat_effect_ledger,
+         durable_chat_worker=durable_chat_worker,
         turn_recorder=turn_recorder,
         cloud_routing_profile_resolver=cloud_routing_profile_resolver,
         cloud_mode=app_settings.cloud.active,

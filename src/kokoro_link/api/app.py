@@ -261,6 +261,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         # unless YURALUME_BACKGROUND_SHADOW=postgres on a scheduler-owning role.
         shadow_coordinator = container.background_shadow_coordinator
         shadow_worker = container.background_shadow_worker
+        durable_chat_worker = getattr(container, "durable_chat_worker", None)
         # Phase 4 realtime outbox dispatcher (§7.1). Set only on the api reader
         # role under YURALUME_REALTIME_BACKEND=postgres; ``None`` everywhere else
         # (memory default / background writer / bare container), so the start /
@@ -425,6 +426,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 await world_event_scheduler.start()
         if matrix.run_background_worker and shadow_worker is not None:
             await shadow_worker.start()
+        if matrix.run_background_worker and durable_chat_worker is not None:
+            await durable_chat_worker.start()
         # Outbound channel retries must run on both API/webhook and connector
         # roles. The repository lease prevents two roles from sending the same
         # pending bubble concurrently.
@@ -489,6 +492,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             # embedded schedulers.
             if matrix.run_background_worker and shadow_worker is not None:
                 await shadow_worker.stop()
+            if matrix.run_background_worker and durable_chat_worker is not None:
+                await durable_chat_worker.stop()
             if matrix.start_world_event_scheduler and not matrix.start_schedulers:
                 if world_event_scheduler is not None:
                     await world_event_scheduler.stop()
