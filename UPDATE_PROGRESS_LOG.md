@@ -1344,3 +1344,42 @@ database rows.
   dedicated test conversation as durable production evidence. The rollout is
   now in the normal daily-cycle observation window; the legacy route remains
   available through a frontend rollback build.
+
+# 2026-09-20 - Restore distributed background execution after role cutover
+
+- Investigated the reported gap in proactive-attempt history, pending follow-up
+  releases, and LumeGram posts after the dedicated services were introduced.
+  Chat remained healthy because durable foreground chat has its own worker loop.
+- Read-only production SQL showed no `background_execution_mode` row (therefore
+  the default `embedded/epoch 0`), no coordinator lease, no background jobs,
+  and no tick journal. Since `app` already ran as the `api` role, no process
+  owned the embedded scheduler. The 20:43 proactive record was consistent with
+  the API's manual evaluate endpoint, which also records `trigger=tick`; it did
+  not prove automatic scheduling had resumed.
+- Used the admin-gated transition API under the explicitly authorized test admin
+  account to move `embedded/0 -> paused/1`, observe two separated zero-claimed
+  drain samples, and enter `distributed/2`. The coordinator then acquired the
+  sole `background-coordinator` lease and seeded both character job chains.
+- The first worker claims exposed a second issue: the Zeabur hostname made the
+  generated worker ID longer than `background_jobs.lease_owner VARCHAR(64)`, so
+  every claim UPDATE rolled back with `StringDataRightTruncationError`. No job
+  attempt or domain side effect committed during these failures.
+- Updated coordinator and worker wiring to use the existing bounded runtime
+  owner-ID helper, preserving the per-incarnation PID/UUID suffix while limiting
+  the full value to 64 characters. Added a long-hostname regression test;
+  background shadow wiring and execution backend suites passed 18 tests.
+- Pushed hotfix commit `81a9dc8`. App, coordinator, worker, and connector
+  deployments `6aafdeaa342483d22ad896b9`, `6aafdead342483d22ad896bd`,
+  `6aafdeb0342483d22ad896be`, and `6aafdeb3342483d22ad896c1` all reached
+  `RUNNING`. The new worker started without another owner-ID truncation error.
+- Post-fix production evidence showed 23 completed jobs at the observation
+  snapshot, attempt count 1 and no failed/dead jobs. Completed kinds included
+  `proactive_evaluate`, `pending_follow_up_release`, `feed_compose`,
+  `feed_comment_reply`, schedule upkeep, story timeout, peer knowledge, persona
+  dream, and goal review. An automatic proactive evaluation produced `sent` at
+  21:29:50 Asia/Hong_Kong.
+- The overdue busy-defer release job completed with `not_released`: this is the
+  expected busy/frozen re-gate, so the row remains queued and the reconciler
+  re-enqueues it later. Two LumeGram `feed_compose` jobs completed without a new
+  post because no eligible source was selected in those rounds; the execution
+  chain itself is healthy.

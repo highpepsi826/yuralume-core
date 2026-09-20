@@ -2,7 +2,7 @@
 
 - 建立日期：2026-09-19（Asia/Hong_Kong）。
 - 狀態：P5 schema migration、dedicated process-role cutover、worker opt-in、production backend canary 與 frontend global cutover 已完成；目前進入全域觀察窗口。
-- Production cutover source baseline：`local/customizations` / `8a9cdd259a7f966df78f15abd9c12955989ecfac`。
+- Production cutover source baseline：`local/customizations` / `81a9dc85eccce7b8f4637e261d129de4a69f219a`（background runtime owner-ID hotfix）。
 - P4 release evidence、fresh backup/restore、正式 migration、role health、backend canary 與 global frontend cutover evidence 均已保存；所有載入新前端 bundle 的玩家聊天現已使用 durable path。
 
 ### 0.1 已落地的 source slices
@@ -554,15 +554,16 @@ Worker opt-in 另外使用 `YURALUME_DURABLE_CHAT_LEASE_SECONDS`（預設 180）
 - [x] 取得 frontend global cutover 決策後，在 `app` build stage 設定 `VITE_DURABLE_CHAT_ENABLED=true`，並保持 `YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED=true`；deployment `6aafd36b342483d22ad892dc` 由 SHA `8a9cdd2` 建置並進入 `RUNNING`。
 - [x] 從公開端點 cache-bust 下載 production HTML、service worker 與 `StagePage-1OHIXzKQ.js`（298,069 bytes）；bundle 同時包含 `chat/turns`、`active-turn`、`client_message_id` 與 `acceptance_unknown`，public `/health` 回傳 200。
 - [x] 完成 post-cutover canary。`p5-canary-20260920-04`／turn `0a4a67665147456987d3216f69fe5014` 命中正常 busy-defer 規則，寫入單一 user／brief assistant pair；其 pending follow-up 由下一回合取消。`p5-canary-20260920-05`／turn `dd29674eae6747ec838859804c399f82` 首次及 duplicate submit 均為 202、同一 turn，最後 state／phase 與 post-turn effect 均為 `completed`；SQL 證明一個 command、user／assistant 各一列、一個 turn record、一個 completed effect，attempt 與 lease generation 均為 1，active-turn 已清空。
+- [x] 修復 dedicated role cutover 後的 background execution gap。Prod 原本缺少 execution-mode row，等同 `embedded/epoch 0`，但 `app=api` 已不再啟動 embedded scheduler；切換為 `paused/epoch 1`、完成兩次 `claimed=0` drain observation，再進入 `distributed/epoch 2`。其後發現 Zeabur 長 hostname 使 background worker owner ID 超過 `background_jobs.lease_owner VARCHAR(64)`；SHA `81a9dc8` 改用有界且保留唯一 suffix 的 runtime owner ID，18 個 focused tests 通過。四個 hotfix deployments `6aafdeaa342483d22ad896b9`、`6aafdead342483d22ad896bd`、`6aafdeb0342483d22ad896be`、`6aafdeb3342483d22ad896c1` 均為 `RUNNING`。新 worker 已完成 proactive、pending-follow-up、feed、schedule 等 jobs，沒有 failed／dead；background 自動鏈恢復。
 
 ```text
 CURRENT_TASK: 同場可靠聊天 durable command implementation
 CURRENT_PHASE: P5 frontend global cutover complete; production observation window active
-SOURCE_BASELINE: 8a9cdd259a7f966df78f15abd9c12955989ecfac / local/customizations
+SOURCE_BASELINE: 81a9dc85eccce7b8f4637e261d129de4a69f219a / local/customizations
 IMPLEMENTATION_STARTED: yes
 PRODUCTION_CHANGED: yes (schema, process-role topology, global durable frontend, dedicated canary character and five labelled canary turns)
 NEXT_ACTION: Observe production for at least one normal daily cycle; watch oldest durable work age, duplicate/idempotency conflicts, recovery_required, worker restarts, DB pool, CPU/memory and legacy-route errors. Roll back frontend first if a no-go condition appears.
-AFTER_REVIEW: YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED=true and VITE_DURABLE_CHAT_ENABLED=true on app; YURALUME_DURABLE_CHAT_WORKER_ENABLED=true only on dedicated worker. Dedicated api/coordinator/worker/connector services remain RUNNING.
+AFTER_REVIEW: YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED=true and VITE_DURABLE_CHAT_ENABLED=true on app; YURALUME_DURABLE_CHAT_WORKER_ENABLED=true only on dedicated worker; background execution mode=distributed/epoch 2. Dedicated api/coordinator/worker/connector services remain RUNNING.
 ```
 
 ## 15. 使用者目前需要做什麼
