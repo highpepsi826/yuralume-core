@@ -1313,3 +1313,34 @@ database rows.
   queue/effect aggregates, coordinator lease evidence, UI coverage reporting,
   and D1-D5 implementation slices. Zeabur management credentials and platform
   mutations remain outside the application trust boundary.
+
+# 2026-09-20 - Same-space durable frontend global cutover
+
+- Enabled `YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED=true` and the build-time
+  `VITE_DURABLE_CHAT_ENABLED=true` on the production `app`; retained
+  `YURALUME_DURABLE_CHAT_WORKER_ENABLED=true` only on the dedicated worker.
+- The app deployment `6aafd36b342483d22ad892dc` from commit `8a9cdd2` reached
+  `RUNNING`. Public `/health` returned 200. The coordinator, worker, and
+  connector deployments `6aafd17f342483d22ad8924a`,
+  `6aafd182342483d22ad8924c`, and `6aafd185342483d22ad8924e` were also
+  `RUNNING` from the same commit.
+- A cache-busted public fetch resolved `index-C2qOB9UN.js` and service-worker
+  precache entry `StagePage-1OHIXzKQ.js` (298,069 bytes). The public StagePage
+  chunk contains `chat/turns`, `active-turn`, `client_message_id`, and
+  `acceptance_unknown`, proving the Vite build flag reached the served bundle.
+- Post-cutover canary `p5-canary-20260920-04` produced turn
+  `0a4a67665147456987d3216f69fe5014` and correctly took the existing busy-defer
+  branch: one durable command and one user/brief-assistant append pair. That
+  branch intentionally has no turn record or post-turn effect; the next test
+  turn cancelled its pending follow-up.
+- Full-turn canary `p5-canary-20260920-05` produced turn
+  `dd29674eae6747ec838859804c399f82`. Initial and repeated submits both returned
+  202; the repeat returned `duplicate=true` and the same turn ID. Final status,
+  phase, and post-turn effect were `completed`; active-turn returned null.
+  Read-only SQL verified one command, one user append, one assistant append,
+  one turn record, and one completed post-turn effect. Attempt count, lease
+  generation, and effect attempt count were all 1, with no failure/error.
+- Per the operator decision, both labelled cutover canaries remain in the
+  dedicated test conversation as durable production evidence. The rollout is
+  now in the normal daily-cycle observation window; the legacy route remains
+  available through a frontend rollback build.

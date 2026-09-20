@@ -1,9 +1,9 @@
 # 同場聊天可靠化與跨裝置恢復方案
 
 - 建立日期：2026-09-19（Asia/Hong_Kong）。
-- 狀態：P5 schema migration、dedicated process-role cutover、worker opt-in 與三筆 production backend canary 已完成。backend acceptance 已關回 false，frontend rollout 尚未開始。
-- Production runtime source baseline：`local/customizations` / `3f03c1b6066ad09f13d56e915e6a4f46d1a98757`。
-- P4 release evidence、fresh backup/restore、正式 migration、role health 與 backend canary evidence 均已保存；Prod 只有專用 canary 角色與三筆明確標記的測試回合使用 durable path。
+- 狀態：P5 schema migration、dedicated process-role cutover、worker opt-in、production backend canary 與 frontend global cutover 已完成；目前進入全域觀察窗口。
+- Production cutover source baseline：`local/customizations` / `8a9cdd259a7f966df78f15abd9c12955989ecfac`。
+- P4 release evidence、fresh backup/restore、正式 migration、role health、backend canary 與 global frontend cutover evidence 均已保存；所有載入新前端 bundle 的玩家聊天現已使用 durable path。
 
 ### 0.1 已落地的 source slices
 
@@ -18,9 +18,9 @@
 - post-turn effect 會先進入 `running` 再執行；中斷或未知結果轉為 `recovery_required`，不自動重播非逐項冪等的副作用。已提交回合的恢復只使用穩定 queue key 補排，不直接呼叫 post-turn body。
 - status API 額外回傳 `post_turn_effect_state`（有 ledger row 時），可區分 canonical chat completion 與 post-turn intent 狀態。
 
-Zeabur 已套用 `t8d6f1a10058`／`u9e7b2a11059`，production dedicated worker 已啟用；backend acceptance 只在受控 canary 窗口開啟，完成後已關閉。
+Zeabur 已套用 `t8d6f1a10058`／`u9e7b2a11059`，production dedicated worker 與 backend acceptance 均已啟用。`app` 只接受／查詢 durable turn，foreground claim 仍只由 dedicated `worker` 執行。
 
-前端目前也有 source-only client slice：`chatDurableOutbox.ts` 以 IndexedDB 保存待提交 payload，`durableChatClient.ts` 以原 `client_message_id` 重試／查詢；ACK 遺失與暫時 status 讀取失敗會保留未知狀態並退避重試，明確 4xx 進入 `needs_input`，terminal record 在 canonical history 成功補取後清理。`ChatPanel` 只有在 owner identity 已確定且 `VITE_DURABLE_CHAT_ENABLED=true` 時使用短請求 acceptance + polling，並在 reload、登入、換 conversation、online、visibility resume 時同步；`GET /conversations/{id}/active-turn` 讓重新進入或另一裝置取得 sending gate。預設仍使用既有 SSE，此 flag 不會因 source 部署自動開啟。
+前端 durable client 已全域部署：`chatDurableOutbox.ts` 以 IndexedDB 保存待提交 payload，`durableChatClient.ts` 以原 `client_message_id` 重試／查詢；ACK 遺失與暫時 status 讀取失敗會保留未知狀態並退避重試，明確 4xx 進入 `needs_input`，terminal record 在 canonical history 成功補取後清理。`ChatPanel` 在 owner identity 已確定時使用短請求 acceptance + polling，並在 reload、登入、換 conversation、online、visibility resume 時同步；`GET /conversations/{id}/active-turn` 讓重新進入或另一裝置取得 sending gate。legacy route 仍保留為 rollback build 的入口，但目前 production build-time `VITE_DURABLE_CHAT_ENABLED=true`。
 
 ## 1. 決策與完成目標
 
@@ -551,22 +551,25 @@ Worker opt-in 另外使用 `YURALUME_DURABLE_CHAT_LEASE_SECONDS`（預設 180）
 - [x] 以 committed SHA `1b72362` 重建 image，重跑 restore/migration、四 role health、ownership barrier、duplicate/busy/conflict、API restart 與 worker recovery evidence；digest 為 `sha256:bea05921ee5741c76edc6c16a37371d990107f9f344fec4d8324dc68b630156d`。
 - [x] 取得正式操作授權後完成 P5 preflight、migration、API/dedicated role cutover、worker opt-in 與 rollback gate；記錄實際 SHA、schema、health、role 與 flags。
 - [x] 使用專用 canary identity 完成三筆 Prod durable acceptance／duplicate／status／API restart／worker restart／append／effect 驗收；每筆皆只有一個 command、user append、assistant append、turn record 與 completed post-turn effect。
+- [x] 取得 frontend global cutover 決策後，在 `app` build stage 設定 `VITE_DURABLE_CHAT_ENABLED=true`，並保持 `YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED=true`；deployment `6aafd36b342483d22ad892dc` 由 SHA `8a9cdd2` 建置並進入 `RUNNING`。
+- [x] 從公開端點 cache-bust 下載 production HTML、service worker 與 `StagePage-1OHIXzKQ.js`（298,069 bytes）；bundle 同時包含 `chat/turns`、`active-turn`、`client_message_id` 與 `acceptance_unknown`，public `/health` 回傳 200。
+- [x] 完成 post-cutover canary。`p5-canary-20260920-04`／turn `0a4a67665147456987d3216f69fe5014` 命中正常 busy-defer 規則，寫入單一 user／brief assistant pair；其 pending follow-up 由下一回合取消。`p5-canary-20260920-05`／turn `dd29674eae6747ec838859804c399f82` 首次及 duplicate submit 均為 202、同一 turn，最後 state／phase 與 post-turn effect 均為 `completed`；SQL 證明一個 command、user／assistant 各一列、一個 turn record、一個 completed effect，attempt 與 lease generation 均為 1，active-turn 已清空。
 
 ```text
 CURRENT_TASK: 同場可靠聊天 durable command implementation
-CURRENT_PHASE: P5 backend canary complete; frontend rollout remains closed
-SOURCE_BASELINE: 3f03c1b6066ad09f13d56e915e6a4f46d1a98757 / local/customizations
+CURRENT_PHASE: P5 frontend global cutover complete; production observation window active
+SOURCE_BASELINE: 8a9cdd259a7f966df78f15abd9c12955989ecfac / local/customizations
 IMPLEMENTATION_STARTED: yes
-PRODUCTION_CHANGED: yes (schema, process-role topology, dedicated canary character and three labelled canary turns)
-NEXT_ACTION: Review the successful backend evidence and decide a separate frontend rollout window; rebuild with VITE_DURABLE_CHAT_ENABLED=true only when accepting a global frontend cutover.
-AFTER_REVIEW: YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED=false; YURALUME_DURABLE_CHAT_WORKER_ENABLED=true only on dedicated worker; VITE_DURABLE_CHAT_ENABLED unset/false. Dedicated api/coordinator/worker/connector services remain deployed.
+PRODUCTION_CHANGED: yes (schema, process-role topology, global durable frontend, dedicated canary character and five labelled canary turns)
+NEXT_ACTION: Observe production for at least one normal daily cycle; watch oldest durable work age, duplicate/idempotency conflicts, recovery_required, worker restarts, DB pool, CPU/memory and legacy-route errors. Roll back frontend first if a no-go condition appears.
+AFTER_REVIEW: YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED=true and VITE_DURABLE_CHAT_ENABLED=true on app; YURALUME_DURABLE_CHAT_WORKER_ENABLED=true only on dedicated worker. Dedicated api/coordinator/worker/connector services remain RUNNING.
 ```
 
 ## 15. 使用者目前需要做什麼
 
-P5 backend 已完成，使用者目前不需要提供額外診斷資料。專用 canary 角色保留供日後重驗；backend acceptance 已關閉，dedicated worker 保持啟用，frontend 仍使用 legacy SSE。
+P5 frontend global cutover 已完成，使用者目前不需要提供額外診斷資料。專用 canary 角色與本次兩筆 cutover canary 依決定保留供日後重驗；backend acceptance、dedicated worker 與 frontend durable build 均保持啟用。
 
-下一個操作決策是 frontend global cutover。現在的 `VITE_DURABLE_CHAT_ENABLED` 是 build-time global flag，並非帳號 allowlist；開啟前應另選 rollout window，確認接受所有新前端使用者改走 durable path，並保留關閉 frontend flag 的 rollback build。
+玩家重新整理或 service worker 更新後會載入 durable bundle。接下來只需完成至少一個正常日週期的 production observation；rollback 仍保留關閉 frontend flag 的 build，遇到 no-go 條件時先切回 frontend，再處理 backend acceptance 與已接受工作。
 
 Observability 診斷包的多服務缺口已另記錄於 `MULTI_SERVICE_DIAGNOSTIC_BUNDLE_IMPLEMENTATION_REFERENCE.md`，後續可從 D1 heartbeat contract/migration 開始實作。
 
