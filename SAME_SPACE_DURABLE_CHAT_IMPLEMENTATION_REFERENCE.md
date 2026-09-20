@@ -1,9 +1,9 @@
 # 同場聊天可靠化與跨裝置恢復方案
 
 - 建立日期：2026-09-19（Asia/Hong_Kong）。
-- 狀態：P2-2 durable foreground execution、generated recovery、effect recovery、前端 outbox source slice、backup/restore proof、隔離 process-role rehearsal 與 committed-SHA release gate 完成。acceptance／worker flags 仍關閉，尚未執行正式 migration、role cutover 或 frontend rollout。
-- 原始碼基準：`local/customizations` / `1b72362cfda36c5e9fcd44849bfe88d4050b3367`。
-- 已完成 committed source image 的 P4 release evidence；未修改正式部署、未執行正式 migration。
+- 狀態：P5 schema migration、dedicated process-role cutover、worker opt-in 與三筆 production backend canary 已完成。backend acceptance 已關回 false，frontend rollout 尚未開始。
+- Production runtime source baseline：`local/customizations` / `3f03c1b6066ad09f13d56e915e6a4f46d1a98757`。
+- P4 release evidence、fresh backup/restore、正式 migration、role health 與 backend canary evidence 均已保存；Prod 只有專用 canary 角色與三筆明確標記的測試回合使用 durable path。
 
 ### 0.1 已落地的 source slices
 
@@ -18,7 +18,7 @@
 - post-turn effect 會先進入 `running` 再執行；中斷或未知結果轉為 `recovery_required`，不自動重播非逐項冪等的副作用。已提交回合的恢復只使用穩定 queue key 補排，不直接呼叫 post-turn body。
 - status API 額外回傳 `post_turn_effect_state`（有 ledger row 時），可區分 canonical chat completion 與 post-turn intent 狀態。
 
-這些是 source checkpoint，不代表 Zeabur 已套用 `t8d6f1a10058`／`u9e7b2a11059`，也不代表 production worker 已啟用。
+Zeabur 已套用 `t8d6f1a10058`／`u9e7b2a11059`，production dedicated worker 已啟用；backend acceptance 只在受控 canary 窗口開啟，完成後已關閉。
 
 前端目前也有 source-only client slice：`chatDurableOutbox.ts` 以 IndexedDB 保存待提交 payload，`durableChatClient.ts` 以原 `client_message_id` 重試／查詢；ACK 遺失與暫時 status 讀取失敗會保留未知狀態並退避重試，明確 4xx 進入 `needs_input`，terminal record 在 canonical history 成功補取後清理。`ChatPanel` 只有在 owner identity 已確定且 `VITE_DURABLE_CHAT_ENABLED=true` 時使用短請求 acceptance + polling，並在 reload、登入、換 conversation、online、visibility resume 時同步；`GET /conversations/{id}/active-turn` 讓重新進入或另一裝置取得 sending gate。預設仍使用既有 SSE，此 flag 不會因 source 部署自動開啟。
 
@@ -550,25 +550,25 @@ Worker opt-in 另外使用 `YURALUME_DURABLE_CHAT_LEASE_SECONDS`（預設 180）
 - [x] 文件化具體 migration／backup／資源／role 切換／回退清單；尚未對任何正式環境執行。
 - [x] 以 committed SHA `1b72362` 重建 image，重跑 restore/migration、四 role health、ownership barrier、duplicate/busy/conflict、API restart 與 worker recovery evidence；digest 為 `sha256:bea05921ee5741c76edc6c16a37371d990107f9f344fec4d8324dc68b630156d`。
 - [x] 取得正式操作授權後完成 P5 preflight、migration、API/dedicated role cutover、worker opt-in 與 rollback gate；記錄實際 SHA、schema、health、role 與 flags。
-- [ ] 使用專用 canary identity 完成 Prod durable acceptance／duplicate／status／restart／append／effect 驗收；目前 Prod 沒有明確標記的 canary identity，因此 acceptance flag 已 rollback 關閉，沒有寫入任何聊天資料。
+- [x] 使用專用 canary identity 完成三筆 Prod durable acceptance／duplicate／status／API restart／worker restart／append／effect 驗收；每筆皆只有一個 command、user append、assistant append、turn record 與 completed post-turn effect。
 
 ```text
 CURRENT_TASK: 同場可靠聊天 durable command implementation
-CURRENT_PHASE: P5 role cutover and worker readiness complete; acceptance canary blocked on dedicated test identity
-SOURCE_BASELINE: 7c62126e7f35ce53daf52fd413defc87eb3a5c99 / local/customizations
+CURRENT_PHASE: P5 backend canary complete; frontend rollout remains closed
+SOURCE_BASELINE: 3f03c1b6066ad09f13d56e915e6a4f46d1a98757 / local/customizations
 IMPLEMENTATION_STARTED: yes
-PRODUCTION_CHANGED: yes (schema migration and process-role topology only; no chat/user data written)
-NEXT_ACTION: Provide an explicitly authorized test account/character, then run the bounded Prod canary with backend acceptance temporarily enabled; keep frontend rollout off until all canary checks pass.
+PRODUCTION_CHANGED: yes (schema, process-role topology, dedicated canary character and three labelled canary turns)
+NEXT_ACTION: Review the successful backend evidence and decide a separate frontend rollout window; rebuild with VITE_DURABLE_CHAT_ENABLED=true only when accepting a global frontend cutover.
 AFTER_REVIEW: YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED=false; YURALUME_DURABLE_CHAT_WORKER_ENABLED=true only on dedicated worker; VITE_DURABLE_CHAT_ENABLED unset/false. Dedicated api/coordinator/worker/connector services remain deployed.
 ```
 
 ## 15. 使用者目前需要做什麼
 
-P4 committed-SHA release gate 已完成；目前已到達 P5 的正式操作決策點。若要繼續，需明確授權維護窗口內的 fresh Prod backup/restore proof、唯讀 schema gate、一次受控 migration、Zeabur role/service cutover、backend canary，以及 canary 通過後的 frontend rollout。這些步驟會修改正式 schema／服務拓撲，新增 dedicated services 也可能產生 Zeabur 費用。
+P5 backend 已完成，使用者目前不需要提供額外診斷資料。專用 canary 角色保留供日後重驗；backend acceptance 已關閉，dedicated worker 保持啟用，frontend 仍使用 legacy SSE。
 
-在取得該授權前，既有站台繼續使用目前版本；durable acceptance／worker／frontend flags 維持關閉，`1b72362` 不會推到 deployment branch，也不會建立或修改 Zeabur service。
+下一個操作決策是 frontend global cutover。現在的 `VITE_DURABLE_CHAT_ENABLED` 是 build-time global flag，並非帳號 allowlist；開啟前應另選 rollout window，確認接受所有新前端使用者改走 durable path，並保留關閉 frontend flag 的 rollback build。
 
-既有唯讀 API 存取已確認 deployment，不需要使用者登入 dashboard 或再提供版本資訊。Prod schema revision 已以 app-service 純讀 command 核對為 `s7h3k9m10057`；正式 migration 前仍必須建立新鮮 backup 並重做同一 gate。目前沒有需要使用者手動補做的部署操作。
+Observability 診斷包的多服務缺口已另記錄於 `MULTI_SERVICE_DIAGNOSTIC_BUNDLE_IMPLEMENTATION_REFERENCE.md`，後續可從 D1 heartbeat contract/migration 開始實作。
 
 裝置作業系統、推播偏好與原生 App 安裝方式待 P6 再決定。
 

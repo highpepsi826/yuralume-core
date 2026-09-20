@@ -1273,3 +1273,43 @@ database rows.
   temporarily enabling backend acceptance for the bounded canary. Keep the
   frontend flag off until receipt, duplicate, status, restart, append, and
   post-turn effect checks pass.
+
+# 2026-09-20 - Same-space durable production backend canary
+
+- Created the dedicated `Durable Chat Canary` character under the explicitly
+  authorized test account. Proactive and feed activity are disabled; no
+  existing project or character was modified or deleted.
+- Temporarily enabled backend acceptance while the frontend durable flag
+  remained off. Disabled the durable worker, submitted a command, repeated the
+  exact `client_message_id`, and verified `202`, `duplicate=true`, the same
+  `turn_id`, queued status, and active-turn lookup.
+- Restarted the API while the worker remained off. The original queued command
+  and active-turn lookup survived with the same IDs. Re-enabled and redeployed
+  the dedicated worker; it claimed and completed that command without an API
+  resubmission under a new ID.
+- Completed three canary turns in one conversation. Turn IDs were
+  `12dd1e80be62478abf12712f771f511b`,
+  `d6134049800946f89dea8573248b374a`, and
+  `11c71bdd366749f9a5503c17e7e70836`.
+- Read-only SQL verified each turn has state/phase `completed`, attempt count
+  `1`, lease generation `1`, no failure code, exactly one user append, exactly
+  one assistant append, one turn record, and one `post_turn` effect in
+  `completed` state with attempt count `1`. Conversation positions are
+  contiguous `0` through `5`; all message and effect idempotency keys use the
+  expected stable turn suffixes.
+- Backend acceptance was set back to `false` after the canary. The dedicated
+  worker remains enabled and the frontend `VITE_DURABLE_CHAT_ENABLED` flag
+  remains off. Existing players therefore continue to use the legacy SSE path
+  until a separate frontend rollout decision.
+
+# 2026-09-20 - Multi-service diagnostic bundle design checkpoint
+
+- Added `MULTI_SERVICE_DIAGNOSTIC_BUNDLE_IMPLEMENTATION_REFERENCE.md`.
+- Confirmed the current diagnostic ZIP reads shared durable database sources,
+  but its deployment block and WARN/ERROR ring buffer describe only the API
+  process that generated the bundle. Dedicated coordinator, worker, and
+  connector process-local state is not aggregated.
+- Proposed a redacted PostgreSQL heartbeat/fleet snapshot, bounded durable
+  queue/effect aggregates, coordinator lease evidence, UI coverage reporting,
+  and D1-D5 implementation slices. Zeabur management credentials and platform
+  mutations remain outside the application trust boundary.
