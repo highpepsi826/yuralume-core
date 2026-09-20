@@ -491,6 +491,9 @@ class PendingFollowUp:
         intent = (promise_intent or "").strip()
         if not intent:
             raise ValueError("scheduled-promise row needs promise_intent")
+        is_honesty_repair = (
+            (defer_reason or "").strip() == HONESTY_REPAIR_DEFER_REASON
+        )
         if scheduled_for.tzinfo is None:
             raise ValueError("PendingFollowUp scheduled_for must be tz-aware")
         # Source message is optional; entity invariant requires at least
@@ -527,14 +530,25 @@ class PendingFollowUp:
             updated_at=timestamp,
             kind=PendingFollowUpKind.SCHEDULED_PROMISE,
             promise_intent=intent[:500],
-            dedupe_key=scheduled_promise_dedupe_key(
-                character_id=character_id,
-                promise_intent=intent[:500],
-                scheduled_for=scheduled_for,
+            # Honesty repairs are scoped by conversation and must not collide
+            # with ordinary appointment callbacks in the character-wide
+            # delivery window. Their auditor owns coalescing explicitly.
+            dedupe_key=(
+                ""
+                if is_honesty_repair
+                else scheduled_promise_dedupe_key(
+                    character_id=character_id,
+                    promise_intent=intent[:500],
+                    scheduled_for=scheduled_for,
+                )
             ),
-            delivery_slot_key=scheduled_promise_delivery_slot_key(
-                character_id=character_id,
-                scheduled_for=scheduled_for,
+            delivery_slot_key=(
+                ""
+                if is_honesty_repair
+                else scheduled_promise_delivery_slot_key(
+                    character_id=character_id,
+                    scheduled_for=scheduled_for,
+                )
             ),
             source_turn_key=source_turn_key,
             obligations=(obligation,),

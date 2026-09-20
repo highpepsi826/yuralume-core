@@ -270,7 +270,18 @@ class LLMSchedulePlanner(SchedulePlannerPort):
             date_=date_,
             local_tz=local_tz,
             beat_slot_id=_beat_slot_id(today_beat, target_date=date_),
+            operator_primary_language=operator_primary_language,
         )
+        if future_beats:
+            activities = _drop_early_future_event_venue_activities(
+                activities,
+                future_beats=future_beats,
+            )
+            activities = _drop_unconfirmed_future_operator_events(
+                activities,
+                operator_reference_names=operator_reference_names,
+                pre_committed_activities=pre_committed_activities,
+            )
         # Defensive merge: if the LLM ignored the commitment directive
         # and didn't emit one of the pre-commitments, splice them back
         # in. ``_resolve_overlaps`` style logic isn't needed here because
@@ -893,6 +904,8 @@ def _render_gap_day_beat_lines(
         "今天的行程**不要**把這場戲演出來，但可以安排一些為它做準備、"
         "心理鋪陳、或相關的日常時段（例如：練習、查資料、整理裝備、"
         "與相關人物碰面、獨處沉澱）。",
+        "今天不得前往、等待、進入、使用或勘景來提前演出這場戲；"
+        "只能安排不構成出席的準備與日常。",
     ]
     if beat.location:
         lines.append(
@@ -955,11 +968,20 @@ def _render_arc_block(
         today_beat is not None
         and today_beat.scheduled_date == target_date
     )
-    if today_beat is not None and is_today:
-        if today_beat.operator_position == OPERATOR_POSITION_ABSENT:
-            lines.extend(_render_staged_beat_lines(today_beat))
-        else:
-            lines.extend(_render_awaiting_player_beat_lines(today_beat))
+    if is_today:
+        if len(same_day_beats) > 1:
+            lines.append("本日劇情骨架（今天排定的每一場戲都要納入行程）：")
+        for beat in same_day_beats:
+            if beat.operator_position == OPERATOR_POSITION_ABSENT:
+                lines.extend(_render_staged_beat_lines(beat))
+            else:
+                lines.extend(_render_awaiting_player_beat_lines(beat))
+        if len(same_day_beats) > 1:
+            lines.extend(
+                f"今天第 {index} 場戲《{beat.title}》"
+                for index, beat in enumerate(same_day_beats, start=1)
+            )
+            lines.append("- 今天有多場排定戲份；不要遺漏其中任何一場。")
     elif today_beat is not None:
         lines.extend(
             _render_gap_day_beat_lines(today_beat, target_date=target_date),
@@ -1024,6 +1046,7 @@ def _build_activities(
     date_: date,
     local_tz: tzinfo,
     beat_slot_id: str | None = None,
+    operator_primary_language: str = "zh-TW",
 ) -> list[ScheduleActivity]:
     """Coerce planner entries into activities for ``date_``.
 

@@ -46,9 +46,12 @@ def render_initial_relationship_seed_lines(
     if include_proactive_permission:
         if seed.proactive_permission:
             _append(lines, "主動訊息授權", "使用者允許創角後主動找她／他，但必須遵守頻率與邊界。")
-            _append(lines, "主動訊息頻率或時機", seed.proactive_cadence_hint)
         else:
             lines.append("- 主動訊息授權：沒有明確授權；不要把起始關係解讀成可直接打擾。")
+    # The permission line is cold-start-only, but the player's cadence
+    # preference remains useful after the first chat as an advisory signal
+    # for proactive composition and should not disappear from context.
+    _append(lines, "主動訊息頻率或時機", seed.proactive_cadence_hint)
     _append(lines, "使用者補充", seed.user_profile_notes)
     return lines
 

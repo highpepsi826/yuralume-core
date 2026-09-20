@@ -545,6 +545,11 @@ CHARACTER_BACKUP_TABLE_RULES: tuple[BackupTableRule, ...] = (
         reason="外部通道 turn 狀態機收據，runtime 時態。",
     ),
     BackupTableRule(
+        table="chat_turn_commands",
+        classification=_RUNTIME,
+        reason="前景 durable chat acceptance 收據與 lease 狀態，純 runtime。",
+    ),
+    BackupTableRule(
         table="external_proactive_events",
         classification=_RUNTIME,
         reason="外部主動送信 pre-send ledger，runtime 時態。",

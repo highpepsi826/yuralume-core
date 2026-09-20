@@ -33,6 +33,8 @@ def app_with_admin_and_player(
 ) -> Iterator[tuple[TestClient, str, str, str, str]]:
     monkeypatch.setenv("KOKORO_AUTH_ENABLED", "true")
     monkeypatch.setenv("KOKORO_DATABASE_URL", "")
+    monkeypatch.setenv("KOKORO_DEPLOYMENT_MODE", "test")
+    monkeypatch.setenv("KOKORO_STORAGE_PROVIDER", "memory")
     monkeypatch.setenv("KOKORO_DEFAULT_PROVIDER_ID", "fake")
     monkeypatch.setenv(
         "KOKORO_JWT_SECRET",

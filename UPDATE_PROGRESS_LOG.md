@@ -1409,3 +1409,23 @@ database rows.
 - Focused validation passed: 15 pair-lease tests, 28 health/wiring tests, 5
   world-event tests, 15 memory/consolidation tests, and 3 tenant migration
   tests. Full suite remains to be run before deployment.
+
+# 2026-09-20 - Non-focused regression cleanup after cutover
+
+- Fixed honesty-repair promise identity: repair rows no longer reuse the
+  character-wide scheduled delivery slot, so separate conversations retain
+  separate repairs while ordinary scheduled promises keep their dedupe window.
+- Registered the new `chat_turn_commands` acceptance table in the character
+  backup runtime boundary and stabilized the authenticated routing-preference
+  test harness with explicit in-memory test storage.
+- Fixed schedule planner regressions: invitation fallback now receives the
+  operator language, same-day beats are all rendered, and gap-day plans remove
+  premature future-event attendance and unconfirmed player co-presence.
+- Made failed image-tool turns use the localized honest failure fallback even
+  when the model's final hop falsely claims delivery; proactive relationship
+  context now retains the cadence hint after cold start.
+- Validation: targeted regression group `99 passed`; isolated full unit suite
+  `48,407 passed, 13 failed`. The remaining 13 are known contract/environment
+  gaps (legacy stream/probe expectations, missing external feature-manifest
+  artifacts, a real-clock retry fixture, and the pre-migration FX1 assertion),
+  with no test errors when using a writable pytest base directory.

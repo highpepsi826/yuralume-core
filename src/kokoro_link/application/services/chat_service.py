@@ -4794,6 +4794,7 @@ class ChatService:
         # so equivalent arg dicts collapse to the same key.
         seen_calls: set[tuple[str, str]] = set()
         image_tool_executed = False
+        image_tool_failed = False
         image_commitment_seen = False
         force_final_reply = False
 
@@ -4974,6 +4975,12 @@ class ChatService:
             if image_claim:
                 image_commitment_seen = True
             if not tools_for_hop:
+                if image_tool_failed:
+                    last_text = localized_fallback_text(
+                        "chat.image_tool_generation_failed",
+                        operator_primary_language,
+                    )
+                    break
                 if image_tool_executed and looks_like_tool_call_attempt(text):
                     _LOGGER.warning(
                         "chat tool-use: final reply after image was still a "
@@ -5179,6 +5186,7 @@ class ChatService:
                 await self._quota_overage_release(image_overage)
             if call.name == _FORCED_IMAGE_TOOL_NAME:
                 image_tool_executed = True
+                image_tool_failed = not result.ok
             tool_outcomes.append(
                 ToolOutcomeMessage(
                     tool_name=call.name,

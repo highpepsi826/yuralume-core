@@ -269,6 +269,7 @@ async def test_another_conversation_gets_its_own_repair() -> None:
 
     rows = await repo.list_open_for_character(_CHAR_ID)
     assert {row.conversation_id for row in rows} == {_CONV_ID, "conv-2"}
+    assert all(row.delivery_slot_key == "" for row in rows)
 
 
 # --- the races -----------------------------------------------------------
