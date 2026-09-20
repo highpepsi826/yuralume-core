@@ -1,9 +1,9 @@
 # 同場聊天可靠化與跨裝置恢復方案
 
 - 建立日期：2026-09-19（Asia/Hong_Kong）。
-- 狀態：P2-2 durable foreground execution、generated recovery、effect recovery、前端 outbox source slice、正式 backup/restore proof 與隔離 process-role rehearsal 完成；本文件已完成 Zeabur 部署／測試／Prod 合併的最後方案審查。acceptance／worker flags 仍關閉，尚未執行正式 migration、role cutover 或 frontend rollout。
-- 原始碼基準：`local/customizations` / `8d4d827dd71367a8d40a901e6dbf81c151409261`。
-- 本輪已完成 source-only 實作與 isolated SQLite migration rehearsal；未提交／推送、未修改正式部署、未執行正式 migration。
+- 狀態：P2-2 durable foreground execution、generated recovery、effect recovery、前端 outbox source slice、backup/restore proof、隔離 process-role rehearsal 與 committed-SHA release gate 完成。acceptance／worker flags 仍關閉，尚未執行正式 migration、role cutover 或 frontend rollout。
+- 原始碼基準：`local/customizations` / `1b72362cfda36c5e9fcd44849bfe88d4050b3367`。
+- 已完成 committed source image 的 P4 release evidence；未修改正式部署、未執行正式 migration。
 
 ### 0.1 已落地的 source slices
 
@@ -548,25 +548,28 @@ Worker opt-in 另外使用 `YURALUME_DURABLE_CHAT_LEASE_SECONDS`（預設 180）
 - [x] 補齊目前實作與目標模型的邊界、`all` 到 dedicated roles 的 ownership 交接順序，以及隔離 rehearsal 通過後合併 Prod 的 evidence／go-no-go／canary／rollback runbook。
 - [x] 在等價隔離 process-role 環境完成 worker startup／shutdown、resource、restart、API restart、pause/drain/distributed ownership 與 durable acceptance/worker rehearsal；connector 外部連線仍留待 Prod canary。
 - [x] 文件化具體 migration／backup／資源／role 切換／回退清單；尚未對任何正式環境執行。
+- [x] 以 committed SHA `1b72362` 重建 image，重跑 restore/migration、四 role health、ownership barrier、duplicate/busy/conflict、API restart 與 worker recovery evidence；digest 為 `sha256:bea05921ee5741c76edc6c16a37371d990107f9f344fec4d8324dc68b630156d`。
 - [ ] 取得正式操作授權後執行 P5，記錄實際 SHA、schema、health、owner 與驗收結果。
 
 ```text
 CURRENT_TASK: 同場可靠聊天 durable command implementation
-CURRENT_PHASE: P4 backup/restore and isolated process-role rehearsal complete
-SOURCE_BASELINE: 8d4d827 / local/customizations
+CURRENT_PHASE: P4 committed-SHA release gate complete; P5 pending approval
+SOURCE_BASELINE: 1b72362 / local/customizations
 IMPLEMENTATION_STARTED: yes
 PRODUCTION_CHANGED: no
-NEXT_ACTION: 先以 committed SHA 重建同一 rehearsal image 並重跑 release evidence；之後才可提出 Prod migration/role-cutover 的新鮮操作確認。
-AFTER_REVIEW: 以 committed SHA 重建並重跑 evidence；未通過該 gate 前不進入 P5 Prod migration／role cutover。
+NEXT_ACTION: 取得新的正式操作授權後，在維護窗口建立 fresh Prod backup/restore proof，重做唯讀 schema gate，再按 runbook 執行受控 migration 與 role cutover。
+AFTER_REVIEW: 未取得正式操作授權前保持三個 durable flags 關閉，不修改 Prod schema、service topology 或 frontend rollout。
 ```
 
 ## 15. 使用者目前需要做什麼
 
-目前無須重新部署、重跑 migration、建立 worker、購買資源、提交密鑰或搬移資料。這一輪仍是 source-only implementation；既有站台可繼續使用，且 durable acceptance／worker／frontend flags 都維持關閉。
+P4 committed-SHA release gate 已完成；目前已到達 P5 的正式操作決策點。若要繼續，需明確授權維護窗口內的 fresh Prod backup/restore proof、唯讀 schema gate、一次受控 migration、Zeabur role/service cutover、backend canary，以及 canary 通過後的 frontend rollout。這些步驟會修改正式 schema／服務拓撲，新增 dedicated services 也可能產生 Zeabur 費用。
+
+在取得該授權前，既有站台繼續使用目前版本；durable acceptance／worker／frontend flags 維持關閉，`1b72362` 不會推到 deployment branch，也不會建立或修改 Zeabur service。
 
 既有唯讀 API 存取已確認 deployment，不需要使用者登入 dashboard 或再提供版本資訊。Prod schema revision 已以 app-service 純讀 command 核對為 `s7h3k9m10057`；正式 migration 前仍必須建立新鮮 backup 並重做同一 gate。目前沒有需要使用者手動補做的部署操作。
 
-裝置作業系統、推播偏好與原生 App 安裝方式待 P6 再決定。真正需要使用者決策的時間點是實作 scope、正式上線窗口、具體資源費用與涉及正式資料的操作。
+裝置作業系統、推播偏好與原生 App 安裝方式待 P6 再決定。
 
 ## 16. 外部依據
 

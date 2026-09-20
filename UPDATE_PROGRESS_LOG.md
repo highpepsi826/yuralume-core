@@ -1,5 +1,28 @@
 # Update and Progress Log
 
+### 2026-09-20 - Complete committed-SHA durable-chat release gate
+
+- Rebuilt the rehearsal app image from committed source
+  `1b72362cfda36c5e9fcd44849bfe88d4050b3367`; local digest is
+  `sha256:bea05921ee5741c76edc6c16a37371d990107f9f344fec4d8324dc68b630156d`.
+- Restored the previously verified derived custom dump into a new disposable
+  PostgreSQL 18/pgvector container. The committed image upgraded it from
+  `s7h3k9m10057` to `u9e7b2a11059`; both durable tables and expected indexes
+  matched source.
+- Internal-only `api`, `coordinator`, `worker`, and `connector` role health and
+  route isolation passed. The pause/drain ownership barrier completed through
+  distributed mode with exactly one coordinator lease owner, then returned to
+  embedded mode.
+- PostgreSQL duplicate, hash-conflict, conversation-busy, API restart
+  persistence, single-attempt claim, lease fencing, and recovery-required
+  behavior passed. Deliberately invalid commands created no effect rows.
+- Verification: backend focused suite 74 passed; frontend durable suite 7
+  passed; the image build completed the production frontend/PWA build.
+  Disposable containers and networks were removed.
+- Production remains unchanged. P5 still requires fresh authorization, a new
+  migration-window Prod backup/restore proof, read-only schema gate, controlled
+  migration, role cutover, and canary. All durable flags remain off.
+
 ### 2026-09-19 - Complete isolated PostgreSQL rehearsal
 
 - Docker Desktop was made available and a temporary `pgvector/pgvector:pg16`

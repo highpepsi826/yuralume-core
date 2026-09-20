@@ -3,8 +3,23 @@
 - Date: 2026-09-20 (Asia/Hong_Kong)
 - Scope: Zeabur backup/restore proof, read-only Prod schema verification, and isolated process-role rehearsal.
 - Production mutation: none. No Prod migration, role cutover, feature flag change, service creation, or frontend rollout was performed.
-- Source image used for rehearsal: `yuralume-rehearsal/durable-chat:20260920-preflight`
-- Rehearsal image digest: `sha256:fe6ddf19d39d9831c54133ac495f16b30b6897de85475d7abdac7bb9c69a2454e`
+- Initial source image used for rehearsal: `yuralume-rehearsal/durable-chat:20260920-preflight`
+- Initial rehearsal image digest: `sha256:fe6ddf19d39d9831c54133ac495f16b30b6897de85475d7abdac7bb9c69a2454e`
+
+## Committed-SHA Release Gate
+
+The release gate was rerun from committed source `1b72362cfda36c5e9fcd44849bfe88d4050b3367`.
+
+- Image: `yuralume-rehearsal/durable-chat:20260920-committed`
+- Digest: `sha256:bea05921ee5741c76edc6c16a37371d990107f9f344fec4d8324dc68b630156d`
+- Embedded build SHA: `1b72362cfda36c5e9fcd44849bfe88d4050b3367`
+- The verified derived custom dump restored at `s7h3k9m10057`; the committed image upgraded it once to `u9e7b2a11059` and reproduced both durable tables and all expected indexes.
+- Internal-only `api`, `coordinator`, `worker`, and `connector` roles returned health `200`; non-API roles returned `404` for a public API route. Observed memory was approximately 165-185 MiB per role.
+- The execution-mode barrier passed `embedded -> paused (1) -> distributed (2) -> paused (3) -> embedded (4)`. Exactly one `background-coordinator` lease owner was observed while distributed.
+- Repository duplicate, hash-conflict, and conversation-busy decisions passed against PostgreSQL. Two deliberately invalid commands each survived acceptance, were claimed once, and stopped at `recovery_required` with attempt `1`, lease generation `1`, and no effect row.
+- A queued command remained `queued|accepted|0` across an API restart and was claimed only after the durable worker restarted.
+- Focused committed-source verification passed: backend durable suite `74 passed`; frontend outbox/client suite `7 passed`; the image build completed the frontend/PWA production build.
+- All disposable containers and networks were removed. The committed image remains locally available as release evidence.
 
 ## Backup Proof
 
@@ -87,7 +102,7 @@ Backend acceptance was enabled only on the disposable `api`; frontend `VITE_DURA
 
 ## Remaining Gates
 
-- The rehearsal image was built from the dirty worktree with a rehearsal-only build identity. A committed SHA must be built and rerun through the release gate before Prod.
+- A fresh Prod backup/restore proof and the same read-only Prod revision/schema gate are still required in the approved maintenance window. The earlier backup proves the procedure but is not the migration-window backup.
 - No real model/provider, billing, or external connector call was used in the destructive-failure tests.
 - No Prod migration or role cutover is approved by this evidence alone. Fresh backup and the same read-only revision gate are required immediately before any such operation.
 - Frontend flag and any cohort/allowlist mechanism remain off. The current backend/frontend flags are global toggles, not percentage rollout controls.
