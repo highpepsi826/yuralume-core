@@ -2336,7 +2336,12 @@ def _runtime_lease_owner_id(prefix: str) -> str:
     import socket
     from uuid import uuid4
 
-    return f"{prefix}-{socket.gethostname()[:24]}-{os.getpid()}-{uuid4().hex[:8]}"
+    suffix = f"{os.getpid()}-{uuid4().hex[:8]}"
+    head = f"{prefix}-{socket.gethostname()}"
+    # ``lease_owner`` and runtime lease owners are both VARCHAR(64). Keep the
+    # per-incarnation suffix intact and trim only the descriptive prefix/host.
+    max_head = 64 - len(suffix) - 1
+    return f"{head[:max_head]}-{suffix}"
 
 
 def _build_studio_execution_lease(
@@ -2597,10 +2602,6 @@ def _build_shadow_runtime(
         )
         return none_row
 
-    import os
-    import socket
-    from uuid import uuid4
-
     from kokoro_link.application.services.background_shadow_coordinator import (
         _DEFAULT_BUCKET_SECONDS,
         ShadowCoordinator,
@@ -2636,8 +2637,6 @@ def _build_shadow_runtime(
         # warning.
         return (queue, lease, None, None, None, None)
 
-    host = socket.gethostname()
-    pid = os.getpid()
     coordinator = None
     journal = None
     if matrix.run_background_coordinator:
@@ -2653,7 +2652,7 @@ def _build_shadow_runtime(
             journal=journal,
             character_repository=character_repository,
             operator_profile_repository=operator_profile_repository,
-            owner_id=f"shadow-coord-{host}-{pid}",
+            owner_id=_runtime_lease_owner_id("shadow-coord"),
             bucket_seconds=_DEFAULT_BUCKET_SECONDS,
             clock=clock,
             mirror_from_journal=(
@@ -2668,7 +2667,7 @@ def _build_shadow_runtime(
             character_repository=character_repository,
             subscription_access_guard=subscription_access_guard,
             operator_profile_repository=operator_profile_repository,
-            worker_id=f"shadow-worker-{host}-{pid}-{uuid4().hex[:8]}",
+            worker_id=_runtime_lease_owner_id("shadow-worker"),
             clock=clock,
             # §13 per-replica execution concurrency (execution mode only; dry-run
             # stays sequential). Deploy scales replicas × this for global width.

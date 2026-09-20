@@ -9,6 +9,7 @@ None. The lifespan starts + stops both shadow services in the mirrored position.
 from __future__ import annotations
 
 import logging
+import socket
 
 import pytest
 from fastapi.testclient import TestClient
@@ -68,6 +69,26 @@ def test_shadow_built_for_background_role_with_db(
     assert container.proactive_scheduler._tick_journal is not None  # noqa: SLF001
     assert container.proactive_scheduler._bucket_seconds == 300  # noqa: SLF001
     assert container.background_shadow_coordinator._mirror_from_journal is True  # noqa: SLF001
+
+
+def test_shadow_runtime_owner_ids_fit_persisted_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _neutralise_overlay(monkeypatch)
+    monkeypatch.setattr(socket, "gethostname", lambda: "zeabur-" + "x" * 120)
+
+    container = build_container(
+        _settings("background", "postgres", backend="postgres"),
+    )
+
+    coordinator = container.background_shadow_coordinator
+    worker = container.background_shadow_worker
+    assert coordinator is not None
+    assert worker is not None
+    assert len(coordinator._owner_id) <= 64  # noqa: SLF001
+    assert len(worker._worker_id) <= 64  # noqa: SLF001
+    assert coordinator._owner_id.startswith("shadow-coord-")  # noqa: SLF001
+    assert worker._worker_id.startswith("shadow-worker-")  # noqa: SLF001
 
 
 def test_production_postgres_backend_does_not_mirror_journal(
