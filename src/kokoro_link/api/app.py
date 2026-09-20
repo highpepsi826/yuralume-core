@@ -133,6 +133,9 @@ from kokoro_link.api.routes.world_events import router as world_events_router
 from kokoro_link.application.services.chat_stream_relay import (
     wait_for_pending_turn_completions,
 )
+from kokoro_link.application.services.runtime_process_heartbeat_publisher import (
+    RuntimeProcessHeartbeatPublisher,
+)
 from kokoro_link.application.services.drain_state import (
     SERVER_DRAINING_CODE,
     ServerDrainingError,
@@ -242,6 +245,71 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     # behaviour.
     matrix = matrix_for_role(settings.process.role)
 
+    def _service_alive(service: object | None) -> bool | None:
+        if service is None:
+            return None
+        for name in ("is_running", "running"):
+            value = getattr(service, name, None)
+            if value is not None:
+                return bool(value() if callable(value) else value)
+        started = getattr(service, "started", None)
+        if started is not None:
+            return bool(started() if callable(started) else started)
+        return None
+
+    def _heartbeat_snapshot() -> dict[str, object]:
+        coordinator = _service_alive(container.background_shadow_coordinator)
+        worker = _service_alive(getattr(container, "durable_chat_worker", None))
+        shadow_worker = _service_alive(container.background_shadow_worker)
+        scheduler_states = [
+            _service_alive(container.proactive_scheduler),
+            _service_alive(container.world_event_scheduler),
+        ]
+        connector_states = [
+            _service_alive(container.telegram_polling_service),
+            _service_alive(container.discord_gateway_service),
+            _service_alive(container.whatsapp_gateway_service),
+        ]
+        required: list[bool] = []
+        if matrix.run_background_coordinator and coordinator is not None:
+            required.append(coordinator)
+        if matrix.run_background_worker:
+            for state in (worker, shadow_worker):
+                if state is not None:
+                    required.append(state)
+        if matrix.start_schedulers:
+            required.extend(state for state in scheduler_states if state is not None)
+        if matrix.start_connectors:
+            required.extend(state for state in connector_states if state is not None)
+        connector_runtime_state = ""
+        if matrix.start_connectors:
+            if any(state is False for state in connector_states):
+                connector_runtime_state = "degraded"
+            elif any(state is True for state in connector_states):
+                connector_runtime_state = "running"
+            else:
+                connector_runtime_state = "stopped"
+        return {
+            "durable_acceptance_enabled": bool(
+                matrix.serve_api_routes
+                and getattr(container, "durable_chat_command_repository", None) is not None
+            ),
+            "durable_worker_enabled": bool(matrix.run_background_worker),
+            "durable_worker_alive": bool(worker or shadow_worker),
+            "background_coordinator_alive": bool(coordinator),
+            "connector_runtime_state": connector_runtime_state,
+            "degraded": any(not state for state in required),
+        }
+
+    heartbeat_publisher = RuntimeProcessHeartbeatPublisher(
+        repository=getattr(container, "runtime_process_heartbeat_repository", None),
+        process_role=settings.process.role,
+        build_commit_sha=build_info.build.commit_sha or "",
+        build_tag=build_info.build.image_tag or build_info.version,
+        service_name=f"yuralume-{settings.process.role}",
+        snapshot=_heartbeat_snapshot,
+    )
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Background schedulers run as single asyncio tasks for the
@@ -267,6 +335,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         # (memory default / background writer / bare container), so the start /
         # stop below is a natural no-op off the postgres backend.
         realtime_dispatcher = getattr(container, "realtime_dispatcher", None)
+
+        # Diagnostics are deliberately first in and first out: a process gets
+        # a starting observation before boot work, and records stopping before
+        # the shared database engine is disposed.
+        await heartbeat_publisher.start()
 
         # Boot-time seed/sync batch, serialised across processes by a
         # PostgreSQL advisory lock. Seven Hosted processes come up at once and
@@ -446,9 +519,14 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         # fresh replica forwards only events appended after it came up.
         if realtime_dispatcher is not None:
             await realtime_dispatcher.start()
+        await heartbeat_publisher.publish_now()
         try:
             yield
         finally:
+            try:
+                await heartbeat_publisher.stop()
+            except Exception as exc:  # fail-soft: never mask clean shutdown
+                _LOGGER.warning("runtime heartbeat stop failed: %r", exc)
             # Stop the LISTEN/poll-driven components first so their loops unwind
             # before the shared engine's pool is disposed below.
             if runtime_config_refresher is not None:

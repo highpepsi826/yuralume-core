@@ -10,6 +10,8 @@ the assertions don't depend on real background work.
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from kokoro_link.api.app import create_app
@@ -169,3 +171,21 @@ def test_default_role_preserves_current_behavior() -> None:
     assert world.started is True
     assert telegram.started is True
     assert studio.called is True
+
+
+def test_lifespan_publishes_start_and_stop_heartbeat() -> None:
+    app = _app_for_role("worker")
+    _install_fakes(app.state.container)
+
+    with TestClient(app):
+        rows = asyncio.run(
+            app.state.container.runtime_process_heartbeat_repository.list_all(),
+        )
+        assert len(rows) == 1
+        assert rows[0].process_role == "worker"
+        assert rows[0].health_state == "healthy"
+
+    rows = asyncio.run(
+        app.state.container.runtime_process_heartbeat_repository.list_all(),
+    )
+    assert rows[0].health_state == "stopping"

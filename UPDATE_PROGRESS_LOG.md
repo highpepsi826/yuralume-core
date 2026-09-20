@@ -1444,3 +1444,17 @@ database rows.
 - D1 validation passed the heartbeat contract/repository/migration tests,
   the existing tenant-width and execution-mode migration tests, and
   `compileall`. No service publishers or production deployment were changed.
+
+# 2026-09-21 - Multi-service diagnostic bundle D2 heartbeat publishers
+
+- Added a best-effort runtime heartbeat publisher with one process-incarnation
+  identity, immediate startup observation, periodic refresh, and graceful
+  `stopping` observation. Repository failures are logged and never block the
+  application lifecycle.
+- Wired the publisher into the shared FastAPI lifespan and exposed the D1
+  repository from the service container. Dedicated roles publish bounded
+  liveness flags for durable acceptance, coordinator/worker loops, and
+  connector runtime state; legacy `all`/`background` map to the D1-compatible
+  `api`/`coordinator` diagnostic roles.
+- Added lifecycle and publisher tests. Focused D2 validation passed 92 tests;
+  `compileall` and diff checks remain part of the checkpoint verification.

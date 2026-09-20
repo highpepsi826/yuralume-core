@@ -13,6 +13,9 @@ from kokoro_link.contracts.runtime_process_heartbeats import (
 from kokoro_link.infrastructure.repositories.in_memory_runtime_process_heartbeats import (
     InMemoryRuntimeProcessHeartbeatRepository,
 )
+from kokoro_link.application.services.runtime_process_heartbeat_publisher import (
+    RuntimeProcessHeartbeatPublisher,
+)
 
 
 UTC = timezone.utc
@@ -126,3 +129,38 @@ def test_model_keeps_role_and_health_values_bounded() -> None:
         "ck_runtime_process_heartbeats_health",
         None,
     }
+
+
+@pytest.mark.asyncio
+async def test_publisher_uses_one_incarnation_and_records_graceful_stop() -> None:
+    repo = InMemoryRuntimeProcessHeartbeatRepository()
+    publisher = RuntimeProcessHeartbeatPublisher(
+        repository=repo,
+        process_role="all",
+        build_commit_sha="sha",
+        build_tag="tag",
+        interval_seconds=0.5,
+        snapshot=lambda: {
+            "durable_acceptance_enabled": True,
+            "details": {"queue_depth": 3},
+        },
+    )
+
+    await publisher.start()
+    started = await repo.get(publisher.instance_id)
+    assert started is not None
+    assert started.process_role == "api"
+    assert started.health_state == "starting"
+    assert started.durable_acceptance_enabled is True
+
+    await publisher.publish_now()
+    healthy = await repo.get(publisher.instance_id)
+    assert healthy is not None
+    assert healthy.health_state == "healthy"
+    assert healthy.started_at == started.started_at
+
+    await publisher.stop()
+    stopped = await repo.get(publisher.instance_id)
+    assert stopped is not None
+    assert stopped.health_state == "stopping"
+    assert publisher.running is False

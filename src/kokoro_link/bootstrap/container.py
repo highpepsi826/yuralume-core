@@ -269,6 +269,12 @@ from kokoro_link.application.services.telegram_polling_service import (
 from kokoro_link.application.services.whatsapp_gateway_service import (
     WhatsAppGatewayService,
 )
+from kokoro_link.infrastructure.repositories.in_memory_runtime_process_heartbeats import (
+    InMemoryRuntimeProcessHeartbeatRepository,
+)
+from kokoro_link.contracts.runtime_process_heartbeats import (
+    RuntimeProcessHeartbeatRepositoryPort,
+)
 from kokoro_link.application.services.operator_persona_service import (
     OperatorPersonaService,
 )
@@ -1458,6 +1464,9 @@ class ServiceContainer:
     # bare ``ServiceContainer()`` test harnesses. Disposed once in the app
     # lifespan shutdown.
     db_engine: "AsyncEngine | None" = None
+    runtime_process_heartbeat_repository: (
+        RuntimeProcessHeartbeatRepositoryPort | None
+    ) = None
     # LINE 休眠回訪 campaign (LR series). Cloud mode only: the dormancy
     # window comes from the control plane and the send path is the Hosted
     # Channel, so a self-host deployment has neither half. ``None`` makes
@@ -2722,6 +2731,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
     # undisposed engine + pool). ``None`` on the in-memory fallback path.
     db_engine: "AsyncEngine | None" = None
     db_session_factory: "sessionmaker[AsyncSession] | None" = None
+    runtime_process_heartbeat_repository: RuntimeProcessHeartbeatRepositoryPort
     if app_settings.use_database:
         from kokoro_link.infrastructure.persistence.engine import (
             build_async_engine,
@@ -2733,6 +2743,12 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             max_overflow=app_settings.db_max_overflow,
         )
         db_session_factory = build_session_factory(db_engine)
+        from kokoro_link.infrastructure.persistence.sa_runtime_process_heartbeats import (
+            SARuntimeProcessHeartbeatRepository,
+        )
+        runtime_process_heartbeat_repository = SARuntimeProcessHeartbeatRepository(
+            db_session_factory,
+        )
         (
             character_repository,
             conversation_repository,
@@ -2953,6 +2969,9 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             db_session_factory,
         )
     else:
+        runtime_process_heartbeat_repository = (
+            InMemoryRuntimeProcessHeartbeatRepository()
+        )
         from kokoro_link.infrastructure.repositories.in_memory_pending_follow_ups import (
             InMemoryPendingFollowUpRepository,
         )
@@ -7050,4 +7069,5 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         app_settings=app_settings,
         clock=clock,
         db_engine=db_engine,
+        runtime_process_heartbeat_repository=runtime_process_heartbeat_repository,
     )
