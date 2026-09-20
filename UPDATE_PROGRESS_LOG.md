@@ -1253,10 +1253,13 @@ database rows.
 - Existing `app` service `6a983bc2573ada8b3bbe4938` was cut over to
   `YURALUME_PROCESS_ROLE=api`, `YURALUME_BACKGROUND_BACKEND=postgres`, and
   `YURALUME_REALTIME_BACKEND=postgres`; deployment
-  `6aafa5d3342483d22ad88001` is `RUNNING`, and public `/health` returned 200.
+  `6aafb4bd342483d22ad8862d` for the recorded docs commit is `RUNNING`, and
+  public `/health` returned 200.
 - Dedicated services created from the same source/image: `coordinator`
   `6aafa78e477bfd0030146976`, `worker` `6aafa794477bfd0030146998`, and
-  `connector` `6aafa79a477bfd00301469bc`. All have no public domain and private
+  `connector` `6aafa79a477bfd00301469bc`. Their final docs-commit deployments
+  were `6aafb4bf342483d22ad8862e`, `6aafb4c2342483d22ad8862f`, and
+  `6aafb4c5342483d22ad88631`. All have no public domain and private
   `/health` returned 200. Coordinator logs show the scheduler/coordinator
   responsibility; worker logs show `durable chat worker started` only after
   `YURALUME_DURABLE_CHAT_WORKER_ENABLED=true` was set on the dedicated worker.
