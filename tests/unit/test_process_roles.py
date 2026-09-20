@@ -409,7 +409,6 @@ def test_process_settings_shadow_invalid_fail_fast(monkeypatch) -> None:
     assert "YURALUME_BACKGROUND_SHADOW" in message
     assert "postgres" in message
 
-def test_only_coordinator_omits_cloud_provider_credentials() -> None:
-    assert matrix_for_role("coordinator").requires_cloud_provider_credentials is False
-    for role in ("all", "api", "background", "worker", "connector"):
+def test_every_provider_capable_role_requires_cloud_provider_credentials() -> None:
+    for role in ("all", "api", "background", "coordinator", "worker", "connector"):
         assert matrix_for_role(role).requires_cloud_provider_credentials is True

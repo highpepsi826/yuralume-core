@@ -45,6 +45,20 @@ class _NoopDispatcher:
         return None
 
 
+class _StubRealtimeDispatcher:
+    def __init__(self, *, running: bool, task_done: bool) -> None:
+        self._running = running
+        self._tasks = [_StubTask(task_done)]
+
+
+class _StubTask:
+    def __init__(self, done: bool) -> None:
+        self._done = done
+
+    def done(self) -> bool:
+        return self._done
+
+
 def _app_for_role(role: str | None):
     process = ProcessSettings(role=role) if role is not None else ProcessSettings()
     # No lifespan is entered by these tests, so the real schedulers never start;
@@ -269,6 +283,41 @@ def test_health_connector_role_ignores_dead_background_loops() -> None:
     )
     resp = TestClient(app).get("/health")
     assert resp.status_code == 200
+
+
+def test_health_connector_role_503_when_connector_loop_exited() -> None:
+    app = _app_for_role("connector")
+    app.state.container.telegram_polling_service = _StubScheduler(
+        started=True, is_running=False,
+    )
+    app.state.container.discord_gateway_service = _StubScheduler(
+        started=True, is_running=True,
+    )
+    app.state.container.whatsapp_gateway_service = _StubScheduler(
+        started=True, is_running=True,
+    )
+    resp = TestClient(app).get("/health")
+    assert resp.status_code == 503
+    assert resp.json()["reason"] == "scheduler_exited"
+
+
+def test_health_api_503_when_realtime_dispatcher_exited() -> None:
+    app = _app_for_role("api")
+    app.state.container.realtime_dispatcher = _StubScheduler(
+        started=True, is_running=False,
+    )
+    resp = TestClient(app).get("/health")
+    assert resp.status_code == 503
+    assert resp.json()["reason"] == "scheduler_exited"
+
+
+def test_health_api_503_when_realtime_dispatcher_task_finished() -> None:
+    app = _app_for_role("api")
+    app.state.container.realtime_dispatcher = _StubRealtimeDispatcher(
+        running=True, task_done=True,
+    )
+    resp = TestClient(app).get("/health")
+    assert resp.status_code == 503
 
 
 class _EmptyRepo:

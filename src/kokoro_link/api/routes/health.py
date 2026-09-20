@@ -15,9 +15,9 @@ the durable coordinator/worker under ``run_background_coordinator`` /
 ``coordinator`` / ``worker`` roles), including the opt-in durable chat worker,
 503s when that loop was started and its task
 has since exited/crashed. Every non-started shape stays 200 to avoid false
-negatives before boot: the ``api`` / ``connector`` roles (own no such loop),
-bare containers (loops ``None``), and lifespan-not-run TestClients (the task was
-never created).
+negatives before boot: bare containers (loops ``None``), and lifespan-not-run
+TestClients (the task was never created). Connector polling/retry loops and the
+API realtime dispatcher are checked when those roles own them.
 """
 
 from __future__ import annotations
@@ -52,6 +52,21 @@ def health(request: Request) -> JSONResponse:
         if matrix.run_background_worker:
             owned.append(getattr(container, "background_shadow_worker", None))
             owned.append(getattr(container, "durable_chat_worker", None))
+        if matrix.start_connectors or matrix.serve_api_routes:
+            owned.append(
+                getattr(container, "outbound_delivery_retry_worker", None),
+            )
+        if matrix.start_connectors:
+            owned.extend(
+                getattr(container, name, None)
+                for name in (
+                    "telegram_polling_service",
+                    "discord_gateway_service",
+                    "whatsapp_gateway_service",
+                )
+            )
+        if matrix.serve_api_routes:
+            owned.append(getattr(container, "realtime_dispatcher", None))
         for scheduler in owned:
             if _scheduler_exited(scheduler):
                 return JSONResponse(
@@ -91,15 +106,29 @@ def _site_settings_overlay(container: object | None) -> str:
 
 
 def _scheduler_exited(scheduler: object | None) -> bool:
-    """A wired scheduler that was ``started`` but is no longer ``is_running``
-    has exited/crashed. ``stop()`` nulls the task ref, so a clean shutdown reads
-    as not-started (never as exited). ``None`` (unwired) and fakes/stubs without
-    the liveness surface are treated as healthy — the probe must never crash on
-    a partial container or a never-started task."""
+    """Return whether a started owned loop has exited unexpectedly.
+
+    Scheduler services expose ``started``/``is_running``. Messaging and retry
+    services predate that protocol and expose ``running`` with a retained
+    ``_task``; the realtime dispatcher uses ``_running`` and ``_tasks``.
+    Clean stop paths clear their task references, so they remain healthy.
+    """
     if scheduler is None:
         return False
     started = getattr(scheduler, "started", None)
     is_running = getattr(scheduler, "is_running", None)
-    if started is None or is_running is None:
-        return False
-    return bool(started) and not bool(is_running)
+    if started is not None and is_running is not None:
+        return bool(started) and not bool(is_running)
+
+    running = getattr(scheduler, "running", None)
+    task = getattr(scheduler, "_task", None)
+    if running is not None and task is not None:
+        return not bool(running)
+
+    dispatcher_running = getattr(scheduler, "_running", None)
+    tasks = getattr(scheduler, "_tasks", None)
+    if dispatcher_running is not None and tasks is not None:
+        if not dispatcher_running:
+            return bool(tasks)
+        return any(getattr(task, "done", lambda: False)() for task in tasks)
+    return False

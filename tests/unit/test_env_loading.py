@@ -258,11 +258,17 @@ def _base_cloud_env(monkeypatch, tmp_path: Path) -> None:
         monkeypatch.delenv(key, raising=False)
 
 
-def test_cloud_mode_requires_database_even_for_credential_exempt_coordinator(
+def test_cloud_mode_requires_database_for_coordinator(
     tmp_path: Path, monkeypatch,
 ) -> None:
     _base_cloud_env(monkeypatch, tmp_path)
     monkeypatch.setenv("YURALUME_PROCESS_ROLE", "coordinator")
+    monkeypatch.setenv("YURALUME_CLOUD_USER_SERVICE_URL", "https://users.example")
+    monkeypatch.setenv("YURALUME_CLOUD_GATEWAY_URL", "https://gateway.example")
+    monkeypatch.setenv("YURALUME_CLOUD_DEPLOYMENT_TOKEN", "deployment-token")
+    monkeypatch.setenv("YURALUME_CLOUD_DEPLOYMENT_ID", "deployment-id")
+    monkeypatch.setenv("YURALUME_CLOUD_DEPLOYMENT_AUDIENCE", "core")
+    monkeypatch.setenv("YURALUME_CLOUD_USER_INTERNAL_CREDENTIAL", "core-credential")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("KOKORO_DATABASE_URL", raising=False)
 
@@ -303,28 +309,33 @@ def test_non_realtime_publisher_roles_allow_memory_backend(
         "postgres" if role == "coordinator" else "embedded",
     )
     monkeypatch.setenv("YURALUME_REALTIME_BACKEND", "memory")
-    if role == "coordinator":
-        monkeypatch.setenv(
-            "DATABASE_URL", "postgresql+asyncpg://user:pass@db:5432/app",
-        )
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql+asyncpg://user:pass@db:5432/app",
+    )
 
     assert AppSettings.from_env(project_root=tmp_path).process.role == role
 
 
-def test_coordinator_role_boots_without_cloud_deployment_token(
+def test_connector_role_requires_database(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    monkeypatch.setenv("YURALUME_PROCESS_ROLE", "connector")
+    monkeypatch.setenv("DEPLOYMENT_MODE", "local")
+    monkeypatch.setenv("KOKORO_STORAGE_PROVIDER", "memory")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(ValueError, match="connector requires DATABASE_URL"):
+        AppSettings.from_env(project_root=tmp_path)
+
+
+def test_coordinator_role_requires_cloud_deployment_token(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """sol #1: the coordinator holds no provider/federation credential (it only
-    enqueues against the durable queue), so cloud mode must NOT force it to carry
-    the deployment token the other roles need — it would crash its boot."""
+    """The coordinator owns world-event RSS/curation in the split topology, so
+    cloud mode must fail closed when its Gateway credentials are absent."""
     _base_cloud_env(monkeypatch, tmp_path)
     monkeypatch.setenv("YURALUME_PROCESS_ROLE", "coordinator")
 
-    settings = AppSettings.from_env(project_root=tmp_path)
-
-    assert settings.process.role == "coordinator"
-    assert settings.cloud.active is True
-    assert settings.cloud.deployment_token == ""  # absent, and that is allowed
+    with pytest.raises(RuntimeError, match="YURALUME_CLOUD_DEPLOYMENT_TOKEN"):
+        AppSettings.from_env(project_root=tmp_path)
 
 
 def test_worker_role_still_requires_cloud_deployment_token(

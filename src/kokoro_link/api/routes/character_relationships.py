@@ -177,5 +177,13 @@ async def tick_character_encounters(
     container: ServiceContainer = Depends(get_container),
     _admin: object = Depends(require_admin),
 ) -> CharacterEncounterTickResponse:
+    if getattr(container, "runtime_ownership", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "distributed encounter ticks are worker-owned; wait for the "
+                "durable encounter_tick job"
+            ),
+        )
     result = await container.character_encounter_service.tick()
     return CharacterEncounterTickResponse.from_domain(result)

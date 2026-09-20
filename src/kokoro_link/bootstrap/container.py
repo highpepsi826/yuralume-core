@@ -5770,17 +5770,23 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         if background_shadow_coordinator is not None:
             background_shadow_coordinator.set_runtime_ownership(runtime_ownership)
 
-    # Dedicated hosted coordinators own the site-global world-event loop, but
-    # every scheduled pass must confirm the same durable lease/epoch used by
-    # due-job coordination. Embedded all/background roles keep no guard.
-    if (
-        process_matrix.start_world_event_scheduler
-        and not process_matrix.start_schedulers
-        and background_shadow_coordinator is not None
-    ):
-        world_event_scheduler.set_leadership_guard(
-            background_shadow_coordinator.owns_live_lease,
-        )
+    # Every hosted world-event pass must confirm the same durable lease/epoch
+    # used by due-job coordination. The API has the manual routes but owns no
+    # scheduler, so its guard fails closed; the coordinator/all/background
+    # process uses its live lease. Embedded self-host keeps the historical
+    # unguarded path.
+    if ownership_enforced:
+        if background_shadow_coordinator is None:
+            async def _no_world_event_ownership() -> bool:
+                return False
+
+            world_event_scheduler.set_leadership_guard(
+                _no_world_event_ownership,
+            )
+        else:
+            world_event_scheduler.set_leadership_guard(
+                background_shadow_coordinator.owns_live_lease,
+            )
 
     # SC1-E — the idle 起幕 wrap-up. One instance serves both scheduling
     # lines: the embedded tick executor calls it per character, and the
@@ -5851,20 +5857,10 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
     if (
         ownership_enforced
         and background_job_queue is not None
-        and background_shadow_coordinator is not None
+        and background_coordinator_lease is not None
     ):
-        from kokoro_link.application.services.due_job_scheduler import (
-            NextDueCalculator,
-        )
-        from kokoro_link.application.services.due_job_reconciler import (
-            DueJobReconciler,
-        )
-        from kokoro_link.application.services.social_due_job_reconciler import (
-            SocialDueJobReconciler,
-        )
         from kokoro_link.application.services.pending_follow_up_release import (
             PendingFollowUpReleaseEnqueuer,
-            PendingFollowUpReleaseReconciler,
             PendingFollowUpReleaseWithdrawer,
         )
         from kokoro_link.application.services.post_turn_runner import (
@@ -5903,21 +5899,13 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             coordinator_lease=background_coordinator_lease,
             clock=clock,
         ))
-        _follow_up_reconciler = PendingFollowUpReleaseReconciler(
-            repository=pending_follow_up_repository,
-            enqueuer=_release_enqueuer,
-            clock=clock,
-        )
 
-        # CV4: the deferred video poll's event-driven carrier. The enqueuer is
-        # handed to the pipeline itself (which mints the next observation from
-        # inside submit / poll) and to the reconcile sweep, so both produce the
-        # same idempotent job. Only wired where a render can be queued.
-        _feed_video_reconciler = None
+        # CV4: the deferred video poll's event-driven carrier. The API needs the
+        # enqueue setter even though it does not run the coordinator reconcile
+        # sweep; the worker then owns execution of the durable poll job.
         if video_jobs_possible:
             from kokoro_link.application.services.feed_video_poll_jobs import (
                 FeedVideoPollEnqueuer,
-                FeedVideoPollReconciler,
             )
 
             _feed_video_enqueuer = FeedVideoPollEnqueuer(
@@ -5926,51 +5914,73 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
                 clock=clock,
             )
             feed_video_job_service.set_poll_enqueuer(_feed_video_enqueuer)
-            _feed_video_reconciler = FeedVideoPollReconciler(
-                repository=pending_feed_video_repository,
-                enqueuer=_feed_video_enqueuer,
-                clock=clock,
+
+        if background_shadow_coordinator is not None:
+            from kokoro_link.application.services.due_job_scheduler import (
+                NextDueCalculator,
+            )
+            from kokoro_link.application.services.due_job_reconciler import (
+                DueJobReconciler,
+            )
+            from kokoro_link.application.services.social_due_job_reconciler import (
+                SocialDueJobReconciler,
+            )
+            from kokoro_link.application.services.pending_follow_up_release import (
+                PendingFollowUpReleaseReconciler,
+            )
+            from kokoro_link.application.services.feed_video_poll_jobs import (
+                FeedVideoPollReconciler,
             )
 
-        # §13 social split: relink missing social chains (per character dream/peer
-        # + per pair encounter) on the same leader + cadence as the character
-        # reconcile. Shares the ONE NextDueCalculator and the coordinator's epoch.
-        _reconcile_next_due = NextDueCalculator(
-            resolver=due_job_profile_resolver, clock=clock,
-        )
-        _reseed_jitter = _env_int("YURALUME_DUE_RESEED_JITTER", 300)
-        _social_reconciler = SocialDueJobReconciler(
-            queue=background_job_queue,
-            character_repository=character_repository,
-            relationship_repository=character_relationship_repository,
-            next_due_calculator=_reconcile_next_due,
-            epoch_provider=lambda: background_shadow_coordinator.epoch,
-            runtime_ownership=runtime_ownership,
-            operator_profile_repository=operator_profile_repository,
-            clock=clock,
-            reseed_jitter_seconds=_reseed_jitter,
-        )
-        # Reconciler → coordinator (only where a coordinator runs in this
-        # process). Shares the coordinator's leader epoch via ``epoch_provider``.
-        _reconciler = DueJobReconciler(
-            queue=background_job_queue,
-            character_repository=character_repository,
-            next_due_calculator=_reconcile_next_due,
-            epoch_provider=lambda: background_shadow_coordinator.epoch,
-            runtime_ownership=runtime_ownership,
-            operator_profile_repository=operator_profile_repository,
-            clock=clock,
-            reseed_jitter_seconds=_reseed_jitter,
-            follow_up_reconciler=_follow_up_reconciler,
-            social_reconciler=_social_reconciler,
-            feed_video_reconciler=_feed_video_reconciler,
-        )
-        background_shadow_coordinator.set_due_job_reconciler(
-            _reconciler,
-            interval_seconds=float(
-                _env_int("YURALUME_DUE_RECONCILE_INTERVAL", 900),
-            ),
-        )
+            _follow_up_reconciler = PendingFollowUpReleaseReconciler(
+                repository=pending_follow_up_repository,
+                enqueuer=_release_enqueuer,
+                clock=clock,
+            )
+            _feed_video_reconciler = None
+            if video_jobs_possible:
+                _feed_video_reconciler = FeedVideoPollReconciler(
+                    repository=pending_feed_video_repository,
+                    enqueuer=_feed_video_enqueuer,
+                    clock=clock,
+                )
+
+            # §13 social split: relink missing social chains (per character
+            # dream/peer + per pair encounter) on the coordinator's cadence.
+            _reconcile_next_due = NextDueCalculator(
+                resolver=due_job_profile_resolver, clock=clock,
+            )
+            _reseed_jitter = _env_int("YURALUME_DUE_RESEED_JITTER", 300)
+            _social_reconciler = SocialDueJobReconciler(
+                queue=background_job_queue,
+                character_repository=character_repository,
+                relationship_repository=character_relationship_repository,
+                next_due_calculator=_reconcile_next_due,
+                epoch_provider=lambda: background_shadow_coordinator.epoch,
+                runtime_ownership=runtime_ownership,
+                operator_profile_repository=operator_profile_repository,
+                clock=clock,
+                reseed_jitter_seconds=_reseed_jitter,
+            )
+            _reconciler = DueJobReconciler(
+                queue=background_job_queue,
+                character_repository=character_repository,
+                next_due_calculator=_reconcile_next_due,
+                epoch_provider=lambda: background_shadow_coordinator.epoch,
+                runtime_ownership=runtime_ownership,
+                operator_profile_repository=operator_profile_repository,
+                clock=clock,
+                reseed_jitter_seconds=_reseed_jitter,
+                follow_up_reconciler=_follow_up_reconciler,
+                social_reconciler=_social_reconciler,
+                feed_video_reconciler=_feed_video_reconciler,
+            )
+            background_shadow_coordinator.set_due_job_reconciler(
+                _reconciler,
+                interval_seconds=float(
+                    _env_int("YURALUME_DUE_RECONCILE_INTERVAL", 900),
+                ),
+            )
 
     pending_follow_up_admin_service = PendingFollowUpAdminService(
         repository=pending_follow_up_repository,
@@ -6015,8 +6025,6 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         from kokoro_link.infrastructure.persistence.sa_pair_lease import (
             SAPairLease,
         )
-        import socket as _socket
-
         assert db_session_factory is not None
         assert background_job_queue is not None
         _worker_next_due = NextDueCalculator(
@@ -6064,7 +6072,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             next_due_calculator=_worker_next_due,
             epoch_provider=_worker_epoch_provider,
             pair_lease=SAPairLease(db_session_factory),
-            pair_lease_owner=f"social-worker-{_socket.gethostname()}-{os.getpid()}",
+            pair_lease_owner=_runtime_lease_owner_id("social-worker"),
             operator_profile_repository=operator_profile_repository,
             clock=clock,
         )

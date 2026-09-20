@@ -9,7 +9,7 @@ response, and decides whether to run again.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from kokoro_link.api.dependencies import (
     ensure_owned_character_id,
@@ -47,6 +47,18 @@ async def consolidate_memories(
         kwargs["min_cluster_size"] = payload.min_cluster_size
     if decay_policy is not None:
         kwargs["decay_policy"] = decay_policy
+
+    if not payload.dry_run:
+        trigger = getattr(container, "auto_consolidation_trigger", None)
+        if (
+            trigger is not None
+            and getattr(container, "runtime_ownership", None) is not None
+        ):
+            if not await trigger.claim_manual(character_id):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="memory consolidation is already claimed or unavailable",
+                )
 
     report = await service.consolidate(character_id, **kwargs)
     return MemoryConsolidationResponse(

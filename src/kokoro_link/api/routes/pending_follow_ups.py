@@ -368,6 +368,26 @@ async def trigger_tick(
     so calling this on a row whose scheduled_for is still in the future
     is a no-op.
     """
+    # In the distributed topology the API is an enqueue/read role. Running the
+    # embedded dispatcher here would race the worker and bypass its lease and
+    # fencing contract, so mint the same durable release jobs used by the
+    # coordinator reconcile instead.
+    if getattr(container, "runtime_ownership", None) is not None:
+        repository = getattr(container, "pending_follow_up_repository", None)
+        enqueuer = getattr(container, "pending_follow_up_release_enqueuer", None)
+        if repository is None or enqueuer is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="distributed pending-follow-up enqueue path not wired",
+            )
+        due = await repository.list_due(now=datetime.now(tz=timezone.utc))
+        queued = sum(
+            1
+            for row in due
+            if await enqueuer.enqueue(row)
+        )
+        return TickResponse(resolved=queued)
+
     dispatcher = container.pending_follow_up_dispatcher
     if dispatcher is None:
         raise HTTPException(

@@ -107,6 +107,18 @@ class AutoConsolidationTrigger:
         finally:
             self._running.discard(character_id)
 
+    async def claim_manual(self, character_id: str) -> bool:
+        """Claim an explicit non-dry-run admin consolidation.
+
+        Manual API calls share the same cross-process cooldown claim as the
+        automatic post-turn trigger, so an API replica cannot overlap a worker
+        consolidation. The explicit request bypasses the automatic pool-size
+        threshold but still fails closed when the claim cannot be proven.
+        """
+        if not character_id:
+            return False
+        return await self._claim(character_id)
+
     async def _claim(self, character_id: str) -> bool:
         try:
             return await self._characters.claim_consolidation_slot(

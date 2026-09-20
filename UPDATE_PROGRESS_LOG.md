@@ -1383,3 +1383,29 @@ database rows.
   re-enqueues it later. Two LumeGram `feed_compose` jobs completed without a new
   post because no eligible source was selected in those rounds; the execution
   chain itself is healthy.
+
+# 2026-09-20 - Cutover ownership correctness fixes
+
+- Split distributed container wiring so API roles receive the durable
+  follow-up, post-turn, and deferred-video enqueue paths while coordinator-only
+  reconcilers remain coordinator-owned. Added API wiring assertions.
+- Extended `/health` liveness checks to connector polling, outbound delivery
+  retry, and API realtime dispatcher loops, including compatibility with their
+  existing `running`/task state surfaces.
+- Made the coordinator provider-capable because it owns world-event RSS
+  ingestion and curation; cloud env validation now requires its Gateway
+  credentials. Dedicated connector boot now requires `DATABASE_URL` so leases,
+  receipts, and delivery ledgers cannot silently become process-local.
+- Added ownership guards to world-event manual triggers, distributed pending
+  follow-up admin ticks, encounter manual ticks, and non-dry-run memory
+  consolidation. Manual distributed work now queues or fails closed instead of
+  racing worker-owned execution.
+- Added `v1w2x3y40001` to widen queue, realtime outbox, and external delivery
+  tenant columns from 64 to the authoritative 128 characters. Bounded pair-lease
+  names and social worker owner IDs now remain valid for long imported IDs and
+  hostnames.
+- Updated the Zeabur role matrix/template so dedicated services explicitly set
+  process, background, shadow, realtime, and durable-chat flags.
+- Focused validation passed: 15 pair-lease tests, 28 health/wiring tests, 5
+  world-event tests, 15 memory/consolidation tests, and 3 tenant migration
+  tests. Full suite remains to be run before deployment.

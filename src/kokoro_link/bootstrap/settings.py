@@ -1741,9 +1741,7 @@ class AppSettings:
             )
 
         process = load_process_settings()
-        # Cloud credential validation is role-aware (see ``_load_cloud_settings``):
-        # the coordinator role holds no provider/federation credential, so it is
-        # exempted from the deployment-token requirement other roles enforce.
+        # Cloud credential validation is role-aware (see ``_load_cloud_settings``).
         cloud = _load_cloud_settings(role=process.role)
         # Cloud Core has no safe in-memory persistence mode: identity projections,
         # conversations, durable jobs and delivery ledgers would silently diverge or
@@ -1753,6 +1751,15 @@ class AppSettings:
             raise ValueError(
                 "YURALUME_CLOUD_ENABLED=true requires DATABASE_URL; "
                 "Cloud Core cannot boot on in-memory persistence",
+            )
+        # A dedicated connector relies on shared account leases, inbound
+        # receipts, and delivery ledgers. Allowing it to boot without the DB
+        # silently turns those guarantees into process-local state and is unsafe
+        # as soon as Zeabur runs more than one connector replica.
+        if process.role == "connector" and not database_url:
+            raise ValueError(
+                "YURALUME_PROCESS_ROLE=connector requires DATABASE_URL; "
+                "connector leases and receipts live in the shared database",
             )
         # A split API/headless publisher cannot use a process-local realtime bus:
         # player events would reach only that replica (or no SSE subscriber at all).
@@ -1968,16 +1975,10 @@ def _load_cloud_settings(role: str = "all") -> CloudSettings:
         _validate_cloud_channel_settings(settings)
     if not settings.active:
         return settings
-    # Role-aware credential requirement (§11 / sol #1). The dedicated
-    # ``coordinator`` role serves no public API and never calls the LLM gateway —
-    # it only runs the leader lease + due-discovery + enqueue loop against the
-    # durable queue, so it holds NO provider/federation credential and needs the
-    # database alone. Forcing it to carry the cloud deployment/gateway/introspect
-    # secrets would crash its boot with a RuntimeError for tokens it never uses.
-    # api / worker / connector / all / background still validate the full set
-    # (they serve routes or execute gateway-backed ticks).
-    if role == "coordinator":
-        return settings
+    # Role-aware credential requirement (§11). The dedicated coordinator owns
+    # the site-global world-event scheduler, whose RSS ingestion and curation
+    # require the cloud embedder in hosted mode. It therefore validates the same
+    # provider/federation credentials as the other provider-capable roles.
     missing = [
         name
         for name, value in (

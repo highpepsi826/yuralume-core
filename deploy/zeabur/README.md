@@ -62,9 +62,23 @@ domain can be added after the empty stack succeeds. Copy
 `production.env.example` into the Zeabur service environment editor, replacing
 only the placeholders with service-private hostnames and secrets.
 
-The app service must remain one production replica using the default `all`
-process role. A local debugger or secondary notebook must not start another
-default runtime against this database.
+The production deployment uses explicit process roles. The public `app` service
+uses `YURALUME_PROCESS_ROLE=api`, `YURALUME_BACKGROUND_BACKEND=postgres`,
+`YURALUME_BACKGROUND_SHADOW=postgres`, and
+`YURALUME_REALTIME_BACKEND=postgres`. Run these roles from the same image and
+the same database:
+
+| Service | `YURALUME_PROCESS_ROLE` | Background | Realtime | Durable chat worker |
+| --- | --- | --- | --- | --- |
+| `app` | `api` | `postgres` + shadow `postgres` | `postgres` | `false` |
+| `coordinator` | `coordinator` | `postgres` + shadow `postgres` | `memory` | `false` |
+| `worker` | `worker` | `postgres` + shadow `postgres` | `postgres` | `true` |
+| `connector` | `connector` | `embedded` | `memory` | `false` |
+
+Every service must set `DATABASE_URL`. The connector uses shared account leases,
+inbound receipts, and delivery ledgers even though it does not consume the
+background queue. A local debugger or secondary notebook must not start another
+runtime against this database.
 
 ## Database Service
 

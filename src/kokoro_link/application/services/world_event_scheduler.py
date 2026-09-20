@@ -210,6 +210,10 @@ class WorldEventScheduler:
 
         Returns the ``IngestionReport`` so admin endpoints can surface
         per-source counts instead of having to parse the log."""
+        if not await self._can_run_scheduled_pass():
+            raise RuntimeError(
+                "world-event ingest is not owned by this process",
+            )
         report = await self._ingest.ingest_all()
         try:
             await self._ingest.gc()
@@ -222,6 +226,10 @@ class WorldEventScheduler:
 
         Returns one row per character with the count added to its
         inbox, so admin endpoints can show what changed."""
+        if not await self._can_run_scheduled_pass():
+            raise RuntimeError(
+                "world-event curation is not owned by this process",
+            )
         characters = await self._characters.list()
         results: list[dict] = []
         for character in characters:

@@ -49,6 +49,7 @@ fails — the same abort signal the studio lease derives from an epoch mismatch.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -61,8 +62,17 @@ half of an encounter pair lease. Distinct from ``background-coordinator`` /
 
 
 def pair_lease_name(character_id: str) -> str:
-    """Row name for one character's half of a pair lease."""
-    return f"{LEASE_NAME_PREFIX}{character_id}"
+    """Row name for one character's half of a pair lease.
+
+    ``background_runtime_leases.name`` is ``VARCHAR(64)``. Keep ordinary IDs
+    readable, but hash long imported/custom IDs so PostgreSQL never rejects the
+    encounter claim after SQLite has accepted it.
+    """
+    readable = f"{LEASE_NAME_PREFIX}{character_id}"
+    if len(readable) <= 64:
+        return readable
+    digest = hashlib.sha256(readable.encode("utf-8")).hexdigest()[:32]
+    return f"encounter:h:{digest}"
 
 
 def canonical_pair(a: str, b: str) -> tuple[str, str]:

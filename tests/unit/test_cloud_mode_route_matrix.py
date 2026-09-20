@@ -33,6 +33,7 @@ from kokoro_link.bootstrap.settings import (
 )
 from kokoro_link.infrastructure.tts.cloud_gateway import CloudGatewayTTSAdapter
 from kokoro_link.infrastructure.tts.null import NullTTSAdapter
+from kokoro_link.infrastructure.embedder.cloud_gateway import CloudGatewayEmbedder
 from kokoro_link.infrastructure.usage.llm_metering import MeteredActiveLLMProvider
 
 
@@ -134,19 +135,14 @@ def test_cloud_mode_without_runtime_config_flag_uses_env_presets() -> None:
     assert container.cloud_routing_profile_resolver is None
 
 
-def test_tokenless_cloud_coordinator_builds_without_gateway_adapters() -> None:
-    """The coordinator only enqueues durable work and must hold no provider token.
-
-    Exercise the real composition root with embedding enabled so both eager Cloud
-    adapters (embedding and TTS) are covered; lazy LLM/image/video factories are
-    never resolved by this role.
-    """
+def test_cloud_coordinator_wires_gateway_adapters_for_world_events() -> None:
+    """The coordinator owns RSS/curation and therefore needs hosted adapters."""
     settings = AppSettings(
         cloud=CloudSettings(
             enabled=True,
             user_service_url="https://users.example",
             gateway_url="https://gateway.example",
-            deployment_token="",
+            deployment_token="ykl_deploy",
         ),
         embedding=EmbeddingSettings(
             model="text-embedding-bge-m3",
@@ -157,4 +153,5 @@ def test_tokenless_cloud_coordinator_builds_without_gateway_adapters() -> None:
 
     container = build_container(settings)
 
-    assert isinstance(container.tts_service._port, NullTTSAdapter)  # noqa: SLF001
+    assert isinstance(container.tts_service._port, CloudGatewayTTSAdapter)  # noqa: SLF001
+    assert isinstance(container.embedder._backend, CloudGatewayEmbedder)  # noqa: SLF001

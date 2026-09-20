@@ -70,6 +70,7 @@ class ComponentMatrix:
         return (
             self.serve_api_routes
             or self.start_schedulers
+            or self.start_world_event_scheduler
             or self.start_connectors
             or self.run_background_worker
         )

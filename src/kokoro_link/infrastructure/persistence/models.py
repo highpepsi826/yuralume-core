@@ -3259,7 +3259,7 @@ class BackgroundJobRow(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     kind: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    tenant_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     operator_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     character_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     due_at: Mapped[datetime] = mapped_column(
@@ -3413,7 +3413,7 @@ class RealtimeEventRow(Base):
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, autoincrement=True,
     )
-    tenant_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     operator_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     event_kind: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_json: Mapped[str] = mapped_column(
@@ -3530,7 +3530,7 @@ class ExternalChatTurnReceiptRow(Base):
     canonical_request_hash: Mapped[str] = mapped_column(
         String(64), nullable=False,
     )
-    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
     account_id: Mapped[str] = mapped_column(String(64), nullable=False)
     character_id: Mapped[str] = mapped_column(String(64), nullable=False)
     channel: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -3616,7 +3616,7 @@ class ExternalProactiveEventRow(Base):
     )
 
     event_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
     account_id: Mapped[str] = mapped_column(String(64), nullable=False)
     character_id: Mapped[str] = mapped_column(String(64), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)

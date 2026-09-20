@@ -47,6 +47,9 @@ class TestCanonicalHelpers:
 
     def test_name_namespace(self) -> None:
         assert pair_lease_name("c1") == "encounter:c1"
+        long_name = pair_lease_name("x" * 128)
+        assert len(long_name) <= 64
+        assert long_name.startswith("encounter:h:")
 
     def test_structural_port(self) -> None:
         assert isinstance(_lease(), PairLeasePort)

@@ -119,13 +119,20 @@ def test_shadow_api_role_builds_queue_port_only(
     # scheduler) — and it must NOT warn (api+shadow is a valid config now).
     _neutralise_overlay(monkeypatch)
     with caplog.at_level(logging.WARNING, logger="kokoro_link.bootstrap.container"):
-        container = build_container(_settings("api", "postgres"))
+        container = build_container(
+            _settings("api", "postgres", backend="postgres"),
+        )
 
     assert container.background_job_queue is not None
     assert container.background_coordinator_lease is not None
     assert container.background_shadow_coordinator is None
     assert container.background_shadow_worker is None
     assert container.proactive_scheduler._tick_journal is None  # noqa: SLF001
+    # API owns the enqueue write points, while the coordinator owns reconcile.
+    # This keeps foreground requests durable without starting a second leader.
+    assert container.chat_service._pending_follow_up_release_enqueuer is not None  # noqa: SLF001
+    assert container.chat_service._post_turn_enqueuer is not None  # noqa: SLF001
+    assert container.pending_follow_up_dispatcher._capability_enqueuer is not None  # noqa: SLF001
     assert not any(
         "starts no schedulers" in rec.message for rec in caplog.records
     )

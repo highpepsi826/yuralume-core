@@ -205,7 +205,10 @@ async def trigger_ingest(
     scheduler = container.world_event_scheduler
     if scheduler is None:
         raise HTTPException(503, "world_event_scheduler unavailable")
-    report = await scheduler.trigger_ingest_now()
+    try:
+        report = await scheduler.trigger_ingest_now()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "sources_attempted": report.sources_attempted,
         "sources_succeeded": report.sources_succeeded,
@@ -226,7 +229,10 @@ async def trigger_curate(
     scheduler = container.world_event_scheduler
     if scheduler is None:
         raise HTTPException(503, "world_event_scheduler unavailable")
-    results = await scheduler.trigger_curate_now()
+    try:
+        results = await scheduler.trigger_curate_now()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "characters": len(results),
         "total_added": sum(r["added"] for r in results if r["added"] >= 0),
