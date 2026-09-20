@@ -1238,3 +1238,35 @@ database rows.
 - Evidence: `deploy/zeabur/SAME_SPACE_DURABLE_CHAT_REHEARSAL_20260920.md`.
 - Next: rebuild the rehearsal image from a committed SHA before any new Prod
   migration or role-cutover confirmation.
+
+# 2026-09-20 - Same-space durable P5 role cutover and canary hold
+
+- Status: Prod migration and process-role cutover completed from committed
+  SHA `7c62126e7f35ce53daf52fd413defc87eb3a5c99`; durable acceptance canary
+  intentionally held and backend acceptance rolled back to `false`.
+- Fresh backup/restore evidence: Zeabur backup job `6aaf9445c42213bc3a0e5057`,
+  native archive `same-space-durable-20260920-080817-prod-native.zip`, derived
+  custom dump SHA-256
+  `7DE4E9AFA4D8B9FCE6D70353E1F753C5238A266D9F3EC747CDFA41FE97227F37`.
+- Schema: Prod advanced once from `s7h3k9m10057` through `t8d6f1a10058` to
+  `u9e7b2a11059`; durable tables and required constraints/indexes were verified.
+- Existing `app` service `6a983bc2573ada8b3bbe4938` was cut over to
+  `YURALUME_PROCESS_ROLE=api`, `YURALUME_BACKGROUND_BACKEND=postgres`, and
+  `YURALUME_REALTIME_BACKEND=postgres`; deployment
+  `6aafa5d3342483d22ad88001` is `RUNNING`, and public `/health` returned 200.
+- Dedicated services created from the same source/image: `coordinator`
+  `6aafa78e477bfd0030146976`, `worker` `6aafa794477bfd0030146998`, and
+  `connector` `6aafa79a477bfd00301469bc`. All have no public domain and private
+  `/health` returned 200. Coordinator logs show the scheduler/coordinator
+  responsibility; worker logs show `durable chat worker started` only after
+  `YURALUME_DURABLE_CHAT_WORKER_ENABLED=true` was set on the dedicated worker.
+- Backend acceptance was enabled only for an unauthenticated smoke check
+  (`401` as expected), then set back to `false`. Frontend
+  `VITE_DURABLE_CHAT_ENABLED` was never enabled. A read-only search found no
+  explicit Prod identity marked `canary`/`test`, so no durable command,
+  message append, billing action, or effect was created; both durable tables
+  remain empty.
+- Follow-up: provide a dedicated authorized test account/character before
+  temporarily enabling backend acceptance for the bounded canary. Keep the
+  frontend flag off until receipt, duplicate, status, restart, append, and
+  post-turn effect checks pass.

@@ -549,16 +549,17 @@ Worker opt-in 另外使用 `YURALUME_DURABLE_CHAT_LEASE_SECONDS`（預設 180）
 - [x] 在等價隔離 process-role 環境完成 worker startup／shutdown、resource、restart、API restart、pause/drain/distributed ownership 與 durable acceptance/worker rehearsal；connector 外部連線仍留待 Prod canary。
 - [x] 文件化具體 migration／backup／資源／role 切換／回退清單；尚未對任何正式環境執行。
 - [x] 以 committed SHA `1b72362` 重建 image，重跑 restore/migration、四 role health、ownership barrier、duplicate/busy/conflict、API restart 與 worker recovery evidence；digest 為 `sha256:bea05921ee5741c76edc6c16a37371d990107f9f344fec4d8324dc68b630156d`。
-- [ ] 取得正式操作授權後執行 P5，記錄實際 SHA、schema、health、owner 與驗收結果。
+- [x] 取得正式操作授權後完成 P5 preflight、migration、API/dedicated role cutover、worker opt-in 與 rollback gate；記錄實際 SHA、schema、health、role 與 flags。
+- [ ] 使用專用 canary identity 完成 Prod durable acceptance／duplicate／status／restart／append／effect 驗收；目前 Prod 沒有明確標記的 canary identity，因此 acceptance flag 已 rollback 關閉，沒有寫入任何聊天資料。
 
 ```text
 CURRENT_TASK: 同場可靠聊天 durable command implementation
-CURRENT_PHASE: P4 committed-SHA release gate complete; P5 pending approval
-SOURCE_BASELINE: 1b72362 / local/customizations
+CURRENT_PHASE: P5 role cutover and worker readiness complete; acceptance canary blocked on dedicated test identity
+SOURCE_BASELINE: 7c62126e7f35ce53daf52fd413defc87eb3a5c99 / local/customizations
 IMPLEMENTATION_STARTED: yes
-PRODUCTION_CHANGED: no
-NEXT_ACTION: 取得新的正式操作授權後，在維護窗口建立 fresh Prod backup/restore proof，重做唯讀 schema gate，再按 runbook 執行受控 migration 與 role cutover。
-AFTER_REVIEW: 未取得正式操作授權前保持三個 durable flags 關閉，不修改 Prod schema、service topology 或 frontend rollout。
+PRODUCTION_CHANGED: yes (schema migration and process-role topology only; no chat/user data written)
+NEXT_ACTION: Provide an explicitly authorized test account/character, then run the bounded Prod canary with backend acceptance temporarily enabled; keep frontend rollout off until all canary checks pass.
+AFTER_REVIEW: YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED=false; YURALUME_DURABLE_CHAT_WORKER_ENABLED=true only on dedicated worker; VITE_DURABLE_CHAT_ENABLED unset/false. Dedicated api/coordinator/worker/connector services remain deployed.
 ```
 
 ## 15. 使用者目前需要做什麼
