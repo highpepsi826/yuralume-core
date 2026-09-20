@@ -3424,6 +3424,62 @@ class RealtimeEventRow(Base):
     )
 
 
+class RuntimeProcessHeartbeatRow(Base):
+    """One bounded observation for a process incarnation.
+
+    This is diagnostic evidence only.  It deliberately has no lease or
+    ownership semantics; stale rows remain until retention prunes them.
+    """
+
+    __tablename__ = "runtime_process_heartbeats"
+    __table_args__ = (
+        CheckConstraint(
+            "process_role IN ('api', 'coordinator', 'worker', 'connector')",
+            name="ck_runtime_process_heartbeats_role",
+        ),
+        CheckConstraint(
+            "health_state IN ('starting', 'healthy', 'degraded', 'stopping')",
+            name="ck_runtime_process_heartbeats_health",
+        ),
+        Index(
+            "ix_runtime_process_heartbeats_role_seen",
+            "process_role",
+            "last_seen_at",
+        ),
+        Index(
+            "ix_runtime_process_heartbeats_seen",
+            "last_seen_at",
+        ),
+    )
+
+    instance_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    process_role: Mapped[str] = mapped_column(String(16), nullable=False)
+    service_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    build_commit_sha: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    build_tag: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    health_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    durable_acceptance_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+    )
+    durable_worker_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+    )
+    durable_worker_alive: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+    )
+    background_coordinator_alive: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+    )
+    connector_runtime_state: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="", server_default="",
+    )
+    details_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}", server_default="{}",
+    )
+
+
 class BackgroundVisibleSlotRow(Base):
     """At-most-once claim ledger for visible per-character background output.
 

@@ -1429,3 +1429,18 @@ database rows.
   gaps (legacy stream/probe expectations, missing external feature-manifest
   artifacts, a real-clock retry fixture, and the pre-migration FX1 assertion),
   with no test errors when using a writable pytest base directory.
+
+# 2026-09-20 - Multi-service diagnostic bundle D1 heartbeat contract
+
+- Added additive migration `w2k7m9n10060` for `runtime_process_heartbeats`.
+  Rows identify one process incarnation and record build identity, bounded
+  health/liveness flags, and allow-listed aggregate counters only. Database
+  check constraints bound process roles and health states; stale rows remain
+  available until retention pruning.
+- Added the shared heartbeat contract, in-memory parity repository, and
+  SQLAlchemy repository with idempotent upsert, list, get, and retention
+  pruning operations. Unknown detail keys and oversized scalar values are
+  rejected before persistence.
+- D1 validation passed the heartbeat contract/repository/migration tests,
+  the existing tenant-width and execution-mode migration tests, and
+  `compileall`. No service publishers or production deployment were changed.
