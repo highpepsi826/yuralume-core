@@ -13,6 +13,20 @@
   frontend/PWA build, i18n catalog/timezone checks, and diff checks passed.
   Production deployment and data resolution were not performed.
 
+### 2026-09-26 - Deploy durable chat recovery end flow to hosted app
+
+- Git result: committed as `d8af612` on `local/customizations` and pushed to
+  the personal fork.
+- Deployment: Zeabur rebuilt only the existing `app` service. The final
+  deployment `6ab7d3184fe789a2e8fefb23` is `RUNNING` for commit
+  `d8af612a53aa21ca6a519b702fc0e3d81c389a09`; the prior same-commit build was
+  replaced after an explicit app-only redeploy refreshed the frontend cache.
+- Verification: `https://yuralume-prod.zeabur.app/health` returned HTTP 200
+  with `status=ok` and `site_settings_overlay=db`. The served StagePage bundle
+  contains the recovery end-flow symbols. Existing storage, PostgreSQL,
+  coordinator, worker, and connector services remained `RUNNING`; no
+  migration, flag, storage, or user-data operation was performed.
+
 ### 2026-09-20 - Complete committed-SHA durable-chat release gate
 
 - Rebuilt the rehearsal app image from committed source
