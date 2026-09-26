@@ -1,5 +1,17 @@
 # Update and Progress Log
 
+### 2026-09-26 - Make diagnostic bundle names collision-resistant
+
+- Source-only repair: diagnostic downloads now use
+  `yuralume-diagnostic-<quick|standard|full>-<YYYYMMDDTHHMMSSZ>.zip`.
+  The selected preset is sent to the API, and the browser uses the server's
+  `Content-Disposition` filename instead of replacing it with a character ID.
+- Compatibility: callers that omit the preset default to `quick`; bundle
+  contents, access control, time-window limits, and data retention are
+  unchanged. No migration or production operation was performed.
+- Verification: observability route tests 15 passed, frontend API tests 5
+  passed, frontend production build passed, and `git diff --check` passed.
+
 ### 2026-09-26 - Add durable chat recovery end flow
 
 - Source-only repair: a worker interruption can now be explicitly ended by the

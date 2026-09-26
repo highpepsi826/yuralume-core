@@ -16,7 +16,7 @@ import io
 import json
 import zipfile
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
@@ -341,6 +341,7 @@ async def list_turns(
 @router.get("/admin/observability/diagnostic-export")
 async def diagnostic_export(
     character_id: str = Query(..., min_length=1),
+    incident_type: Literal["quick", "standard", "full"] = Query(default="quick"),
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     include_prompt: bool = Query(default=False),
@@ -573,7 +574,11 @@ async def diagnostic_export(
             "Storage: current metadata of selected character's referenced objects, not a historical inventory.\n"
             "Zeabur restart/OOM/probe events remain external. No migration is implied by a missing source.\n"
         ))
-    filename = f"yuralume-diagnostic-{character_id}-{start.strftime('%Y%m%d-%H%M')}.zip"
+    exported_at = datetime.now(timezone.utc)
+    filename = (
+        f"yuralume-diagnostic-{incident_type}-"
+        f"{exported_at.strftime('%Y%m%dT%H%M%SZ')}.zip"
+    )
     return Response(content=buffer.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"',
                              "Cache-Control": "no-store",

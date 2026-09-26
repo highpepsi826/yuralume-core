@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import axios from 'axios'
 import {
+  downloadDiagnosticExport,
   exportUsageEventsCsv,
   listUsageEvents,
   usageSummary,
@@ -164,6 +165,41 @@ describe('usage observability API', () => {
           capability: undefined,
           character_id: undefined,
           limit: 500,
+        },
+        responseType: 'blob',
+      },
+    )
+  })
+
+  it('uses the server diagnostic filename with the incident type and seconds', async () => {
+    const archive = new Blob(['zip'])
+    mockedAxios.get.mockResolvedValueOnce({
+      data: archive,
+      headers: {
+        'content-disposition': 'attachment; filename="yuralume-diagnostic-standard-20260926T150835Z.zip"',
+      },
+    })
+
+    await expect(downloadDiagnosticExport({
+      characterId: 'char-1',
+      incidentType: 'standard',
+    })).resolves.toEqual({
+      blob: archive,
+      filename: 'yuralume-diagnostic-standard-20260926T150835Z.zip',
+    })
+
+    expect(mockedAxios.get).toHaveBeenCalledWith(
+      '/api/v1/admin/observability/diagnostic-export',
+      {
+        params: {
+          character_id: 'char-1',
+          incident_type: 'standard',
+          since: undefined,
+          until: undefined,
+          include_prompt: undefined,
+          include_messages: undefined,
+          include_logs: undefined,
+          include_storage_metadata: undefined,
         },
         responseType: 'blob',
       },

@@ -257,19 +257,28 @@ export async function getTurn(turnId: string): Promise<TurnRecordDetail> {
   return data
 }
 
+export interface DiagnosticExportFile {
+  blob: Blob
+  filename: string
+}
+
+export type DiagnosticExportType = 'quick' | 'standard' | 'full'
+
 export async function downloadDiagnosticExport(params: {
   characterId: string
+  incidentType?: DiagnosticExportType
   since?: string
   until?: string
   includePrompt?: boolean
   includeMessages?: boolean
   includeLogs?: boolean
   includeStorageMetadata?: boolean
-}): Promise<Blob> {
-  const { data } = await axios.get<Blob>(`${BASE}/diagnostic-export`, {
+}): Promise<DiagnosticExportFile> {
+  const response = await axios.get<Blob>(`${BASE}/diagnostic-export`, {
     responseType: 'blob',
     params: {
       character_id: params.characterId,
+      incident_type: params.incidentType || 'quick',
       since: params.since || undefined,
       until: params.until || undefined,
       include_prompt: params.includePrompt || undefined,
@@ -278,7 +287,29 @@ export async function downloadDiagnosticExport(params: {
       include_storage_metadata: params.includeStorageMetadata || undefined,
     },
   })
-  return data
+  const disposition = response.headers?.['content-disposition']
+  return {
+    blob: response.data,
+    filename: parseDiagnosticFilename(disposition) || fallbackDiagnosticFilename(params.incidentType),
+  }
+}
+
+function parseDiagnosticFilename(header: string | undefined): string | null {
+  if (!header) return null
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header)?.[1]
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded)
+    } catch {
+      // Fall through to the ASCII filename token.
+    }
+  }
+  return /filename="([^\"]+)"/i.exec(header)?.[1] || null
+}
+
+function fallbackDiagnosticFilename(incidentType: DiagnosticExportType = 'quick'): string {
+  const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  return `yuralume-diagnostic-${incidentType}-${timestamp}.zip`
 }
 
 export async function updateTurnOperatorFeedback(

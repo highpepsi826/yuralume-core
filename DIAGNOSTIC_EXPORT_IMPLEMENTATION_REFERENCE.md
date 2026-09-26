@@ -7,6 +7,22 @@ current deployed UI does not provide a Turn-record JSON export or a bundled
 incident export. Operators need a local artifact for investigating a Telegram
 delivery failure by time window.
 
+## Download filename follow-up (2026-09-26)
+
+The browser currently overrides the server's filename with a stable character
+ID, allowing unrelated exports to look identical. The server's alternate name
+uses the requested window start and minute precision. Name new downloads
+`yuralume-diagnostic-<quick|standard|full>-<YYYYMMDDTHHMMSSZ>.zip`, using
+the export completion time in UTC. Pass the UI's selected diagnostic preset to
+the API, and use the server's `Content-Disposition` filename in the browser.
+Existing API callers default to `quick`; export contents, access controls,
+retention, and production data remain unchanged. No migration is needed.
+
+Checklist: update the backend filename/query contract; wire the browser to the
+response filename; add focused backend/frontend tests; run focused checks and
+record the source result. Production deployment is separate from this source
+change.
+
 ## Scope
 
 - Add an admin-only diagnostic export API and UI entry point.

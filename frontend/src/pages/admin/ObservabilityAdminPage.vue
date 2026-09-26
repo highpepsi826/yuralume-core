@@ -6,7 +6,7 @@ import type { Character } from '@/types/character'
 import { listCharacters } from '@/utils/api/characters'
 import ObservabilityPanel from '@/components/observability/ObservabilityPanel.vue'
 import { UiButton, UiCard, UiSelect, UiBadge } from '@/components/ui'
-import { downloadDiagnosticExport } from '@/utils/api/observability'
+import { downloadDiagnosticExport, type DiagnosticExportType } from '@/utils/api/observability'
 
 const { t } = useI18n()
 
@@ -25,7 +25,7 @@ const exportIncludePrompt = ref(false)
 const exportIncludeMessages = ref(false)
 const exportIncludeLogs = ref(false)
 const exportIncludeStorageMetadata = ref(false)
-const exportPreset = ref('quick')
+const exportPreset = ref<DiagnosticExportType>('quick')
 const exportBusy = ref(false)
 const exportError = ref<string | null>(null)
 
@@ -34,8 +34,9 @@ async function exportDiagnostic() {
   exportBusy.value = true
   exportError.value = null
   try {
-    const blob = await downloadDiagnosticExport({
+    const exportFile = await downloadDiagnosticExport({
       characterId: selected.value,
+      incidentType: exportPreset.value,
       since: toIsoInstant(exportSince.value),
       until: toIsoInstant(exportUntil.value),
       includePrompt: exportIncludePrompt.value,
@@ -43,10 +44,10 @@ async function exportDiagnostic() {
       includeLogs: exportIncludeLogs.value,
       includeStorageMetadata: exportIncludeStorageMetadata.value,
     })
-    const url = URL.createObjectURL(blob)
+    const url = URL.createObjectURL(exportFile.blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `yuralume-diagnostic-${selected.value}.zip`
+    anchor.download = exportFile.filename
     anchor.click()
     URL.revokeObjectURL(url)
   } catch (err) {
@@ -56,7 +57,7 @@ async function exportDiagnostic() {
   }
 }
 
-function applyPreset(value: string) {
+function applyPreset(value: DiagnosticExportType) {
   exportPreset.value = value
   exportIncludePrompt.value = value === 'full'
   exportIncludeMessages.value = value !== 'quick'

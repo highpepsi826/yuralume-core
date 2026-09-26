@@ -79,10 +79,13 @@ def test_diagnostic_export_full_scope_is_bounded_and_reports_sources():
     client = _client(container)
     response = client.get(
         "/api/v1/admin/observability/diagnostic-export"
-        "?character_id=c1&include_prompt=true&include_messages=true"
+        "?character_id=c1&incident_type=standard&include_prompt=true&include_messages=true"
         "&include_logs=true&include_storage_metadata=true"
     )
     assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert 'filename="yuralume-diagnostic-standard-' in disposition
+    assert disposition.endswith('.zip"')
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         summary = json.loads(archive.read("summary.json"))
         assert "incident_summary.json" in archive.namelist()
