@@ -375,3 +375,22 @@ class DurableChatCommandRepositoryPort(Protocol):
     ) -> bool:
         """Fence a command into manual/provider reconciliation."""
         ...
+
+    async def resolve_recovery(
+        self,
+        *,
+        turn_id: str,
+        owner_id: str,
+        failure_code: str,
+        failure_message: str,
+        now: datetime | None = None,
+    ) -> bool:
+        """End an owner-confirmed recovery wait without replaying the turn.
+
+        ``recovery_required`` rows are always eligible.  A claimed/processing/
+        generated/committed row is eligible only after its lease has expired;
+        a live worker must remain the sole owner of that command.  The
+        transition clears the lease and fences stale callbacks before making
+        the command terminal, so the conversation admission can reopen.
+        """
+        ...

@@ -636,6 +636,8 @@ export const messages: MessageSchema = {
       replying: '{name} が返信中',
       streamReconnecting: '接続を切り替えました。返信を待っています…',
       streamStillProcessing: '処理中です。完了すると返信が自動的に表示されます…',
+      recoveryRequired: 'このターンの結果を確認できませんでした。',
+      endRecovery: '待機を終了',
       attach: 'ファイルを添付',
       attachImage: '画像を添付',
       attachLimit: '上限 {n}',
@@ -792,6 +794,9 @@ export const messages: MessageSchema = {
       streamReconnecting: '接続が切れました。返信の状態を確認しています…',
       streamStillProcessing: 'サーバーで処理中です。完了すると自動的に返信が表示されます。',
       streamAbortedByRestart: 'サービスが再起動したため返信を完了できませんでした。メッセージは保存済みです。もう一度送信してください。',
+      recoveryRequired: 'このターンの結果を確認できません。待機を終了してから、もう一度送信してください。元のプロバイダー／請求結果は照合用に保持されます。',
+      recoveryResolved: 'このターンの待機を終了しました。もう一度入力して送信してください。元の結果は照合用に保持されています。',
+      recoveryResolveFailed: 'まだ待機を終了できません。しばらくしてからもう一度お試しください。',
     },
   },
   feed: {

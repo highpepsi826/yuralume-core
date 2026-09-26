@@ -184,3 +184,36 @@ async def test_sql_adapter_expired_claim_becomes_recovery_required() -> None:
     assert recovered.phase is ChatTurnPhase.RECOVERY_REQUIRED
     assert recovered.failure_code == "worker_lease_expired"
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sql_adapter_owner_can_resolve_recovery() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(ChatTurnCommandRow.__table__.create)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession)
+    repository = SADurableChatCommandRepository(session_factory)
+    accepted_at = datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
+    accepted = await repository.submit(
+        _submission(client_message_id="client-1", message="hello"),
+    )
+    assert isinstance(accepted, AcceptedCommand)
+    claim = await repository.claim_next(
+        "worker-1", lease_seconds=10, now=accepted_at,
+    )
+    assert claim is not None
+    assert await repository.claim_next(
+        "worker-2", lease_seconds=10, now=accepted_at.replace(second=10),
+    ) is None
+    assert await repository.resolve_recovery(
+        turn_id=claim.command.turn_id,
+        owner_id="user-1",
+        failure_code="recovery_abandoned",
+        failure_message="owner ended recovery wait",
+        now=accepted_at.replace(second=10),
+    )
+    resolved = await repository.get(claim.command.turn_id, owner_id="user-1")
+    assert resolved is not None
+    assert resolved.state is ChatTurnCommandState.CANCELLED
+    assert resolved.lease_generation == 2
+    await engine.dispose()

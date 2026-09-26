@@ -1,5 +1,18 @@
 # Update and Progress Log
 
+### 2026-09-26 - Add durable chat recovery end flow
+
+- Source-only repair: a worker interruption can now be explicitly ended by the
+  authenticated owner after `recovery_required` or an expired execution lease.
+  The command is fenced and terminal without replaying unknown provider or
+  billing effects; the frontend releases its sending lock and local receipt so
+  the player can retry.
+- Evidence: the current diagnostic bundle showed a persisted user message with
+  no following assistant row and an API restart during the incident window.
+- Verification: focused backend/frontend tests, Vue typecheck, production
+  frontend/PWA build, i18n catalog/timezone checks, and diff checks passed.
+  Production deployment and data resolution were not performed.
+
 ### 2026-09-20 - Complete committed-SHA durable-chat release gate
 
 - Rebuilt the rehearsal app image from committed source

@@ -133,6 +133,16 @@ export async function getChatTurnStatus(turnId: string): Promise<ChatTurnStatus>
   return res.json() as Promise<ChatTurnStatus>
 }
 
+/** End an owner-confirmed recovery wait without replaying the turn. */
+export async function resolveChatTurnRecovery(turnId: string): Promise<ChatTurnStatus> {
+  const res = await authedFetch(
+    `/api/v1/chat/turns/${encodeURIComponent(turnId)}/resolve-recovery`,
+    { method: 'POST' },
+  )
+  if (!res.ok) throw await chatErrorFromResponse(res, 'Could not end chat recovery')
+  return res.json() as Promise<ChatTurnStatus>
+}
+
 export async function getActiveChatTurn(
   conversationId: string,
 ): Promise<ChatTurnStatus | null> {

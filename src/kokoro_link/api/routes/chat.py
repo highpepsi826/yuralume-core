@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -33,6 +34,7 @@ from kokoro_link.application.dto.chat import (
 )
 from kokoro_link.contracts.durable_chat_commands import (
     AcceptedCommand,
+    ChatTurnCommandState,
     ChatTurnCommandSubmission,
     ConversationBusy,
     IdempotencyConflict,
@@ -215,6 +217,96 @@ async def get_chat_turn_status(
             record.last_heartbeat_at.isoformat()
             if record.last_heartbeat_at else None
         ),
+    )
+
+
+@router.post(
+    "/chat/turns/{turn_id}/resolve-recovery",
+    response_model=ChatTurnStatusResponse,
+)
+async def resolve_durable_chat_recovery(
+    turn_id: str,
+    container: ServiceContainer = Depends(get_container),
+    current_user_id: str = Depends(get_current_user_id),
+) -> ChatTurnStatusResponse:
+    """Fence an owner-confirmed, unrecoverable turn and release its gate.
+
+    This is deliberately narrower than a general cancel endpoint.  A live
+    worker-owned command cannot be cancelled here; only a command already in
+    ``recovery_required`` or one whose execution lease has expired is eligible.
+    Ending the wait does not assert that a provider call was refunded or that
+    an external effect did not happen.  The terminal row remains queryable for
+    reconciliation and the lease generation is bumped to fence stale workers.
+    """
+
+    if not _durable_chat_acceptance_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "durable_chat_acceptance_disabled",
+                "message": "Durable chat acceptance is not enabled",
+            },
+        )
+    durable_repo = getattr(container, "durable_chat_command_repository", None)
+    if durable_repo is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Durable chat command repository is not wired",
+        )
+    command = await durable_repo.get(turn_id, owner_id=current_user_id)
+    if command is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Turn not found")
+    if command.state is ChatTurnCommandState.CANCELLED:
+        return _durable_status_response(command)
+    now = datetime.now(timezone.utc)
+    expired = command.lease_until is None or command.lease_until <= now
+    eligible_state = command.state in {
+        ChatTurnCommandState.RECOVERY_REQUIRED,
+        ChatTurnCommandState.CLAIMED,
+        ChatTurnCommandState.PROCESSING,
+        ChatTurnCommandState.GENERATED,
+        ChatTurnCommandState.COMMITTED,
+    }
+    if not (
+        command.state is ChatTurnCommandState.RECOVERY_REQUIRED
+        or (eligible_state and expired)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "chat_turn_not_recoverable",
+                "message": "The chat turn is still owned by a live worker",
+            },
+        )
+    changed = await durable_repo.resolve_recovery(
+        turn_id=turn_id,
+        owner_id=current_user_id,
+        failure_code="recovery_abandoned",
+        failure_message=(
+            "The worker wait was ended by the owner; provider and billing "
+            "outcome still requires reconciliation"
+        ),
+        now=now,
+    )
+    if not changed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "chat_turn_recovery_race",
+                "message": "The chat turn changed before recovery could be ended",
+            },
+        )
+    resolved = await durable_repo.get(turn_id, owner_id=current_user_id)
+    if resolved is None:  # pragma: no cover - defensive owner-scope guard
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Turn not found")
+    effects = getattr(container, "durable_chat_effect_ledger", None)
+    effect_state = None
+    if effects is not None:
+        effect = await effects.get(turn_id=turn_id, effect_kind="post_turn")
+        effect_state = effect.state.value if effect is not None else None
+    return _durable_status_response(
+        resolved,
+        post_turn_effect_state=effect_state,
     )
 
 

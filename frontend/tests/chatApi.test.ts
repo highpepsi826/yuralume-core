@@ -7,6 +7,7 @@ import {
   ChatStreamProtocolError,
   InsufficientCreditsError,
   isChatStreamAbortedError,
+  resolveChatTurnRecovery,
   sendChatMessage,
   sendChatMessageStream,
 } from '@/utils/api/chat'
@@ -21,6 +22,22 @@ const mockedAuthedFetch = vi.mocked(authedFetch)
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+describe('chat recovery API', () => {
+  it('ends an owner-confirmed recovery wait through the fenced endpoint', async () => {
+    mockedAuthedFetch.mockResolvedValueOnce(jsonResponse(200, {
+      turn_id: 'turn-1', conversation_id: 'conversation-1', status: 'cancelled',
+    }))
+
+    const result = await resolveChatTurnRecovery('turn-1')
+
+    expect(mockedAuthedFetch).toHaveBeenCalledWith(
+      '/api/v1/chat/turns/turn-1/resolve-recovery',
+      { method: 'POST' },
+    )
+    expect(result.status).toBe('cancelled')
+  })
 })
 
 describe('chat API runtime limit errors', () => {

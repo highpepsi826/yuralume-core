@@ -646,6 +646,58 @@ class SADurableChatCommandRepository(DurableChatCommandRepositoryPort):
             await session.commit()
             return True
 
+    async def resolve_recovery(
+        self,
+        *,
+        turn_id: str,
+        owner_id: str,
+        failure_code: str,
+        failure_message: str,
+        now: datetime | None = None,
+    ) -> bool:
+        current = _utc(now or datetime.now(timezone.utc))
+        async with self._session_factory() as session:
+            row = await session.scalar(
+                select(ChatTurnCommandRow)
+                .where(
+                    ChatTurnCommandRow.turn_id == turn_id,
+                    ChatTurnCommandRow.owner_id == owner_id,
+                )
+                .with_for_update(),
+            )
+            if row is None:
+                return False
+            if row.state == ChatTurnCommandState.RECOVERY_REQUIRED.value:
+                eligible = True
+            else:
+                eligible = (
+                    row.state in {
+                        ChatTurnCommandState.CLAIMED.value,
+                        ChatTurnCommandState.PROCESSING.value,
+                        ChatTurnCommandState.GENERATED.value,
+                        ChatTurnCommandState.COMMITTED.value,
+                    }
+                    and (
+                        row.lease_until is None
+                        or _utc(row.lease_until) <= current
+                    )
+                )
+            if not eligible:
+                await session.rollback()
+                return False
+            row.state = ChatTurnCommandState.CANCELLED.value
+            row.phase = ChatTurnPhase.RECOVERY_REQUIRED.value
+            row.failure_code = failure_code
+            row.failure_message = failure_message
+            row.lease_owner = None
+            row.lease_until = None
+            row.next_attempt_at = None
+            row.lease_generation += 1
+            row.updated_at = current
+            row.last_heartbeat_at = current
+            await session.commit()
+            return True
+
     @staticmethod
     async def _select_fenced_live(
         session: AsyncSession,

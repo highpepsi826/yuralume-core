@@ -114,4 +114,25 @@ describe('DurableChatClient', () => {
     expect(result.record.state).toBe('completed')
     expect((await client.pending())).toHaveLength(0)
   })
+
+  it('turns an expired worker lease into an explicit recovery state', async () => {
+    vi.mocked(submitDurableChatTurn).mockResolvedValue({
+      turn_id: 'turn-1', conversation_id: 'conversation-1', status: 'queued',
+    })
+    vi.mocked(getChatTurnStatus).mockResolvedValue({
+      turn_id: 'turn-1',
+      conversation_id: 'conversation-1',
+      status: 'processing',
+      lease_until: '2000-01-01T00:00:00Z',
+    })
+    const store = createMemoryChatDurableOutboxStore()
+    const client = new DurableChatClient({ ownerKey: 'user-1', store })
+    const record = await client.save({ character_id: 'character-1', message: 'hello' })
+
+    const result = await client.waitForCompletion(record, { intervalMs: 250 })
+
+    expect(result.status.status).toBe('recovery_required')
+    expect(result.status.failure_code).toBe('worker_lease_expired')
+    expect(result.record.state).toBe('recovery_required')
+  })
 })

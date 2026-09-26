@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,7 @@ from fastapi import HTTPException
 from kokoro_link.api.routes.chat import (
     get_active_durable_chat_turn,
     get_chat_turn_status,
+    resolve_durable_chat_recovery,
     submit_durable_chat_turn,
 )
 from kokoro_link.application.dto.chat import SendChatMessageRequest
@@ -199,3 +201,83 @@ async def test_active_turn_lookup_is_owner_scoped_for_a_second_device(
     assert found.turn_id == accepted.turn_id
     assert found.status == "queued"
     assert hidden is None
+
+
+@pytest.mark.asyncio
+async def test_owner_can_end_recovery_and_reopen_conversation(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    monkeypatch.setenv("YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED", "true")
+    container = _container()
+    accepted = await submit_durable_chat_turn(
+        SendChatMessageRequest(
+            character_id="character-1",
+            message="hello",
+            client_message_id="client-1",
+        ),
+        container=container,
+        current_user_id="default",
+        _drain_gate=None,
+    )
+    repository = container.durable_chat_command_repository
+    claim_time = datetime.now(timezone.utc)
+    claim = await repository.claim_next(
+        "worker-1", lease_seconds=30,
+        now=claim_time,
+    )
+    assert claim is not None
+    assert await repository.mark_recovery_required(
+        turn_id=claim.command.turn_id,
+        worker_id="worker-1",
+        lease_generation=claim.command.lease_generation,
+        failure_code="executor_unhandled_error",
+        failure_message="unknown provider outcome",
+        now=claim_time,
+    )
+
+    resolved = await resolve_durable_chat_recovery(
+        accepted.turn_id,
+        container=container,
+        current_user_id="default",
+    )
+
+    assert resolved.status == "cancelled"
+    assert resolved.failure_code == "recovery_abandoned"
+    assert await get_active_durable_chat_turn(
+        accepted.conversation_id,
+        container=container,
+        current_user_id="default",
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_owner_cannot_end_a_live_worker_turn(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    monkeypatch.setenv("YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED", "true")
+    container = _container()
+    accepted = await submit_durable_chat_turn(
+        SendChatMessageRequest(
+            character_id="character-1",
+            message="hello",
+            client_message_id="client-1",
+        ),
+        container=container,
+        current_user_id="default",
+        _drain_gate=None,
+    )
+    claim_time = datetime.now(timezone.utc)
+    claim = await container.durable_chat_command_repository.claim_next(
+        "worker-1", lease_seconds=30, now=claim_time,
+    )
+    assert claim is not None
+
+    with pytest.raises(HTTPException) as caught:
+        await resolve_durable_chat_recovery(
+            accepted.turn_id,
+            container=container,
+            current_user_id="default",
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.detail["code"] == "chat_turn_not_recoverable"

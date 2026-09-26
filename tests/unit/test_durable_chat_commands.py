@@ -274,6 +274,47 @@ async def test_expired_lease_requires_recovery_and_is_not_replayed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_owner_can_resolve_recovery_and_release_conversation_admission() -> None:
+    repository = InMemoryDurableChatCommandRepository()
+    accepted = await repository.submit(_submission())
+    assert isinstance(accepted, AcceptedCommand)
+    claim = await repository.claim_next(
+        "worker-1", lease_seconds=30, now=accepted.command.accepted_at,
+    )
+    assert claim is not None
+    assert await repository.mark_processing(
+        turn_id=claim.command.turn_id,
+        worker_id="worker-1",
+        lease_generation=claim.command.lease_generation,
+        phase=ChatTurnPhase.WAITING_MODEL,
+        now=accepted.command.accepted_at,
+    )
+    assert await repository.mark_recovery_required(
+        turn_id=claim.command.turn_id,
+        worker_id="worker-1",
+        lease_generation=claim.command.lease_generation,
+        failure_code="executor_unhandled_error",
+        failure_message="unknown provider outcome",
+        now=accepted.command.accepted_at,
+    )
+
+    assert await repository.resolve_recovery(
+        turn_id=claim.command.turn_id,
+        owner_id="user-1",
+        failure_code="recovery_abandoned",
+        failure_message="owner ended recovery wait",
+        now=accepted.command.accepted_at,
+    )
+    resolved = await repository.get(claim.command.turn_id, owner_id="user-1")
+    assert resolved is not None
+    assert resolved.state is ChatTurnCommandState.CANCELLED
+    assert resolved.lease_owner is None
+    assert await repository.active_for_conversation(
+        "conversation-1", owner_id="user-1",
+    ) is None
+
+
+@pytest.mark.asyncio
 async def test_completed_command_clears_lease_and_releases_admission() -> None:
     repository = InMemoryDurableChatCommandRepository()
     accepted = await repository.submit(_submission())

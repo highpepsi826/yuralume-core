@@ -15,11 +15,13 @@ import {
   getActiveChatTurn,
   getLatestConversation,
   isChatStreamAbortedError,
+  resolveChatTurnRecovery,
   sendChatMessage,
   sendChatMessageStream,
   uploadChatAttachments,
   undoLastTurn,
 } from '@/utils/api/chat'
+import type { ChatTurnStatus } from '@/utils/api/chat'
 import {
   DurableChatClient,
   DurableChatSyncAbortedError,
@@ -228,7 +230,8 @@ const olderCursor = ref<number | null>(null)
 const loadingOlder = ref(false)
 const streamingText = ref('')
 const liveTurnId = ref<string | null>(null)
-const turnRecoveryStatus = ref<'reconnecting' | 'processing' | null>(null)
+const turnRecoveryStatus = ref<'reconnecting' | 'processing' | 'recovery_required' | null>(null)
+const resolvingDurableRecovery = ref(false)
 const durableChatEnabled = import.meta.env.VITE_DURABLE_CHAT_ENABLED === 'true'
 const durableOutboxStore = createChatDurableOutboxStore()
 const durableOwnerKey = computed(() => {
@@ -248,6 +251,7 @@ const durableChatClient = computed(() => new DurableChatClient({
 }))
 let durableWaitAbortController: AbortController | null = null
 let durableRestoreAbortController: AbortController | null = null
+let durableRecoveryLockId: number | null = null
 /** Which tool the character is running right now (SSE tool_activity
  * frames), or null. Drives the typing indicator's icon + diegetic
  * line; transitions live in utils/toolActivity (pure, unit-tested). */
@@ -445,6 +449,8 @@ function abandonInFlightTurn(nextCharacterId: string | null) {
   activeToolName.value = null
   liveTurnId.value = null
   turnRecoveryStatus.value = null
+  durableRecoveryLockId = null
+  resolvingDurableRecovery.value = false
   abandonSendingLock()
   // The undo is a second in-flight request with its own lock, and it holds
   // three buttons hostage (undo, open-a-scene, load-older). Disowning it the
@@ -1760,21 +1766,27 @@ async function runDurableChatTurn(
       inputText.value = request.message
       localMessages.value.push({
         role: 'assistant',
-        content: completed.status.failure_message || t('chat.errors.streamFailed'),
+        content: completed.status.failure_code === 'recovery_abandoned'
+          ? t('chat.errors.recoveryResolved')
+          : completed.status.failure_message || t('chat.errors.streamFailed'),
       })
     } else if (
       completed.status.status === 'recovery_required'
       || completed.status.post_turn_effect_state === 'recovery_required'
     ) {
-      turnRecoveryStatus.value = 'processing'
+      turnRecoveryStatus.value = 'recovery_required'
       keepGate = true
+      durableRecoveryLockId = lockId
       localMessages.value.push({
         role: 'assistant',
-        content: completed.status.failure_message || t('chat.errors.streamStillProcessing'),
+        content: t('chat.errors.recoveryRequired'),
       })
     }
-    liveTurnId.value = null
-    if (completed.status.status !== 'recovery_required') {
+    if (
+      completed.status.status !== 'recovery_required'
+      && completed.status.post_turn_effect_state !== 'recovery_required'
+    ) {
+      liveTurnId.value = null
       turnRecoveryStatus.value = null
     }
   } catch (error) {
@@ -1879,12 +1891,14 @@ async function restoreActiveDurableTurn(conversationId: string | null): Promise<
       if (
         refreshed.status === 'recovery_required'
         || refreshed.post_turn_effect_state === 'recovery_required'
+        || isExpiredDurableLease(refreshed)
       ) {
         // The canonical reply is already committed. Keep the conversation
-        // gate visible until an operator/reconciliation action resolves the
-        // outstanding effect; never silently turn it into a new send window.
-        turnRecoveryStatus.value = 'processing'
+        // gate visible until the owner explicitly ends the unknown wait; never
+        // silently turn it into a new send window or replay the command.
+        turnRecoveryStatus.value = 'recovery_required'
         keepGate = true
+        durableRecoveryLockId = lockId
         return
       }
       turnRecoveryStatus.value = 'processing'
@@ -1903,6 +1917,71 @@ async function restoreActiveDurableTurn(conversationId: string | null): Promise<
       turnRecoveryStatus.value = null
       releaseSendingLock(lockId)
     }
+  }
+}
+
+function isExpiredDurableLease(status: ChatTurnStatus): boolean {
+  if (!['claimed', 'processing', 'generated', 'committed'].includes(status.status)) {
+    return false
+  }
+  if (!status.lease_until) return false
+  const leaseUntil = Date.parse(status.lease_until)
+  return Number.isFinite(leaseUntil) && leaseUntil <= Date.now()
+}
+
+async function resolveActiveDurableRecovery(): Promise<void> {
+  const turnId = liveTurnId.value
+  if (
+    !turnId
+    || turnRecoveryStatus.value !== 'recovery_required'
+    || resolvingDurableRecovery.value
+  ) return
+  const lockId = durableRecoveryLockId
+  resolvingDurableRecovery.value = true
+  try {
+    const resolved = await resolveChatTurnRecovery(turnId)
+    if (resolved.status !== 'cancelled') return
+    durableRestoreSeq += 1
+    durableRestoreAbortController?.abort()
+    durableRestoreAbortController = null
+    durableWaitAbortController?.abort()
+    durableWaitAbortController = null
+    const client = durableChatClient.value
+    try {
+      const records = await client.pending()
+      const record = records.find((item) => item.turnId === turnId)
+      if (record) await client.forget(record)
+    } catch {
+      // Terminal server state is authoritative; local cleanup can retry later.
+    }
+    try {
+      if (props.character) {
+        const snapshot = await getLatestConversation(props.character.id)
+        if (snapshot && (!props.conversationId || snapshot.id === props.conversationId)) {
+          localMessages.value = [...snapshot.messages]
+        }
+      }
+    } catch {
+      // Keep the existing transcript and release the gate even if history is down.
+    }
+    localMessages.value.push({
+      role: 'assistant',
+      content: t('chat.errors.recoveryResolved'),
+    })
+    liveTurnId.value = null
+    turnRecoveryStatus.value = null
+    durableRecoveryLockId = null
+    if (lockId !== null) releaseSendingLock(lockId)
+    else abandonSendingLock()
+    await scrollToBottom()
+    focusInput()
+  } catch {
+    localMessages.value.push({
+      role: 'assistant',
+      content: t('chat.errors.recoveryResolveFailed'),
+    })
+  } finally {
+    resolvingDurableRecovery.value = false
   }
 }
 
@@ -1957,6 +2036,7 @@ async function syncDurableOutbox(): Promise<void> {
       timeoutMs: null,
       signal: controller.signal,
     })
+    liveTurnId.value = result.status.turn_id
     if (result.status.status === 'completed') {
       try {
         const snapshot = await getLatestConversation(props.character.id)
@@ -1974,18 +2054,23 @@ async function syncDurableOutbox(): Promise<void> {
         // Keep the terminal record if local deletion is temporarily blocked;
         // ``pending`` excludes it and a later maintenance pass may clean it.
       }
+      liveTurnId.value = null
     } else if (result.status.status === 'failed' || result.status.status === 'cancelled') {
       inputText.value = result.record.payload.message
       localMessages.value.push({
         role: 'assistant',
-        content: result.status.failure_message || t('chat.errors.streamFailed'),
+        content: result.status.failure_code === 'recovery_abandoned'
+          ? t('chat.errors.recoveryResolved')
+          : result.status.failure_message || t('chat.errors.streamFailed'),
       })
+      liveTurnId.value = null
     } else if (
       result.status.status === 'recovery_required'
       || result.status.post_turn_effect_state === 'recovery_required'
     ) {
-      turnRecoveryStatus.value = 'processing'
+      turnRecoveryStatus.value = 'recovery_required'
       keepGate = true
+      durableRecoveryLockId = lockId
     }
   } catch (error) {
     if (!(error instanceof DurableChatSyncAbortedError)) {
@@ -2010,6 +2095,7 @@ async function syncDurableOutbox(): Promise<void> {
     if (durableWaitAbortController === controller) durableWaitAbortController = null
     if (!keepGate && turnRecoveryStatus.value !== 'reconnecting') {
       turnRecoveryStatus.value = null
+      liveTurnId.value = null
       releaseSendingLock(lockId)
     }
   }
@@ -2650,7 +2736,9 @@ onUnmounted(() => {
           <span v-else-if="turnRecoveryStatus" class="tool-activity" role="status">
             {{ turnRecoveryStatus === 'processing'
               ? t('chat.errors.streamStillProcessing')
-              : t('chat.errors.streamReconnecting') }}
+              : turnRecoveryStatus === 'recovery_required'
+                ? t('chat.errors.recoveryRequired')
+                : t('chat.errors.streamReconnecting') }}
           </span>
         </div>
 
@@ -2696,6 +2784,15 @@ onUnmounted(() => {
           </span>
           <span v-else-if="turnRecoveryStatus === 'processing'">
             {{ t('chat.input.streamStillProcessing') }}
+          </span>
+          <span v-else-if="turnRecoveryStatus === 'recovery_required'" class="chat-recovery-status">
+            <span>{{ t('chat.input.recoveryRequired') }}</span>
+            <button
+              type="button"
+              class="chat-recovery-status__action"
+              :disabled="resolvingDurableRecovery"
+              @click="resolveActiveDurableRecovery"
+            >{{ t('chat.input.endRecovery') }}</button>
           </span>
           <span v-else>
             {{ t('chat.input.replying', { name: characterDisplayName }) }}
@@ -3447,6 +3544,32 @@ onUnmounted(() => {
   border-radius: 50%;
   background: var(--color-accent, #8b6cff);
   animation: tool-activity-pulse 1.6s ease-in-out infinite;
+}
+
+.chat-recovery-status {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-recovery-status__action {
+  border: 1px solid color-mix(in srgb, currentColor 42%, transparent);
+  border-radius: 5px;
+  padding: 2px 8px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-recovery-status__action:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.chat-recovery-status__action:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 .chat-assist-panel {

@@ -568,6 +568,23 @@ AFTER_REVIEW: YURALUME_DURABLE_CHAT_ACCEPTANCE_ENABLED=true and VITE_DURABLE_CHA
 
 ## 15. 使用者目前需要做什麼
 
+### 15.1 Worker 中斷後的 recovery gate 修正（2026-09-26）
+
+目前觀察到 worker 在回合執行中失敗、瀏覽器重新整理後，前端會繼續輪詢
+`processing`／`recovery_required`，但 source 沒有 owner 可用的結束等待路徑，
+因此永久保留 sending lock。這違反 §7.3「recovery_required 不能成為永久的
+sending lock」的既定契約。
+
+本次只補可明確選擇的 recovery 結束流程：owner 以短請求將已失去有效 lease
+或已進入 `recovery_required` 的 command fenced 為 `cancelled`，清除 lease、
+保留原 failure／reconciliation 訊息，並讓前端清掉本機 outbox 與 sending lock。
+不會把未知的 provider／billing 結果宣稱為失敗已退款，也不會自動重播舊 command。
+仍在有效 lease 下的 `processing` command 不可被此動作取消；若 lease 已過期，
+resolve 交易會先把它轉成 recovery，再完成 fence。
+
+非目標：不改既有聊天歷史、計費、post-turn effect 或 production deployment。
+先完成 source focused tests 與 frontend build；部署／正式資料 resolve 另需操作決策。
+
 P5 frontend global cutover 已完成，使用者目前不需要提供額外診斷資料。專用 canary 角色與本次兩筆 cutover canary 依決定保留供日後重驗；backend acceptance、dedicated worker 與 frontend durable build 均保持啟用。
 
 玩家重新整理或 service worker 更新後會載入 durable bundle。接下來只需完成至少一個正常日週期的 production observation；rollback 仍保留關閉 frontend flag 的 build，遇到 no-go 條件時先切回 frontend，再處理 backend acceptance 與已接受工作。

@@ -517,6 +517,52 @@ class InMemoryDurableChatCommandRepository(DurableChatCommandRepositoryPort):
             )
             return True
 
+    async def resolve_recovery(
+        self,
+        *,
+        turn_id: str,
+        owner_id: str,
+        failure_code: str,
+        failure_message: str,
+        now: datetime | None = None,
+    ) -> bool:
+        async with self._lock:
+            current = _utc(now or datetime.now(timezone.utc))
+            command = self._commands.get(turn_id)
+            if command is None or command.owner_id != owner_id:
+                return False
+            if command.state is ChatTurnCommandState.RECOVERY_REQUIRED:
+                eligible = True
+            else:
+                eligible = (
+                    command.state in {
+                        ChatTurnCommandState.CLAIMED,
+                        ChatTurnCommandState.PROCESSING,
+                        ChatTurnCommandState.GENERATED,
+                        ChatTurnCommandState.COMMITTED,
+                    }
+                    and (
+                        command.lease_until is None
+                        or command.lease_until <= current
+                    )
+                )
+            if not eligible:
+                return False
+            self._commands[turn_id] = replace(
+                command,
+                state=ChatTurnCommandState.CANCELLED,
+                phase=ChatTurnPhase.RECOVERY_REQUIRED,
+                failure_code=failure_code,
+                failure_message=failure_message,
+                lease_owner=None,
+                lease_until=None,
+                next_attempt_at=None,
+                lease_generation=command.lease_generation + 1,
+                updated_at=current,
+                last_heartbeat_at=current,
+            )
+            return True
+
     async def set_state_for_test(
         self,
         turn_id: str,

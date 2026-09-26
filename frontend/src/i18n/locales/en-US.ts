@@ -638,6 +638,8 @@ export const messages: MessageSchema = {
       replying: '{name} is replying',
       streamReconnecting: 'Connection switched; waiting for the reply…',
       streamStillProcessing: 'Still processing; the reply will appear automatically…',
+      recoveryRequired: 'This turn could not be confirmed.',
+      endRecovery: 'End waiting',
       attach: 'Attach file',
       attachImage: 'Attach image',
       attachLimit: 'Max {n}',
@@ -794,6 +796,9 @@ export const messages: MessageSchema = {
       streamReconnecting: 'The connection dropped; checking the reply status…',
       streamStillProcessing: 'The server is still working. The reply will appear automatically when ready.',
       streamAbortedByRestart: 'The service restarted before this reply finished. Your message was saved; please send it again.',
+      recoveryRequired: 'This turn could not be confirmed. End waiting, then send it again. The original provider and billing outcome remains for reconciliation.',
+      recoveryResolved: 'Waiting ended for this turn. Enter the message again to retry; the original outcome remains for reconciliation.',
+      recoveryResolveFailed: 'The wait could not be ended yet. Please try again shortly.',
     },
   },
   feed: {

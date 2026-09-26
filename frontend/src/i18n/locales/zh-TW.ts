@@ -637,6 +637,8 @@ export const messages = {
       replying: '{name} 正在回覆',
       streamReconnecting: '連線已切換，正在等待回覆…',
       streamStillProcessing: '仍在處理，完成後會自動顯示回覆…',
+      recoveryRequired: '這一輪的結果目前無法確認。',
+      endRecovery: '結束等待',
       attach: '附加檔案',
       attachImage: '附加圖片',
       attachLimit: '上限 {n}',
@@ -793,6 +795,9 @@ export const messages = {
       streamReconnecting: '連線中斷，正在確認回覆狀態…',
       streamStillProcessing: '伺服器仍在處理，完成後會自動顯示回覆。',
       streamAbortedByRestart: '服務剛剛重新啟動，這次回覆沒有完成；你的訊息已保存，請重新送出。',
+      recoveryRequired: '這一輪的結果無法確認，請結束等待後重新送出。原本的 provider／計費結果仍保留待對帳。',
+      recoveryResolved: '已結束這一輪的等待；請重新輸入並送出。原本的結果仍保留待對帳。',
+      recoveryResolveFailed: '目前還不能結束這一輪的等待，請稍後再試。',
     },
   },
   feed: {

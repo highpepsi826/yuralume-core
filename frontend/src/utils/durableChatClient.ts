@@ -155,6 +155,25 @@ export class DurableChatClient {
         continue
       }
       attempt = 0
+      if (isExpiredWorkerLease(result.status)) {
+        const recoveryStatus: ChatTurnStatus = {
+          ...result.status,
+          status: 'recovery_required',
+          phase: 'recovery_required',
+          failure_code: 'worker_lease_expired',
+          failure_message: 'The worker lease expired; the turn needs reconciliation',
+        }
+        const recovery = await saveDurableChatOutboxRecord(
+          this.store,
+          result.record,
+          {
+            state: 'recovery_required',
+            failureMessage: recoveryStatus.failure_message ?? undefined,
+          },
+          this.now(),
+        )
+        return { record: recovery, status: recoveryStatus }
+      }
       current = result.record
       if (result.status.status === 'completed') {
         const completed = await saveDurableChatOutboxRecord(
@@ -200,6 +219,7 @@ export class DurableChatClient {
       'submitting',
       'acceptance_unknown',
       'accepted',
+      'recovery_required',
     ])
   }
 
@@ -224,6 +244,15 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 function backoffMs(base: number, attempt: number): number {
   return Math.min(30_000, base * 2 ** Math.min(attempt, 5))
+}
+
+function isExpiredWorkerLease(status: ChatTurnStatus): boolean {
+  if (!['claimed', 'processing', 'generated', 'committed'].includes(status.status)) {
+    return false
+  }
+  if (!status.lease_until) return false
+  const leaseUntil = Date.parse(status.lease_until)
+  return Number.isFinite(leaseUntil) && leaseUntil <= Date.now()
 }
 
 async function waitWithJitter(ms: number, signal?: AbortSignal): Promise<void> {
