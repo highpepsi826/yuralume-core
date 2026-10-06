@@ -1497,3 +1497,29 @@ database rows.
   `api`/`coordinator` diagnostic roles.
 - Added lifecycle and publisher tests. Focused D2 validation passed 92 tests;
   `compileall` and diff checks remain part of the checkpoint verification.
+
+# 2026-10-07 - AIRP image delivery scope repair (source only)
+
+- Documented the approved image-only scope before implementation in
+  `AIRP_IMAGE_DELIVERY_SCOPE_REFERENCE.md`; linked the earlier broad boundary
+  reference as historical.
+- Restricted shared outcome judging and new correction/repair instructions to
+  completed real image attachment delivery. Removed broad search/web/product
+  outcome checks and always-on browsing incapability wording; search tools,
+  actual tool-result flow and character knowledge/memory guidance remain.
+- Added explicit usable image counts and bounded recent dialogue to chat,
+  proactive and scheduled/busy composer evidence. Non-image attachments cannot
+  establish image delivery. Historical NSFW input uses safe context summaries
+  without changing the original community compose inputs.
+- Aligned the media-quality rubric with fictional/in-game photos and ordinary
+  video/news discussion, retaining real media prompt quality checks.
+- Verification: 703 integrated tests passed; 20 intentional prompt snapshots
+  regenerated/reviewed; UTF-8/LF and diff checks passed. Independent review
+  findings were fixed. No live provider call or production data change.
+- Existing queued repairs and automatic image intent heuristics are unchanged.
+  The user subsequently authorized commit/push on 2026-10-07; the existing
+  Zeabur branch integration is expected to rebuild the app. Deployment
+  completion is not asserted in this source checkpoint.
+- The authorized checkpoint could not stage: automatic approval review failed
+  twice with local proxy HTTP 404 for unavailable `gpt-5.6-luna`. Neither Git
+  staging command executed; source remains uncommitted and unpushed.

@@ -239,9 +239,10 @@ def test_prompt_covers_rendezvous_and_report_promise_shapes() -> None:
 
     assert "赴約型" in prompt
     assert "回報型" in prompt
-    # A completion promise must never invent the result it was asked to fetch.
-    assert "不要憑空編造具體結果" in prompt
-    assert "不能假裝已送達" in prompt
+    assert "承諾需要搜尋資料或其他工具功能" in prompt
+    assert "不要憑空編造具體結果" not in prompt
+    assert "透過產品交付真實照片、圖片或截圖" in prompt
+    assert "工具成功但沒有圖片或只有非圖片附件" in prompt
 
 
 def test_prompt_keeps_airp_recording_promises_inside_the_shared_fiction() -> None:
@@ -260,8 +261,11 @@ def test_prompt_keeps_airp_recording_promises_inside_the_shared_fiction() -> Non
 
     assert "在場景中聽答錄機" in prompt
     assert "可直接履行的劇情行動" in prompt
-    assert "沒有實體設備、錄音檔或 computer-use 工具" in prompt
-    assert "現實附件、網頁資料、外部服務或產品資料變更" in prompt
+    assert "虛構照片、遊戲內照片" in prompt
+    assert "看影片、聊新聞、瀏覽網頁不需要工具證據" in prompt
+    assert "虛構照片與未來傳圖的承諾不受這條限制" in prompt
+    assert "沒有實體設備、錄音檔或 computer-use 工具" not in prompt
+    assert "現實附件、網頁資料、外部服務或產品資料變更" not in prompt
 
 
 def test_prompt_injects_operator_local_current_time() -> None:

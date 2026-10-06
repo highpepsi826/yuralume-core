@@ -2596,6 +2596,7 @@ class ChatService:
             generation=generation,
             operator=operator,
             content_mode=content_mode.value,
+            recent_messages=tuple(updated_conversation.messages[:-1]),
             turn_started_at=(
                 journal.turn_started_at if journal is not None else None
             ),
@@ -4235,6 +4236,7 @@ class ChatService:
         operator: "OperatorProfile | None",
         content_mode: str,
         turn_started_at: datetime | None = None,
+        recent_messages: tuple[Message, ...] = (),
     ) -> None:
         """Judge the reply that just streamed out, in the background (HV4).
 
@@ -4262,6 +4264,13 @@ class ChatService:
             # external action to have lied about. The prompt-side red line
             # covers this shape (HV2).
             return
+        dialogue_context = _format_recent_dialogue(
+            sanitize_messages_for_tolerance(
+                list(recent_messages[-4:]),
+                content_tolerance=CONTENT_TOLERANCE_FRONTIER,
+            ),
+            latest_user_message="",
+        )
         self._schedule_background(auditor.audit(
             character=character,
             conversation_id=conversation_id,
@@ -4270,6 +4279,11 @@ class ChatService:
             offered_tools=generation.offered_tool_names,
             tool_outcomes=generation.tool_outcomes,
             delivered_attachments=len(generation.attachments or ()),
+            delivered_image_attachments=sum(
+                attachment.kind.casefold() == "image" and bool(attachment.url.strip())
+                for attachment in (generation.attachments or ())
+            ),
+            dialogue_context=dialogue_context,
             operator_primary_language=(
                 getattr(operator, "primary_language", "") or ""
             ),
@@ -9691,6 +9705,7 @@ class StreamFinalizer:
             generation=self._generation,
             operator=self._operator,
             content_mode=self._content_mode.value,
+            recent_messages=tuple(updated_conversation.messages[:-1]),
             turn_started_at=(
                 self._journal.turn_started_at
                 if self._journal is not None else None

@@ -37,7 +37,11 @@ import pytest
 from kokoro_link.application.dto.character import CreateCharacterRequest
 from kokoro_link.application.dto.chat import SendChatMessageRequest
 from kokoro_link.application.services.character_service import CharacterService
-from kokoro_link.application.services.chat_service import ChatService
+from kokoro_link.application.services.chat_service import (
+    ChatGenerationResult,
+    ChatGenerationTrace,
+    ChatService,
+)
 from kokoro_link.application.services.chat_outcome_claim_auditor import (
     CHAT_HONESTY_TURN_KIND,
     REPAIR_STATUS_NO_REPOSITORY,
@@ -79,6 +83,12 @@ from kokoro_link.contracts.scheduled_promise_composer import (
 )
 from kokoro_link.contracts.tool import TOOL_CAPABILITY_IMAGE, ToolPort
 from kokoro_link.domain.entities.character import Character
+from kokoro_link.domain.entities.conversation import (
+    Message,
+    MessageAttachment,
+    MessageContentMode,
+    MessageRole,
+)
 from kokoro_link.domain.entities.pending_follow_up import (
     PendingFollowUpKind,
     PendingFollowUpStatus,
@@ -638,6 +648,8 @@ async def test_write_point_audits_a_delivered_reply_and_owes_the_repair() -> Non
     assert judge.seen[0].offered_tools == ("fake_image",)
     assert judge.seen[0].outcomes == ()
     assert judge.seen[0].delivered_attachments == 0
+    assert judge.seen[0].delivered_image_attachments == 0
+    assert "傳一張你現在的照片給我" in judge.seen[0].dialogue_context
     rows = await repo.list_open_for_character(created.id)
     assert len(rows) == 1
     assert rows[0].turn_record_id == response.assistant_message.turn_record_id
@@ -696,7 +708,70 @@ async def test_streaming_write_point_audits_too() -> None:
 
     assert guard.counters.chat_audited == 1
     assert judge.seen[0].offered_tools == ("fake_image",)
+    assert judge.seen[0].delivered_image_attachments == 0
+    assert "傳一張你現在的照片給我" in judge.seen[0].dialogue_context
     assert len(await repo.list_open_for_character(created.id)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("attachment", "expected_images"),
+    [
+        (MessageAttachment(kind="file", url="/uploads/report.txt"), 0),
+        (MessageAttachment(kind="image", url=""), 0),
+        (MessageAttachment(kind="image", url="/uploads/photo.png"), 1),
+    ],
+)
+async def test_chat_audit_counts_images_and_receives_safe_recent_dialogue(
+    attachment: MessageAttachment, expected_images: int,
+) -> None:
+    judge = _ScriptedJudge(OutcomeClaimVerdict.ok())
+    auditor, _ = _auditor(judge=judge, repository=InMemoryPendingFollowUpRepository())
+    chat, _ = _chat_service(replies=[], auditor=auditor)
+    chat._schedule_outcome_claim_audit(
+        character=_character(),
+        conversation_id=_CONV_ID,
+        turn_record_id=_TURN_ID,
+        assistant_text="這張如何？",
+        generation=ChatGenerationResult(
+            text="這張如何？", attachments=[attachment], forced_fired=False,
+            trace=ChatGenerationTrace(), offered_tool_names=("fake_image",),
+        ),
+        operator=None,
+        content_mode="normal",
+        recent_messages=(
+            Message(role=MessageRole.USER, content="old context"),
+            Message(
+                role=MessageRole.USER, content="private NSFW scene",
+                content_mode=MessageContentMode.NSFW,
+                safe_summary="玩家請求一張照片",
+            ),
+        ),
+    )
+    await chat.wait_for_pending()
+    evidence = judge.seen[0]
+    assert evidence.delivered_attachments == 1
+    assert evidence.delivered_image_attachments == expected_images
+    assert "玩家請求一張照片" in evidence.dialogue_context
+    assert "private NSFW scene" not in evidence.dialogue_context
+
+
+@pytest.mark.asyncio
+async def test_chat_auditor_bounds_context_and_preserves_image_count_override() -> None:
+    judge = _ScriptedJudge(OutcomeClaimVerdict.ok())
+    repo = InMemoryPendingFollowUpRepository()
+    auditor, _ = _auditor(judge=judge, repository=repo)
+    context = "old context" + "recent context " * 200
+    result = await auditor.audit(
+        character=_character(), conversation_id=_CONV_ID,
+        turn_record_id=_TURN_ID, assistant_text="這張如何？",
+        offered_tools=("fake_image",), delivered_attachments=1,
+        delivered_image_attachments=0, dialogue_context=context, now=_now(),
+    )
+    assert result.repair_status == REPAIR_STATUS_NOT_NEEDED
+    assert judge.seen[0].delivered_image_attachments == 0
+    assert judge.seen[0].dialogue_context == context[-2000:]
+    assert await repo.list_open_for_character(_character().id) == []
 
 
 # --- the repair row released: PF's three endings, unchanged --------------

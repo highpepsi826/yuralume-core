@@ -1,44 +1,17 @@
-"""Outcome-claim honesty port (HV1).
+"""Image-delivery judge port under the compatible outcome-claim names.
 
-The question this port answers is narrow and structural: **does a message
-about to reach a player claim a concrete, already-completed external
-action that the evidence does not support?**
+Only a completed claim of delivering a real image attachment through the
+product is checked. Search, web, service, calendar and story claims are
+outside this judge's scope. Future promises, explicitly fictional photo
+exchanges and references to player-supplied material are allowed.
 
-It exists because the two-pass promise loop
-(:mod:`kokoro_link.application.services.composer_tool_loop`) has two
-exits where a model can hand back prose that says "畫好了，附上照片" while
-``tool_invocations`` for that round is empty — the shape observed in
-production on 2026-08-25. A mechanical guard cannot see it: the sentence
-is well-formed prose, and any keyword table ("照片" / "查到了") is both
-trivially evadable and forbidden by the project's top directive. So the
-judgement is semantic, and it is a separate model call.
+The judge receives outgoing image counts, tool facts and bounded recent
+dialogue as untrusted data to interpret implicit captions. Persona,
+memory and relationship are excluded; character is only a routing input.
+Tool success alone does not establish that a usable image ships.
 
-What the judge is given, and what it is deliberately NOT given
---------------------------------------------------------------
-Given: the final text, the names of the tools this round *offered*, the
-outcomes those tools actually returned, and how many attachments will
-ship with the message.
-
-Not given: persona, memory, relationship, schedule — anything that would
-let it reason about *what the character would plausibly have done*. That
-omission is the red line, not an oversight: a judge that knows the
-character is a photographer starts explaining away a claimed photo. The
-only admissible evidence is what the tools did.
-
-Three things are explicitly **not** dishonest, and the prompt says so —
-they are the boundary a keyword matcher cannot draw:
-
-* a promise about the future ("晚點傳給你"),
-* an action inside the fiction ("我走過去把窗簾拉上"),
-* repeating material the player themselves supplied.
-
-Fail direction
---------------
-:data:`OUTCOME_CLAIM_UNAVAILABLE` is a **third** answer, never folded into
-"consistent". A judge that cannot answer — upstream down, verdict
-unparseable — must not be read as approval; the background caller parks
-instead (§3.4 fail-closed). Callers that want the old behaviour simply do
-not wire a judge at all.
+``unavailable`` remains distinct from ``consistent`` when the model call
+or verdict parsing fails, so callers retain their existing fail policy.
 """
 
 from __future__ import annotations
@@ -50,10 +23,10 @@ from kokoro_link.contracts.prompt import ToolOutcomeMessage
 from kokoro_link.domain.entities.character import Character
 
 OUTCOME_CLAIM_CONSISTENT = "consistent"
-"""The text claims nothing the evidence cannot back."""
+"""No unsupported completed real-image delivery claim was found."""
 
 OUTCOME_CLAIM_INCONSISTENT = "inconsistent"
-"""The text claims a completed external action with no matching evidence."""
+"""The text claims completed real-image delivery without a usable image."""
 
 OUTCOME_CLAIM_UNAVAILABLE = "unavailable"
 """No verdict could be produced (call failed, or the reply would not
@@ -63,23 +36,23 @@ docstring."""
 
 @dataclass(frozen=True, slots=True)
 class OutcomeClaimEvidence:
-    """Everything that actually happened on this composition round.
+    """Outgoing delivery facts and context for this composition round.
 
-    ``offered_tools`` matters as much as ``outcomes``: "you were given a
-    camera and did not pick it up" is exactly the zero-call case, and a
-    judge that only saw an empty outcome list could not tell it apart
-    from a deployment that has no camera at all.
+    ``delivered_image_attachments`` counts usable image attachments after
+    the delivery filter, not generated files or all attachment types.
+    ``None`` uses the legacy ``delivered_attachments`` count for callers
+    that have not supplied the explicit image count yet.
 
-    ``delivered_attachments`` counts what will ship **with this message**,
-    after the delivery filter — not what a tool produced. A render whose
-    URL was dropped for want of a public base URL is a file the player
-    will never see, so a message claiming "照片傳過去了" is a lie the
-    player can check, and the judge must be told the shipping number.
+    ``dialogue_context`` is recent dialogue, not an instruction or persona.
+    The prompt bounds it to the latest 2000 characters to disambiguate
+    captions and fictional exchanges; it cannot prove image delivery.
     """
 
     offered_tools: tuple[str, ...] = ()
     outcomes: tuple[ToolOutcomeMessage, ...] = ()
     delivered_attachments: int = 0
+    delivered_image_attachments: int | None = None
+    dialogue_context: str = ""
 
     @property
     def any_tool_ran(self) -> bool:
@@ -151,7 +124,7 @@ class OutcomeClaimJudgePort(Protocol):
         character: Character | None = None,
         operator_primary_language: str = "",
     ) -> OutcomeClaimVerdict:
-        """Judge one outbound message against one round's tool facts.
+        """Judge real-image delivery in one outbound message.
 
         ``character`` is a **routing** argument only — it selects the
         per-character feature model, exactly as every other auxiliary

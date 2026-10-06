@@ -814,6 +814,8 @@ class ComposerToolLoop:
             return _ZeroCallResolution(message=shipped)
         evidence = OutcomeClaimEvidence(
             offered_tools=tuple(tool.name for tool in tools),
+            delivered_image_attachments=0,
+            dialogue_context=_image_delivery_context(payload),
         )
 
         def parked(reason: OutcomeClaimParkReason) -> _ZeroCallResolution:
@@ -919,6 +921,11 @@ class ComposerToolLoop:
             offered_tools=tuple(tool.name for tool in tools),
             outcomes=run.outcomes,
             delivered_attachments=len(run.attachments),
+            delivered_image_attachments=sum(
+                attachment.kind.casefold() == "image" and bool(attachment.url.strip())
+                for attachment in run.attachments
+            ),
+            dialogue_context=_image_delivery_context(payload),
         )
         verdict = await self._verdict_for(
             body, evidence=evidence, character=character, payload=payload,
@@ -1418,13 +1425,15 @@ def _safe_text(
     return (text or "").strip()
 
 
-def _queued_message_texts(payload: Any) -> tuple[str, ...]:
+def _queued_message_texts(
+    payload: Any, *, content_tolerance: str | None = None,
+) -> tuple[str, ...]:
     """The queued player messages a busy-defer follow-up owes a reply to.
 
     Empty for the scheduled-promise payload, which has no backlog — the
     loop is generic over both, so every payload read here is a ``getattr``
     rather than a type check."""
-    tolerance = _content_tolerance(payload)
+    tolerance = content_tolerance or _content_tolerance(payload)
     texts: list[str] = []
     for message in getattr(payload, "queued_messages", ()) or ():
         text = _safe_text(
@@ -1438,26 +1447,39 @@ def _queued_message_texts(payload: Any) -> tuple[str, ...]:
     return tuple(texts)
 
 
-def _promise_text(payload: Any) -> str:
+def _promise_text(payload: Any, *, content_tolerance: str | None = None) -> str:
     """The player's original wording behind a scheduled promise."""
     return _safe_text(
         getattr(payload, "promise_text", ""),
         content_mode=getattr(payload, "promise_content_mode", None),
         safe_summary=getattr(payload, "promise_safe_summary", ""),
-        content_tolerance=_content_tolerance(payload),
+        content_tolerance=content_tolerance or _content_tolerance(payload),
     )
 
 
-def _latest_user_message(payload: Any) -> str:
+def _latest_user_message(
+    payload: Any, *, content_tolerance: str | None = None,
+) -> str:
     """What this message is answering, as the judge understands it.
 
     The newest queued message for a busy-defer follow-up; the original
     request for a scheduled promise. Empty when neither exists, which the
     gate prompt renders as 「（無）」 rather than guessing."""
-    queued = _queued_message_texts(payload)
+    queued = _queued_message_texts(payload, content_tolerance=content_tolerance)
     if queued:
         return queued[-1]
-    return _promise_text(payload)
+    return _promise_text(payload, content_tolerance=content_tolerance)
+
+
+def _image_delivery_context(payload: Any) -> str:
+    summary = getattr(payload, "recent_dialogue_summary", None) or ""
+    request = _latest_user_message(
+        payload, content_tolerance=CONTENT_TOLERANCE_FRONTIER,
+    )
+    return "\n".join(
+        part for part in (summary[-1200:], request[-800:])
+        if part
+    )[-2000:]
 
 
 def _temporal_lines(payload: Any) -> tuple[str, ...]:

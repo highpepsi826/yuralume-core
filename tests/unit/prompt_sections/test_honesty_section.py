@@ -1,17 +1,4 @@
-"""Behavioural pins for the HV2 honesty section.
-
-The golden corpus already proves *what the block says*. These prove the
-two things a byte-oracle cannot: that the baseline text survives the hop
-that hides the tool rail, and that the browsing line treats an undeclared
-capability set as unknown rather than absent.
-
-The second one is the load-bearing case. Reading ``None`` as "no browsing"
-would print 「你打不開網頁」 to every character on every surface that never
-declared a capability set — including ones holding a live ``web_search``
-— and the observable damage is silent: the model simply stops searching
-and starts guessing, which is the exact failure this whole series exists
-to stop, wearing the opposite costume.
-"""
+"""Image-delivery guidance remains stable without auditing AIRP life."""
 
 from __future__ import annotations
 
@@ -19,13 +6,11 @@ import pytest
 
 from kokoro_link.infrastructure.prompt.sections.context import ToolsContext
 from kokoro_link.infrastructure.prompt.sections.honesty import (
-    BROWSING_TOOL_NAMES,
     SECTIONS,
-    browsing_unavailable,
 )
 from kokoro_link.infrastructure.prompt.sections.order import SECTION_ORDER
 
-HONESTY_HEADING = "誠實界線"
+HONESTY_HEADING = "圖片交付界線"
 NO_BROWSING_MARK = "這個環境沒有給你上網的能力"
 
 
@@ -64,19 +49,22 @@ def test_the_baseline_discipline_renders_whatever_the_capability_set_is(
     assert HONESTY_HEADING in _text(names)
 
 
-def test_the_baseline_still_permits_fiction_and_future_promises() -> None:
-    """FB rule 7: a section of pure prohibitions teaches over-avoidance."""
+def test_real_image_delivery_requires_a_usable_image_attachment() -> None:
     body = _text(None)
-    assert "我等等幫你看看" in body      # promising later is honest
-    assert "我走過去把窗簾拉上" in body  # narrating the fiction is allowed
-    assert body.count("✅") >= 3
+    assert "這則訊息須有實際可交付的圖片附件" in body
+    assert "工具成功但沒有圖片，或只有非圖片附件，都不算" in body
+    assert "可以自然說稍後再傳" in body
 
 
 def test_the_baseline_keeps_airp_device_actions_inside_the_shared_fiction() -> None:
     body = _text(None)
     assert "登入虛構遊戲" in body
-    assert "按下場景中的答錄機" in body
-    assert "computer-use 工具" in body
+    assert "按場景中的答錄機" in body
+    assert "虛構照片、遊戲內照片" in body
+    assert "未來傳圖的承諾" in body
+    assert "不需要真實附件" in body
+    assert "看影片、聊新聞、瀏覽網頁" in body
+    assert "不需要工具證據" in body
 
 
 def test_the_baseline_text_does_not_vary_with_the_offered_tools() -> None:
@@ -86,35 +74,22 @@ def test_the_baseline_text_does_not_vary_with_the_offered_tools() -> None:
     moved between them it would break the DH5 stable prefix for every
     block behind it, on every tool-using turn.
     """
-    assert _render(("web_search",)) == _render(("web_fetch", "web_search"))
+    assert _render(None) == _render(()) == _render(("web_search",))
+    assert _render(("generate_image",)) == _render(("web_fetch", "web_search"))
 
 
-# --- the browsing line is a positive claim, never an inference -------
-
-
-def test_an_undeclared_capability_set_says_nothing_about_browsing() -> None:
-    assert browsing_unavailable(None) is False
-    assert NO_BROWSING_MARK not in _text(None)
-
-
-def test_a_declared_empty_capability_set_is_a_positive_absence() -> None:
-    assert browsing_unavailable(()) is True
-    assert NO_BROWSING_MARK in _text(())
-
-
-@pytest.mark.parametrize("tool_name", sorted(BROWSING_TOOL_NAMES))
-def test_either_web_tool_alone_is_enough_to_stay_silent(
-    tool_name: str,
+@pytest.mark.parametrize(
+    "names", [None, (), ("web_search",), ("generate_image",)],
+)
+def test_the_section_has_no_browsing_disclaimer_or_broad_completion_rule(
+    names: tuple[str, ...] | None,
 ) -> None:
-    # ``web_fetch`` counts: 「我點進去看過了」 is a fetch claim, not a
-    # search claim, so a deployment with only one of the two still has a
-    # character that can honestly reach the web.
-    assert browsing_unavailable((tool_name,)) is False
-    assert NO_BROWSING_MARK not in _text((tool_name, "generate_image"))
-
-
-def test_a_non_web_capability_set_still_gets_the_line() -> None:
-    assert NO_BROWSING_MARK in _text(("generate_image", "send_photo"))
+    body = _text(names)
+    assert NO_BROWSING_MARK not in body
+    assert "你打不開網頁" not in body
+    assert "我沒辦法自己去查" not in body
+    assert "我查到了" not in body
+    assert "才算真的發生過" not in body
 
 
 # --- placement -------------------------------------------------------

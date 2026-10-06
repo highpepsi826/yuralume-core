@@ -3,7 +3,7 @@
 Regression cover for a specific failure: the block's judgements were
 written for ``generate_image`` and rendered unconditionally, so a model
 offered ``web_search`` read "沒有具體畫面可給 → 別叫工具" and declined
-to search — then sometimes narrated a search it never ran.
+to search. AIRP narration and image attachment delivery have separate rules.
 """
 
 from __future__ import annotations
@@ -73,21 +73,32 @@ def test_search_skip_list_covers_companionship_not_difficulty() -> None:
     assert "在你腦中，不在網路上" in block
 
 
-def test_honesty_rule_is_shared_by_every_tool() -> None:
-    """Applies whatever the character has: claiming an un-run tool is
-    the failure that reaches the player as misinformation."""
+def test_image_delivery_rule_is_shared_without_broad_tool_evidence_requirements() -> None:
     for names in (("web_search",), ("generate_image",), ("web_search", "generate_image")):
         block = _render(*names)
-        assert "沒有實際輸出工具 JSON，就不准在回覆裡表現得好像用過工具" in block
-        assert "也不要在文字裡假裝你使用過任何工具" in block
+        assert "這則訊息須有可交付的圖片附件" in block
+        assert "工具成功但沒有圖片，或只有非圖片附件，都不算" in block
+        assert "沒有實際輸出工具 JSON，就不准" not in block
+        assert "假裝你使用過任何工具" not in block
         assert "共同角色扮演裡的場景行動不需要工具" in block
         assert "劇情中的答錄機" in block
+        assert "虛構照片、遊戲內照片" in block
+        assert "影片、新聞與瀏覽敘述不需要工具證據" in block
+        assert "外部資料、外部服務或產品資料" not in block
 
 
-def test_fabricated_search_claim_is_called_out_by_example() -> None:
+def test_search_narration_is_not_subject_to_broad_proof_prohibitions() -> None:
     block = _render("web_search")
-    assert "我剛查了一下" in block
-    assert "我看到新聞說" in block
+    assert "我剛查了一下" not in block
+    assert "我看到新聞說" not in block
+    assert "憑空捏造消息" not in block
+
+
+def test_image_stage_direction_rule_targets_real_attachment_delivery() -> None:
+    block = _render("generate_image")
+    assert "要透過產品交付真實圖片附件時" in block
+    assert "旁白代替工具呼叫與圖片附件" in block
+    assert "虛構照片、遊戲內照片與場景中的拍照可以照常敘述" in block
 
 
 def test_staying_in_character_is_not_a_reason_to_skip_search() -> None:

@@ -443,6 +443,31 @@ async def test_a_delivered_render_backs_the_claim_and_ships() -> None:
     assert attempt.outcome == ProactiveOutcome.SENT
     _, evidence = judge.seen[0]
     assert evidence.delivered_attachments == 1
+    assert evidence.delivered_image_attachments == 1
+
+
+@pytest.mark.asyncio
+async def test_proactive_non_image_attachment_is_not_image_evidence() -> None:
+    harness = build_messaging_harness()
+    character = await _web_character(harness)
+    decider = _ScriptedDecider(ProactiveDecision(
+        True, "ok", "這段錄音給你", tool_calls=(ToolCall(name=PHOTO_TOOL),),
+    ))
+    guard, judge = _guard(OutcomeClaimVerdict.ok())
+    orchestrator = _StubOrchestrator(ToolResult.success(
+        "recording ready",
+        attachments=(ToolAttachment(
+            kind="audio", url="https://cdn.example.com/a.mp3", mime_type="audio/mpeg",
+        ),),
+    ))
+    dispatcher, _ = _dispatcher(
+        harness, decider=decider, guard=guard, orchestrator=orchestrator,
+    )
+    attempt = await _evaluate(dispatcher, character)
+    assert attempt.outcome == ProactiveOutcome.SENT
+    evidence = judge.seen[0][1]
+    assert evidence.delivered_attachments == 1
+    assert evidence.delivered_image_attachments == 0
 
 
 # --- fail direction --------------------------------------------------

@@ -1,4 +1,8 @@
-"""HV4 — chat's side of the outcome-claim gate: audit after, repair later.
+"""Image-only chat audit under the compatible HV4 outcome-claim names.
+
+Only unsupported real image delivery can create a new repair. Search,
+ordinary character life and shared scenes are outside the current policy.
+The lifecycle rationale below describes the existing durable repair machinery.
 
 Every other surface HV covers composes the whole message, then decides
 whether it may ship. Chat cannot: the reply streams token by token
@@ -227,7 +231,7 @@ class ChatHonestyAuditResult:
 
 
 class ChatOutcomeClaimAuditor:
-    """Judge a delivered chat reply, and owe a repair when it lied.
+    """Judge delivered image captions and repair missing real images.
 
     Called off the chat write point as a background task, so it costs the
     player no latency and can never fail their turn: :meth:`audit` returns
@@ -265,6 +269,8 @@ class ChatOutcomeClaimAuditor:
         offered_tools: tuple[str, ...],
         tool_outcomes: tuple[ToolOutcomeMessage, ...] = (),
         delivered_attachments: int = 0,
+        delivered_image_attachments: int | None = None,
+        dialogue_context: str = "",
         operator_primary_language: str = "",
         content_mode: str = "normal",
         undone_turn_gate: UndoneTurnGate | None = None,
@@ -303,6 +309,8 @@ class ChatOutcomeClaimAuditor:
                 offered_tools=offered_tools,
                 tool_outcomes=tool_outcomes,
                 delivered_attachments=delivered_attachments,
+                delivered_image_attachments=delivered_image_attachments,
+                dialogue_context=dialogue_context,
                 operator_primary_language=operator_primary_language,
                 content_mode=content_mode,
                 undone_turn_gate=undone_turn_gate,
@@ -348,6 +356,8 @@ class ChatOutcomeClaimAuditor:
         offered_tools: tuple[str, ...],
         tool_outcomes: tuple[ToolOutcomeMessage, ...],
         delivered_attachments: int,
+        delivered_image_attachments: int | None,
+        dialogue_context: str,
         operator_primary_language: str,
         content_mode: str,
         undone_turn_gate: UndoneTurnGate | None,
@@ -366,6 +376,11 @@ class ChatOutcomeClaimAuditor:
             offered_tools=tuple(offered_tools),
             outcomes=tuple(tool_outcomes),
             delivered_attachments=max(0, int(delivered_attachments)),
+            delivered_image_attachments=(
+                max(0, int(delivered_image_attachments))
+                if delivered_image_attachments is not None else None
+            ),
+            dialogue_context=dialogue_context[-2000:],
         )
         with outcome_claim_audit_scope():
             verdict = await self._guard.review(

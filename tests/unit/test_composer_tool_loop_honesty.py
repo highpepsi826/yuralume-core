@@ -41,13 +41,17 @@ from kokoro_link.contracts.outcome_claim import (
     OutcomeClaimEvidence,
     OutcomeClaimVerdict,
 )
+from kokoro_link.contracts.pending_follow_up_composer import PendingFollowUpComposeInput
 from kokoro_link.contracts.scheduled_promise_composer import (
     ScheduledPromiseComposeInput,
     ScheduledPromiseComposeOutput,
 )
 from kokoro_link.domain.entities.character import Character
+from kokoro_link.domain.entities.conversation import MessageContentMode
+from kokoro_link.domain.entities.pending_follow_up import PendingFollowUpMessage
+from kokoro_link.domain.value_objects.content_flow import CONTENT_TOLERANCE_COMMUNITY
 from kokoro_link.domain.value_objects.character_state import CharacterState
-from kokoro_link.domain.value_objects.tool_call import ToolCall
+from kokoro_link.domain.value_objects.tool_call import ToolAttachment, ToolCall, ToolResult
 from kokoro_link.infrastructure.localization.fallback_texts import (
     localized_fallback_text,
 )
@@ -463,7 +467,94 @@ async def test_pass_two_overclaim_is_re_composed_once_then_shipped() -> None:
     assert guard.counters.corrected == 1
     # The judge saw the *delivered* attachment count, not the produced one.
     assert judge.seen[0][1].delivered_attachments == 1
+    assert judge.seen[0][1].delivered_image_attachments == 1
     assert judge.seen[0][1].outcomes[0].tool_name == "fake_image"
+
+
+@pytest.mark.asyncio
+async def test_non_image_artifact_does_not_satisfy_image_evidence() -> None:
+    class _DocumentTool(FakeImageTool):
+        async def invoke(self, ctx):
+            return ToolResult.success(
+                "document created",
+                attachments=(ToolAttachment(kind="file", url="/uploads/report.txt"),),
+            )
+
+    registry = InMemoryToolRegistry([_DocumentTool()])
+    judge = _ScriptedJudge([OutcomeClaimVerdict.ok()])
+    composer = _ScriptedComposer([_call(), _prose("這是整理好的紀錄")])
+    payload = replace(_payload(), recent_dialogue_summary="我們正在遊戲裡交換照片")
+    loop = ComposerToolLoop(
+        tool_registry=registry,
+        tool_orchestrator=ToolOrchestrator(
+            registry=registry,
+            invocation_repository=InMemoryToolInvocationRepository(),
+        ),
+        public_base_url="https://yura.example",
+        outcome_claim_guard=OutcomeClaimGuard(judge=judge),
+    )
+    result = await loop.run(
+        character=_character(), payload=payload, compose=composer.compose,
+    )
+    assert len(result.attachments) == 1
+    evidence = judge.seen[0][1]
+    assert evidence.delivered_attachments == 1
+    assert evidence.delivered_image_attachments == 0
+    assert "我們正在遊戲裡交換照片" in evidence.dialogue_context
+    assert payload.promise_text in evidence.dialogue_context
+
+
+@pytest.mark.asyncio
+async def test_zero_tool_image_evidence_uses_dialogue_and_current_request() -> None:
+    judge = _ScriptedJudge([OutcomeClaimVerdict.ok()])
+    composer = _ScriptedComposer([_prose("我昨晚看了一支遊戲影片")])
+    payload = replace(_payload(), recent_dialogue_summary="old " * 500)
+    result = await _loop(guard=OutcomeClaimGuard(judge=judge)).run(
+        character=_character(), payload=payload, compose=composer.compose,
+    )
+    assert result.content_text == "我昨晚看了一支遊戲影片"
+    evidence = judge.seen[0][1]
+    assert evidence.delivered_image_attachments == 0
+    assert len(evidence.dialogue_context) <= 2000
+    assert evidence.dialogue_context.endswith(payload.promise_text)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("safe_summary", ["", "玩家請求一張照片"])
+@pytest.mark.parametrize("surface", ["promise", "follow_up"])
+async def test_image_judge_context_does_not_expand_nsfw_content_routing(
+    safe_summary: str, surface: str,
+) -> None:
+    judge = _ScriptedJudge([OutcomeClaimVerdict.ok()])
+    composer = _ScriptedComposer([_prose("我們繼續剛才的故事")])
+    if surface == "promise":
+        payload = replace(
+            _payload(), promise_text="raw historical NSFW material",
+            promise_content_mode=MessageContentMode.NSFW,
+            promise_safe_summary=safe_summary,
+            content_tolerance=CONTENT_TOLERANCE_COMMUNITY,
+        )
+    else:
+        payload = PendingFollowUpComposeInput(
+            character=_character(), queued_messages=(PendingFollowUpMessage.new(
+                content="raw historical NSFW material", queued_at=_now(),
+                content_mode=MessageContentMode.NSFW, safe_summary=safe_summary,
+            ),),
+            brief_reply="晚點接著聊", defer_reason="busy", queued_at=_now(),
+            current_activity=None, just_finished_activity=None,
+            recent_dialogue_summary=None, now=_now(),
+            content_tolerance=CONTENT_TOLERANCE_COMMUNITY,
+        )
+    await _loop(guard=OutcomeClaimGuard(judge=judge)).run(
+        character=_character(), payload=payload, compose=composer.compose,
+    )
+    assert "raw historical NSFW material" not in judge.seen[0][1].dialogue_context
+    assert judge.seen[0][1].dialogue_context == safe_summary
+    if surface == "promise":
+        assert composer.seen[0].promise_text == payload.promise_text
+    else:
+        assert composer.seen[0].queued_messages == payload.queued_messages
+    assert composer.seen[0].content_tolerance == CONTENT_TOLERANCE_COMMUNITY
 
 
 @pytest.mark.asyncio

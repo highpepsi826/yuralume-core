@@ -122,8 +122,12 @@ def test_prompt_keeps_airp_scene_actions_out_of_the_tool_requirement() -> None:
     prompt = _build_prompt(payload)
 
     assert "共同角色扮演裡的遊戲、錄音、道具或故事工作" in prompt
-    assert "不是要你操作現實電腦或取得實體檔案" in prompt
-    assert "真實附件、外部資料、外部服務或產品資料變更" in prompt
+    assert "虛構照片、遊戲內照片" in prompt
+    assert "看影片、聊新聞、瀏覽網頁不需要工具證據" in prompt
+    assert "只有透過產品交付真實圖片附件時" in prompt
+    assert "工具成功但沒有圖片、只有非圖片附件或工具失敗" in prompt
+    assert "真實附件、外部資料、外部服務或產品資料變更" not in prompt
+    assert "不要憑空編造具體結果" not in prompt
 
 
 def test_prompt_includes_schedule_activity_knowledge_boundary() -> None:

@@ -17,14 +17,8 @@ that was meant to stop gratuitous selfies was suppressing search.
 So each tool now brings its own triggers, and they are rendered only
 when that tool is actually offered to this character. What stays shared
 is the mechanical contract — the JSON shape, one call per reply, and
-the honesty rule below.
-
-**The honesty rule.** A model that decides against calling a tool
-sometimes narrates the outcome anyway ("我剛查了一下…", "*（傳一張自拍）*"),
-which is worse than not calling it: the player is told something
-happened that did not. Both known shapes of this — fabricated search
-results and parenthetical stage directions in place of a call — are
-called out explicitly, for every tool, on every turn.
+the real image attachment rule below. Ordinary AIRP life and shared
+scenes can be narrated without tool evidence.
 """
 
 from __future__ import annotations
@@ -73,9 +67,9 @@ _IMAGE_GUIDANCE: Final = ToolUsageGuidance(
         "剛剛已經發過類似的圖，畫面還沒推進到新的場景。",
     ),
     anti_patterns=(
-        "不要用「*（生成一張圖片：小櫻坐在公園…）*」「*（傳一張自拍…）*」"
-        "「*（拍一張照片…）*」這類括號旁白代替真正的工具呼叫——"
-        "那只是一段文字，工具不會被執行，使用者看到的是一句沒有圖的敘述。",
+        "要透過產品交付真實圖片附件時，不要用「*（生成一張圖片…）*」"
+        "「*（傳一張自拍…）*」這類括號旁白代替工具呼叫與圖片附件；"
+        "虛構照片、遊戲內照片與場景中的拍照可以照常敘述。",
     ),
 )
 
@@ -96,9 +90,6 @@ _WEB_SEARCH_GUIDANCE: Final = ToolUsageGuidance(
         "這一輪已經查過同一件事，或使用者只是閒聊、抒發情緒、需要的是陪伴而不是資訊。",
     ),
     anti_patterns=(
-        "**絕對不要在沒有實際呼叫工具的情況下，寫出「我剛查了一下」「我看到新聞說」"
-        "「網路上寫」這類句子**——那是憑空捏造消息給信任你的人，"
-        "比誠實說「我不確定，我查查看」糟糕得多。",
         "不要因為「查資料很不像角色會做的事」而放棄搜尋。"
         "查詢過程對使用者是隱形的，使用者只會看到你最後用角色語氣講出來的內容；"
         "知道得準確不會讓你不像你自己。",
@@ -199,25 +190,19 @@ def _render_call_contract() -> list[str]:
 
 
 def _render_shared_anti_patterns(tools: list[PromptToolDescriptor]) -> list[str]:
-    """Mechanical mistakes + the honesty rule, plus per-tool failures.
-
-    The honesty rule leads because it is the one that hurts the player:
-    a fabricated tool outcome is misinformation delivered in a trusted
-    voice, while a malformed JSON blob is merely ugly.
-    """
+    """Keep tool calls executable and real image delivery attachment-backed."""
     lines = [
         "",
         "嚴禁的錯誤模式（非常重要、常見錯誤）：",
-        "❌ **沒有實際輸出工具 JSON，就不准在回覆裡表現得好像用過工具。**"
-        "只有這回合輸出了 JSON、下一輪收到工具結果，才算真的用過。"
-        "想做某件事就真的呼叫工具；不想呼叫就別提它，或誠實說你不確定。",
-        "❌ 不要把工具呼叫寫成旁白（`*（…）*` 這類括號敘述）——工具不會被執行。",
+        "❌ 真實圖片交付不能用文字代替：要說圖片已傳給玩家，"
+        "這則訊息須有可交付的圖片附件；工具成功但沒有圖片，或只有非圖片附件，都不算。",
+        "❌ 要執行工具時，不要把呼叫寫成旁白（`*（…）*` 這類括號敘述）——工具不會被執行。",
         "❌ 不要在自然語言回覆中夾 JSON；也不要在 JSON 前後補「好的我來查」這類解釋。",
         "✅ 正確：要用工具 → 這回合整個輸出就是一段 JSON；"
-        "要聊天 → 完全不出現 JSON，也不出現任何暗示你剛用過工具的說法。",
+        "要聊天 → 直接寫角色的自然語言，不夾工具 JSON。",
         "✅ 共同角色扮演裡的場景行動不需要工具：虛構遊戲、劇情中的答錄機、"
-        "道具與故事工作可直接延續。只有真實附件、外部資料、外部服務或產品資料"
-        "變更，才算需要工具結果的對外操作。",
+        "道具與故事工作可直接延續；虛構照片、遊戲內照片也可以用文字敘述。"
+        "角色生活中的影片、新聞與瀏覽敘述不需要工具證據。",
     ]
     for tool in tools:
         guidance = _TOOL_GUIDANCE.get(tool.name)
@@ -227,6 +212,6 @@ def _render_shared_anti_patterns(tools: list[PromptToolDescriptor]) -> list[str]
     lines.extend([
         "",
         "若這回合沒有任何工具符合上述時機，就直接用角色的語氣以自然語言回覆，"
-        "不要輸出任何 JSON——但也不要在文字裡假裝你使用過任何工具。",
+        "不要輸出任何 JSON。",
     ])
     return lines

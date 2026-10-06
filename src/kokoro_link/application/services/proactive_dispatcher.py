@@ -2150,6 +2150,11 @@ class ProactiveDispatcher:
             ),
             outcomes=run.outcomes,
             delivered_attachments=len(run.attachments),
+            delivered_image_attachments=sum(
+                attachment.kind.casefold() == "image" and bool(attachment.url.strip())
+                for attachment in run.attachments
+            ),
+            dialogue_context=context.recent_dialogue_summary[-2000:],
         )
 
     async def _resolve_outbound_honesty(

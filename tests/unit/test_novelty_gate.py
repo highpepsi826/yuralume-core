@@ -348,6 +348,22 @@ def test_novelty_gate_rubric_teaches_the_four_hard_axes() -> None:
         assert axis in prompt.split("JSON 形狀固定為", 1)[1]
 
 
+@pytest.mark.parametrize(
+    "text", ["遊戲裡我把照片傳給你，給你看", "昨晚看了一段遊戲新聞影片"],
+)
+def test_media_quality_rubric_exempts_airp_without_disabling_real_media_checks(
+    text: str,
+) -> None:
+    prompt = _build_prompt(replace(_context(), response_text=text))
+    assert text in prompt
+    assert "隨附工具 prompt：\n- （無）" in prompt
+    assert "虛構照片、遊戲內照片、場景中的拍照或交換照片" in prompt
+    assert "單純談論影片或新聞，都不要求媒體工具 prompt" in prompt
+    assert "未宣稱透過產品交付真實媒體時，此軸 false" in prompt
+    assert "透過產品交付真實圖片或影片，而所需工具 prompt 空缺" in prompt
+    assert "工具 prompt 裡混進 JSON、schema 字樣或欄位名" in prompt
+
+
 def test_verdict_hard_fail_is_false_when_only_soft_axes_fire() -> None:
     verdict = NoveltyVerdict(passes=False, over_warm=True)
 

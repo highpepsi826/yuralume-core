@@ -107,7 +107,7 @@ MARKER_PERSONA_CURIOSITY = "自然認識對方的提示："
 MARKER_HISTORY_GAP = "——（中間隔了"
 MARKER_HISTORY_GAP_TRAILING = "以下才是這次的新訊息）——"
 MARKER_BODY_STATE = "身體訊號（事實層；自然體現於對話、不需直白報告）："
-MARKER_HONESTY = "誠實界線（不管這一輪有沒有工具可用，這段都成立）："
+MARKER_HONESTY = "圖片交付界線（只適用於透過產品傳給玩家的真實圖片附件）："
 MARKER_NO_BROWSING = "這個環境沒有給你上網的能力："
 MARKER_SUBJECTIVE_TIME = (
     "主觀時間（話題層事實，與情緒層 idle drift 分離；話題選擇參考用，請勿照字面覆述）："
@@ -319,19 +319,18 @@ GOLDEN_CASES: tuple[GoldenCase, ...] = (
     GoldenCase(
         name="no_browsing_capability",
         summary=(
-            "A declared capability set with no web tool: the honesty "
-            "section says so out loud."
+            "A declared capability set with no web tool keeps image guidance "
+            "without a browsing capability disclaimer."
         ),
         branches=("tool_capabilities.declared", "browsing.unavailable"),
-        markers=(MARKER_HONESTY, MARKER_NO_BROWSING),
-        absent_markers=("web_search",),
+        markers=(MARKER_HONESTY,),
+        absent_markers=("web_search", MARKER_NO_BROWSING),
         build_kwargs=lambda: {
             **_required(F.rich_character(), latest="這個連結你幫我看一下？"),
             "now": F.NOW,
             "today_local": F.TODAY,
-            # The shape the line exists for: a character that can draw but
-            # cannot look anything up, on the final hop where the tool rail
-            # is hidden and ``available_tools`` is therefore empty.
+            # Final hop hides the tool rail; image guidance still renders
+            # without turning a missing web tool into a role disclaimer.
             "character_tool_names": ("send_photo",),
         },
     ),

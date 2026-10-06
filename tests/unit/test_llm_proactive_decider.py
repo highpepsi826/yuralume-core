@@ -404,7 +404,10 @@ async def test_prompt_has_role_knowledge_boundary_for_user_related_events() -> N
     assert "認知範圍與誠實表達" in prompt
     assert "不要假裝專家" in prompt
     assert "這條認知界線不會取消你和對方共享的角色扮演情境" in prompt
-    assert "沒有實體設備、錄音檔或 computer-use 工具" in prompt
+    assert "虛構照片、遊戲內照片" in prompt
+    assert "看影片、聊新聞、瀏覽網頁不需要工具證據" in prompt
+    assert "圖片交付界線只適用於透過產品傳給玩家的真實圖片附件" in prompt
+    assert "沒有實體設備、錄音檔或 computer-use 工具" not in prompt
     assert "主要是因為對方可能在意" in prompt
     assert "Cloudflare" in prompt
 

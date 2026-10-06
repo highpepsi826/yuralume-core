@@ -1,5 +1,9 @@
 # AIRP Honesty Boundary Repair
 
+Historical scope: the 2026-10-07 image-only policy and current implementation
+are documented in `AIRP_IMAGE_DELIVERY_SCOPE_REFERENCE.md`, which supersedes
+this reference's broader search and external-outcome evidence requirements.
+
 ## Problem
 
 The outcome-claim honesty judge is misclassifying embodied actions inside the
