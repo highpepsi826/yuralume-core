@@ -172,6 +172,34 @@ export async function testDraftProviderConnection(
   return data
 }
 
+export async function generateProviderTestVideo(
+  payload: ProviderConnectionPayload,
+  prompt: string,
+  connectionId: string | null,
+  signal: AbortSignal,
+): Promise<Blob> {
+  try {
+    const { data } = await axios.post<Blob>(
+      '/api/v1/admin/providers/generate-test-video',
+      { ...payload, prompt, connection_id: connectionId },
+      { responseType: 'blob', timeout: 1_830_000, signal },
+    )
+    return data
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
+      const text = await error.response.data.text()
+      let detail: unknown
+      try {
+        detail = JSON.parse(text).detail
+      } catch {
+        // Gateways may return an HTML error page instead of API JSON.
+      }
+      if (typeof detail === 'string') throw new Error(detail)
+    }
+    throw error
+  }
+}
+
 export async function diagnoseDraftProviderPayload(
   payload: ProviderConnectionPayload,
   connectionId?: string | null,

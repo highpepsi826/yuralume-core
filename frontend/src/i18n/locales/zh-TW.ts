@@ -5124,6 +5124,15 @@ export const messages = {
         confirmTitle: '執行真實生圖測試？',
         confirmBody: '這會實際透過 provider 生成一張小圖，端到端驗證生圖能力，可能產生少許費用。要繼續嗎？',
       },
+      videoTest: {
+        button: '生成測試影片',
+        prompt: '測試影片提示詞',
+        hint: '使用目前的設定生成一段短片，完成後可播放及下載，不會發佈至動態。實際片長依模型而定。',
+        confirmTitle: '生成一段真實測試影片？',
+        confirmBody: '這會呼叫影片 API，可能產生費用，並需要數分鐘。請保留此頁面直到完成；關閉頁面或連線逾時不代表供應商已取消任務，重新測試可能再次計費。',
+        running: '正在生成測試影片，可能需要數分鐘，請保留此頁面……',
+        download: '下載測試影片',
+      },
       errors: {
         loadFailed: '載入 provider 設定失敗',
         saveFailed: '儲存 provider 設定失敗',

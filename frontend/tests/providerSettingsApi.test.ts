@@ -3,6 +3,7 @@ import axios from 'axios'
 import {
   diagnoseDraftProviderPayload,
   diagnoseProviderPayload,
+  generateProviderTestVideo,
   testDraftProviderConnection,
   testProviderConnection,
   type ProbeReport,
@@ -15,6 +16,7 @@ vi.mock('axios', () => {
     post: vi.fn(),
     patch: vi.fn(),
     delete: vi.fn(),
+    isAxiosError: (error: unknown) => !!error && typeof error === 'object' && 'isAxiosError' in error,
   }
   return { default: api }
 })
@@ -48,6 +50,39 @@ function probe(overrides: Partial<ProbeReport> = {}): ProbeReport {
 }
 
 describe('provider settings test API — deep flag & probes', () => {
+  it('receives a video blob with saved credentials, cancellation and a long timeout', async () => {
+    const payload = draftPayload()
+    const signal = new AbortController().signal
+    const video = new Blob(['video'], { type: 'video/mp4' })
+    mockedAxios.post.mockResolvedValueOnce({ data: video })
+    await expect(generateProviderTestVideo(payload, 'Boat', 'saved-1', signal)).resolves.toBe(video)
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      '/api/v1/admin/providers/generate-test-video',
+      { ...payload, prompt: 'Boat', connection_id: 'saved-1' },
+      { responseType: 'blob', timeout: 1_830_000, signal },
+    )
+  })
+
+  it('decodes the API error from a blob response', async () => {
+    mockedAxios.post.mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { data: new Blob([JSON.stringify({ detail: 'Video quota exceeded' })]) },
+    })
+    await expect(generateProviderTestVideo(draftPayload(), 'Boat', null, new AbortController().signal))
+      .rejects.toThrow('Video quota exceeded')
+  })
+
+  it('preserves gateway and cancellation errors', async () => {
+    const error = { isAxiosError: true, message: 'Gateway timeout', response: { data: new Blob(['<html>timeout</html>']) } }
+    mockedAxios.post.mockRejectedValueOnce(error)
+    await expect(generateProviderTestVideo(draftPayload(), 'Boat', null, new AbortController().signal))
+      .rejects.toBe(error)
+    const cancelled = new Error('cancelled')
+    mockedAxios.post.mockRejectedValueOnce(cancelled)
+    await expect(generateProviderTestVideo(draftPayload(), 'Boat', null, new AbortController().signal))
+      .rejects.toBe(cancelled)
+  })
+
   it('posts the draft with deep=false by default and returns probes', async () => {
     const payload = draftPayload()
     const result = {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { notification } from 'ant-design-vue'
 import { useI18n } from 'vue-i18n'
@@ -23,6 +23,7 @@ import {
   diagnoseDraftProviderPayload,
   diagnoseProviderPayload,
   deleteProviderConnection,
+  generateProviderTestVideo,
   listComfyuiCheckpoints,
   listProviderCatalog,
   listProviderConnections,
@@ -74,6 +75,52 @@ const diagnosingPayloadId = ref<string | null>(null)
 const diagnosingPayloadLabCapability = ref<string | null>(null)
 const diagnosingPayloadLabId = ref<string | null>(null)
 const editingId = ref<string | null>(null)
+const videoPrompt = ref('A small paper boat floating gently on a calm pond, soft daylight, slow camera movement.')
+const videoTesting = ref(false)
+const videoPreviewUrl = ref('')
+const videoError = ref('')
+let videoRequest: AbortController | null = null
+
+function clearVideoTest(): void {
+  videoRequest?.abort()
+  videoRequest = null
+  videoTesting.value = false
+  videoError.value = ''
+  if (videoPreviewUrl.value) URL.revokeObjectURL(videoPreviewUrl.value)
+  videoPreviewUrl.value = ''
+}
+
+onBeforeUnmount(clearVideoTest)
+
+async function generateTestVideo(): Promise<void> {
+  if (videoTesting.value || !videoPrompt.value.trim()) return
+  const payload = payloadFor('video')
+  const connectionId = form.clear_secret ? null : editingId.value
+  const prompt = videoPrompt.value.trim()
+  const confirmed = await confirmDialog({
+    title: t('admin.providerSettings.videoTest.confirmTitle'),
+    content: t('admin.providerSettings.videoTest.confirmBody'),
+    okText: t('admin.providerSettings.videoTest.button'),
+  })
+  if (!confirmed || videoTesting.value) return
+  clearVideoTest()
+  const controller = new AbortController()
+  videoRequest = controller
+  videoTesting.value = true
+  try {
+    const blob = await generateProviderTestVideo(payload, prompt, connectionId, controller.signal)
+    if (videoRequest !== controller) return
+    videoPreviewUrl.value = URL.createObjectURL(blob)
+  } catch (err) {
+    if (videoRequest !== controller) return
+    videoError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    if (videoRequest === controller) {
+      videoTesting.value = false
+      videoRequest = null
+    }
+  }
+}
 
 // Per-capability live-probe results from the draft test-draft route.
 // Keyed by capability; cleared whenever the draft provider changes so a
@@ -320,6 +367,7 @@ watch(
 )
 
 function resetFormForCurrentProvider(): void {
+  clearVideoTest()
   const entry = selectedCatalog.value
   clearCapabilityProbes()
   clearPayloadDiagnostics()
@@ -400,6 +448,7 @@ function startCreate(providerId?: string): void {
 }
 
 function startEdit(row: ProviderConnection): void {
+  clearVideoTest()
   clearCapabilityProbes()
   clearPayloadDiagnostics()
   editingId.value = row.id
@@ -841,6 +890,13 @@ const bulkSummary = computed(() => {
 })
 
 onMounted(loadAll)
+// Discard previews when their input settings change; late responses must not
+// attach a video to a different draft.
+watch(
+  () => [payloadFor('video'), editingId.value, form.clear_secret, videoPrompt.value],
+  clearVideoTest,
+  { deep: true },
+)
 </script>
 
 <template>
@@ -1205,6 +1261,28 @@ onMounted(loadAll)
                       </div>
                     </template>
 
+                    <div v-if="capability === 'video'" class="provider-settings__video-test">
+                      <label class="field-label">
+                        <span>{{ t('admin.providerSettings.videoTest.prompt') }}</span>
+                        <textarea v-model="videoPrompt" rows="3" maxlength="2000" :disabled="videoTesting" />
+                      </label>
+                      <p class="field-hint">{{ t('admin.providerSettings.videoTest.hint') }}</p>
+                      <UiButton
+                        type="button"
+                        :loading="videoTesting"
+                        :disabled="videoTesting || !videoPrompt.trim()"
+                        @click="generateTestVideo"
+                      >
+                        {{ t('admin.providerSettings.videoTest.button') }}
+                      </UiButton>
+                      <p v-if="videoTesting" role="status">{{ t('admin.providerSettings.videoTest.running') }}</p>
+                      <p v-if="videoError" role="alert">{{ videoError }}</p>
+                      <template v-if="videoPreviewUrl">
+                        <video :src="videoPreviewUrl" controls playsinline preload="metadata" />
+                        <a :href="videoPreviewUrl" download="provider-test.mp4">{{ t('admin.providerSettings.videoTest.download') }}</a>
+                      </template>
+                    </div>
+
                     <div
                       v-if="capabilityProbes[capability]?.length"
                       class="provider-settings__probes"
@@ -1458,6 +1536,27 @@ onMounted(loadAll)
 </template>
 
 <style scoped>
+.provider-settings__video-test {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.provider-settings__video-test textarea,
+.provider-settings__video-test video {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+
+.provider-settings__video-test video {
+  max-height: 420px;
+  background: #000;
+}
+
+.provider-settings__video-test [role='alert'] {
+  overflow-wrap: anywhere;
+}
 .provider-settings {
   display: flex;
   flex-direction: column;

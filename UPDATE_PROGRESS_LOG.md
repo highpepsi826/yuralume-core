@@ -1576,3 +1576,17 @@ database rows.
   fail-soft and are distinguishable without exposing paths or file contents.
 - Verification: 15 build/version tests and 21 heartbeat/persistence/export tests
   passed. Not committed, pushed, or deployed.
+
+# 2026-10-16 - provider video generation preview (source only)
+
+- Added an explicit video capability-card generation action with editable
+  prompt, cost confirmation, busy/error state, local playback, and MP4 download.
+- Reuses runtime video adapters and matching saved credentials; draft settings
+  and newly entered credentials take precedence. Test clips and synthetic
+  characters are not persisted or published. Shallow connectivity tests remain
+  unchanged. Admin and cloud-mode restrictions apply to the new endpoint.
+- Verification: 95 focused Python tests, 22 frontend tests, Vue type checks,
+  locale checks, production/PWA build, and diff checks passed. No real paid API
+  call or live browser playback test. Hosted proxy timeout behavior is unverified.
+- Not committed, pushed, or deployed. Implementation details are recorded in
+  VIDEO_PROVIDER_GENERATION_TEST_REFERENCE.md.

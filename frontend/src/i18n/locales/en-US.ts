@@ -5125,6 +5125,15 @@ export const messages: MessageSchema = {
         confirmTitle: 'Run a real image test?',
         confirmBody: 'This actually generates one small image through the provider to verify image generation end to end. It may incur a tiny cost. Continue?',
       },
+      videoTest: {
+        button: 'Generate test video',
+        prompt: 'Test video prompt',
+        hint: 'Generate a short clip with the current settings, then play or download it without publishing a feed post. Duration depends on the model.',
+        confirmTitle: 'Generate a real test video?',
+        confirmBody: 'This calls the video API, may incur charges, and can take several minutes. Keep this page open until it finishes. Closing the page or a connection timeout may not cancel the upstream job; retrying may incur another charge.',
+        running: 'Generating the test video. This may take several minutes; keep this page open…',
+        download: 'Download test video',
+      },
       errors: {
         loadFailed: 'Failed to load provider settings',
         saveFailed: 'Failed to save provider settings',

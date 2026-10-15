@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from kokoro_link.infrastructure.observability.runtime_diagnostics import event
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -539,6 +540,80 @@ class ProviderConnectionService:
             last_validation_error=error,
             probes=probes,
         )
+
+    async def generate_test_video(
+        self,
+        *,
+        provider: str,
+        config: dict[str, Any],
+        secret: dict[str, Any],
+        prompt: str,
+        connection_id: str | None = None,
+    ) -> bytes:
+        """Generate an isolated preview without saving settings or publishing media."""
+        from kokoro_link.domain.entities.character import Character
+        from kokoro_link.domain.value_objects.character_state import CharacterState
+        from kokoro_link.infrastructure.provider_settings.adapter_builders import (
+            build_video_provider,
+        )
+
+        entry = self._require_catalog(provider)
+        self._clean_capabilities(entry, ["video"])
+        prompt = prompt.strip()
+        if not prompt or len(prompt) > 2000:
+            raise ProviderConnectionError("video test prompt must contain 1–2000 characters")
+        stored_secret: dict[str, Any] = {}
+        if connection_id:
+            current = await self._get_required(connection_id)
+            if current.provider != provider:
+                raise ProviderConnectionError("connection provider does not match the video draft")
+            try:
+                stored_secret = await self.get_decrypted_secret(connection_id)
+            except ProviderSecretCipherError as exc:
+                raise ProviderConnectionError("stored provider secret could not be decrypted") from exc
+        cleaned_secret = self._clean_config(
+            entry, secret, fields=entry.auth_fields, payload_name="secret",
+        )
+        effective_secret = {**stored_secret, **cleaned_secret}
+        try:
+            cleaned_config = self._clean_config(
+                entry, self._normalize_legacy_config(entry, config),
+                fields=entry.config_fields, payload_name="config",
+            )
+            self._validate_required(
+                entry, config=cleaned_config, secret=effective_secret,
+                has_existing_secret=False, enabled=True, capabilities=["video"],
+            )
+            adapter = build_video_provider(
+                ProviderConnection(
+                    id="video-generation-test", provider=provider, label="Video test",
+                    enabled=True, capabilities=("video",), config=cleaned_config,
+                ),
+                effective_secret,
+            )
+            if adapter is None:
+                raise ProviderConnectionError("video generation test is not supported by this provider")
+            async with asyncio.timeout(1800):
+                output = await adapter.generate(
+                    character=Character.create(
+                        name="Video test", summary="", personality=[], interests=[],
+                        speaking_style="", boundaries=[], state=CharacterState(
+                            emotion="calm", affection=0, fatigue=0, trust=0, energy=100,
+                        ),
+                    ),
+                    positive=prompt, aspect="landscape", length_frames=81,
+                    use_runtime_state=False,
+                )
+            if not output:
+                raise ProviderConnectionError("provider returned no video")
+            return output
+        except TimeoutError as exc:
+            raise ProviderConnectionError("video generation test timed out; the upstream job may still run") from exc
+        except Exception as exc:
+            detail = _redact_values(
+                str(exc), tuple(value for value in effective_secret.values() if isinstance(value, str)),
+            )
+            raise ProviderConnectionError(_sanitize_error(detail)) from exc
 
     async def diagnose_draft_payload(
         self,

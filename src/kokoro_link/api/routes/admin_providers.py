@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from kokoro_link.api.dependencies import get_container, is_cloud_mode, require_admin
@@ -159,6 +160,11 @@ class ProviderPayloadDiagnosticRequest(ProviderConnectionCreateRequest):
 
     connection_id: str | None = None
     exhaustive: bool = False
+
+
+class ProviderVideoTestRequest(ProviderConnectionCreateRequest):
+    connection_id: str | None = None
+    prompt: str = Field(min_length=1, max_length=2000)
 
 
 class ProviderPayloadDiagnosticRunRequest(BaseModel):
@@ -321,6 +327,27 @@ async def list_provider_models(
         api_key=api_key,
     )
     return ListModelsResponse(models=result.models, error=result.error)
+
+
+@router.post("/generate-test-video")
+async def generate_test_video(
+    payload: ProviderVideoTestRequest,
+    admin: OperatorProfile = Depends(require_admin),
+    container: ServiceContainer = Depends(get_container),
+    _unlocked: None = Depends(_require_provider_settings_unlocked),
+) -> Response:
+    del admin
+    try:
+        video = await _service(container).generate_test_video(
+            provider=payload.provider, config=payload.config, secret=payload.secret,
+            prompt=payload.prompt, connection_id=payload.connection_id,
+        )
+    except ProviderConnectionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=video, media_type="video/mp4",
+        headers={"Cache-Control": "no-store", "Content-Disposition": 'inline; filename="provider-test.mp4"'},
+    )
 
 
 @router.post("/test-draft", response_model=ProviderConnectionTestResponse)
