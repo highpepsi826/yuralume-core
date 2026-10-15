@@ -9,6 +9,8 @@ LLM-based state refinement, and short-term intent updates. Every
 the character's medium-term goals.
 """
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event, observed, observed_stream, response_shape, bind
+
 import asyncio
 import json
 import logging
@@ -756,6 +758,7 @@ def _log_image_rejection_degrade(
     )
 
 
+@observed("chat.generation")
 async def _generate_capturing(
     model,
     prompt: str,
@@ -1537,6 +1540,7 @@ class ChatService:
             is not None
         )
 
+    @observed("chat.route")
     async def _resolve_main_chat_model(
         self,
         *,
@@ -1555,6 +1559,8 @@ class ChatService:
                 character=character,
                 payload=payload,
             )
+            event("routing.explicit", character_id=character.id, provider_id=provider_id,
+                  model_id=model_id, routing_source="legacy_request_or_character")
             return self._model_registry.resolve(provider_id), model_id
 
         if self._active_llm_provider is not None:
@@ -1973,6 +1979,7 @@ class ChatService:
     ) -> None:
         self._tts_pregenerator = pregenerator
 
+    @observed("chat.prelude")
     async def _begin_turn(
         self,
         payload: SendChatMessageRequest,
@@ -2002,11 +2009,13 @@ class ChatService:
         """
         active_turn = self._admit_turn()
         try:
-            return await self._resolve_turn_prelude(
+            prelude = await self._resolve_turn_prelude(
                 payload,
                 current_user_id=current_user_id,
                 active_turn=active_turn,
             )
+            bind(conversation_id=prelude.conversation.id, character_id=prelude.character.id)
+            return prelude
         except BaseException:
             active_turn.release()
             raise
@@ -2072,6 +2081,7 @@ class ChatService:
         """
         return getattr(prelude.character, "user_id", "") or DEFAULT_OPERATOR_ID
 
+    @observed("chat.lease")
     async def _acquire_turn_lease(
         self, conversation_id: str,
     ) -> "StudioLeaseSession | None":
@@ -2097,6 +2107,7 @@ class ChatService:
             return ActiveTurn()
         return self._drain_state.try_enter_turn()
 
+    @observed("chat.request")
     async def send_message(
         self,
         payload: SendChatMessageRequest,
@@ -2505,6 +2516,8 @@ class ChatService:
         # capturing.
         if external_turn is None:
             turn_record_id = payload.durable_turn_id or str(uuid4())
+            bind(turn_id=turn_record_id)
+            event("chat.turn.recording", turn_id=turn_record_id)
             assistant_index = len(updated_conversation.messages) - 1
         else:
             # ``turn_record_id`` was resolved from the stable receipt id above.
@@ -2699,6 +2712,7 @@ class ChatService:
             story_scene_closing=scene_turn.closing_narration,
         )
 
+    @observed("chat.stream_setup")
     async def send_message_stream(
         self,
         payload: SendChatMessageRequest,

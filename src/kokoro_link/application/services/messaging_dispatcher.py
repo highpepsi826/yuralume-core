@@ -44,6 +44,8 @@ answers 200, the platform never retries, and the player's message is gone for
 good with no error anywhere.
 """
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event, observed, observed_stream, response_shape, bind
+
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
@@ -173,6 +175,7 @@ class MessagingDispatcher:
         # ``zh-TW`` (the prior behaviour).
         self._operator_language_resolver = operator_language_resolver
 
+    @observed("messaging.inbound")
     async def handle_inbound(self, message: InboundMessage) -> None:
         if self._debouncer is not None and self._debouncer.should_drop(message):
             _LOGGER.debug(
@@ -230,6 +233,9 @@ class MessagingDispatcher:
         message_text = localize_inbound_placeholder_text(
             message.text, operator_language,
         )
+        bind(character_id=account.character_id, conversation_id=conversation_id)
+        event("messaging.accepted", account_id=account.id, platform_message_id=message.platform_message_id,
+              binding_id=binding.id)
         request = SendChatMessageRequest(
             character_id=account.character_id,
             conversation_id=conversation_id,

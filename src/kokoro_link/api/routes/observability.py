@@ -15,6 +15,8 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from urllib.parse import quote
+from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -35,10 +37,13 @@ from kokoro_link.infrastructure.persistence.models import (
 from kokoro_link.infrastructure.build_info import get_build_info
 from kokoro_link.infrastructure.runtime_identity import PROCESS_STARTED_AT, instance_id
 from kokoro_link.infrastructure.observability.diagnostic_sources import (
-    factory_for, read_messages, read_storage, read_turns, utc,
+    factory_for, read_messages, read_storage, read_turns, utc, safe_turn_refs,
 )
 from kokoro_link.infrastructure.observability.diagnostic_buffer import (
     get_diagnostic_buffer, redact,
+)
+from kokoro_link.infrastructure.observability.diagnostic_export_sources import (
+    read_additional_sources, routing_snapshot,
 )
 
 _ALLOWED_OPERATOR_FEEDBACK_KINDS = {"out_of_character", "felt_human"}
@@ -351,8 +356,8 @@ async def diagnostic_export(
     container: ServiceContainer = Depends(get_container),
 ) -> Response:
     """Download a bounded, read-only incident bundle for one character."""
-    start = _parse_since(since) if since else datetime.now(timezone.utc) - timedelta(hours=1)
-    end = _parse_since(until) if until else datetime.now(timezone.utc)
+    start = utc(_parse_since(since)) if since else datetime.now(timezone.utc) - timedelta(hours=1)
+    end = utc(_parse_since(until)) if until else datetime.now(timezone.utc)
     if end <= start:
         raise HTTPException(status_code=400, detail="until must be after since")
     if end - start > timedelta(hours=24):
@@ -371,13 +376,18 @@ async def diagnostic_export(
             "completion_tokens": record.completion_tokens,
             "error": record.error, "created_at": record.created_at.isoformat(),
             "response_excerpt": record.response_text[:1000] if include_messages else "",
-            "post_turn_refs": record.post_turn_refs,
+            "response_original_chars": len(record.response_text) if include_messages else None,
+            "response_truncated": include_messages and len(record.response_text) > 1000,
+            # Arbitrary refs may embed chat excerpts, prompts and generated bodies.
+            "post_turn_refs": safe_turn_refs(record.post_turn_refs or {}),
+            "post_turn_refs_omitted": bool(set(record.post_turn_refs or {}) - {
+                "content_mode", "source", "turn_id", "request_id", "command_id", "provider_id", "model_id", "profile_id", "config_revision"}),
         }
         if include_prompt:
             item["prompt_assembled"] = record.prompt_assembled
         turns.append(item)
     payload = {
-        "schema_version": 3, "character_id": character_id,
+        "schema_version": 4, "character_id": character_id,
         "window": {"since": start.isoformat(), "until": end.isoformat(), "timezone": "Asia/Hong_Kong"},
         "limits": {"max_turns": 500, "include_prompt": include_prompt,
                    "include_messages": include_messages,
@@ -422,6 +432,20 @@ async def diagnostic_export(
     messages: list[dict[str, Any]] = []
     attachments: list[str] = []
     factory = factory_for(container)
+    additional, extra_coverage = await read_additional_sources(factory, character_id, start, end)
+    sources_status.update(extra_coverage)
+    routing, sources_status["routing_snapshot"] = await routing_snapshot(container, character_id)
+    persistent_events = []
+    try:
+        from kokoro_link.infrastructure.observability.persistent_diagnostics import (
+            read_persistent_diagnostics, diagnostic_storage_status,
+        )
+        persistent_events, sources_status["persistent_events"] = await read_persistent_diagnostics(
+            factory, start, end, character_id=character_id, limit=2000,
+            include_global=True, include_logs=include_logs)
+        payload["diagnostic_storage"] = await diagnostic_storage_status(factory)
+    except Exception as exc:
+        sources_status["persistent_events"] = {"status": "unavailable", "reason": type(exc).__name__}
     if include_messages or include_storage_metadata:
         if factory is None:
             source_errors["messages"] = "database_source_not_available"
@@ -442,6 +466,12 @@ async def diagnostic_export(
     application_logs = None
     if include_logs:
         application_logs, coverage = get_diagnostic_buffer().snapshot(start, end)
+        # A process-local buffer cannot establish historical coverage across restarts.
+        coverage["historical_coverage"] = "unknown"
+        coverage["process_started_at"] = PROCESS_STARTED_AT.isoformat()
+        if start < PROCESS_STARTED_AT or not application_logs:
+            coverage["status"] = "partial"
+            coverage["reason"] = "empty_buffer_or_window_predates_process"
         sources_status["application_logs"] = coverage
     payload_storage = None
     if include_storage_metadata:
@@ -524,11 +554,17 @@ async def diagnostic_export(
         row for row in inbound_rows if row.state in ("claimed", "queued")
     ]
     legacy_receipts = [row for row in inbound_rows if row.state == "legacy"]
+    generation_failed_receipts = [row for row in inbound_rows if row.state == "generation_failed"]
+    generation_errors = [row for row in additional["generation_events"] if row["status"] in ("failed", "error")]
+    durable_failures = [row for name in ("commands", "jobs", "effects") for row in additional[name]
+                        if row.get("state", row.get("status")) in ("failed", "dead", "recovery_required", "terminal")]
     turn_errors = [record for record in records if record.error]
     health_status = "healthy"
     if not accounts and not records:
         health_status = "unknown"
-    elif stale_accounts or failed_deliveries or unresolved_receipts or turn_errors:
+    elif stale_accounts or failed_deliveries or unresolved_receipts or turn_errors or generation_failed_receipts or generation_errors:
+        health_status = "degraded"
+    if generation_failed_receipts or generation_errors or durable_failures:
         health_status = "degraded"
     payload["inferred_health"] = {
         "status": health_status,
@@ -537,6 +573,11 @@ async def diagnostic_export(
         "polling_accounts": len(polling_accounts),
         "stale_polling_account_ids": stale_accounts,
         "turn_error_count": len(turn_errors),
+        "generation_failed_receipt_count": len(generation_failed_receipts),
+        "generation_error_count": len(generation_errors),
+        "durable_failure_count": len(durable_failures),
+        "historical_failures_present": bool(turn_errors or generation_failed_receipts or generation_errors or durable_failures),
+        "current_endpoint_status": "available",
         "unresolved_receipt_count": len(unresolved_receipts),
         "legacy_receipt_count": len(legacy_receipts),
         "pending_or_terminal_delivery_count": len(failed_deliveries),
@@ -547,16 +588,67 @@ async def diagnostic_export(
            for k in ("turn_records", "inbound_receipts", "outbound_deliveries")) and health_status == "healthy":
         payload["inferred_health"]["status"] = "unknown"
     payload["source_errors"] = source_errors
+    collection_status = "partial" if source_errors or any(v["status"] in ("partial", "unavailable") for v in sources_status.values()) else "complete"
+    missing = [k for k, v in sources_status.items() if v["status"] in ("partial", "unavailable", "not_requested")]
+    # Neither successful queries nor current snapshots prove sufficient incident history.
+    historical_gaps = ["platform_events", "historical_config_before_instrumentation",
+                       "provider_attempts_before_instrumentation", "feed_outcomes_before_instrumentation"]
+    if not all(payload["deployment"]["build"].values()):
+        historical_gaps.append("deployment_build_identity")
     payload["diagnostic_completeness"] = {
-        "status": "partial" if source_errors or any(v["status"] in ("partial", "unavailable") for v in sources_status.values()) else "complete",
+        "status": "partial", "collection_status": collection_status,
         "sources": sources_status,
+        "diagnostic_coverage": {"status": "partial", "missing_evidence": sorted(set(missing + historical_gaps)),
+                                "note": "Current snapshots and empty results do not establish historical evidence coverage."},
     }
+    truncations = []
+    def bounded(value, path="$", depth=0):
+        if isinstance(value, str) and len(value) > 16000:
+            truncations.append({"path": path, "original_chars": len(value), "exported_chars": 16000})
+            return value[:16000]
+        if isinstance(value, dict):
+            return {k: bounded(v, f"{path}.{k}", depth + 1) for k, v in value.items()}
+        if isinstance(value, list):
+            if len(value) > 2000:
+                truncations.append({"path": path, "original_items": len(value), "exported_items": 2000})
+            return [bounded(v, f"{path}[{i}]", depth + 1) for i, v in enumerate(value[:2000])]
+        return value
+    payload = bounded(payload)
+    messages = bounded(messages, "$.conversation_messages")
+    additional = bounded(additional, "$.additional_sources")
+    payload["text_truncations"] = truncations
+    if truncations or any(item["response_truncated"] for item in turns):
+        sources_status["turn_records"]["status"] = "partial"
+        sources_status["turn_records"]["text_truncated"] = True
+        collection_status = "partial"
+        payload["diagnostic_completeness"]["collection_status"] = collection_status
+        payload["diagnostic_completeness"]["sources"]["turn_records"] = sources_status["turn_records"]
+        missing.append("turn_records")
+        payload["diagnostic_completeness"]["diagnostic_coverage"]["missing_evidence"] = sorted(set(missing + historical_gaps))
+    manifest = {"schema_version": 1, "export_id": str(uuid4()), "generated_at": now.isoformat(),
+                "window": payload["window"], "character_id": character_id,
+                "collection_status": collection_status, "diagnostic_coverage": payload["diagnostic_completeness"]["diagnostic_coverage"],
+                "sources": sources_status, "text_truncations": truncations,
+                "snapshots_are_not_history": True, "host_disk_capacity": "unknown"}
+    configured_role = getattr(getattr(getattr(container, "app_settings", None), "process", None), "role", None)
+    fleet = {"scope": "current_app_wide_snapshot_not_history", "configured_process_role": configured_role,
+             "expected_topology": "single_process_all_role" if configured_role == "all" else "unknown",
+             "heartbeats": additional["heartbeats"], "leases": additional["leases"]}
+    for heartbeat in fleet["heartbeats"]:
+        heartbeat["fresh_at_export"] = (now - datetime.fromisoformat(heartbeat["last_seen_at"])).total_seconds() <= 120
     # Never instruct migration merely because optional diagnostics are absent.
     payload = redact(payload)
     messages = redact(messages)
     payload_storage = redact(payload_storage)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps(redact(manifest), ensure_ascii=False, indent=2))
+        for name in ("generation_events", "feed_posts", "pending_feed_videos"):
+            archive.writestr(name + ".jsonl", "".join(json.dumps(redact(row), ensure_ascii=False) + "\n" for row in additional[name]))
+        archive.writestr("durable_work.json", json.dumps(redact({name: additional[name] for name in ("commands", "effects", "jobs")}), ensure_ascii=False, indent=2))
+        archive.writestr("fleet_status.json", json.dumps(redact(fleet), ensure_ascii=False, indent=2))
+        archive.writestr("routing_snapshot.json", json.dumps(redact(routing), ensure_ascii=False, indent=2))
+        archive.writestr("diagnostic_events.jsonl", "".join(json.dumps(redact(row), ensure_ascii=False) + "\n" for row in persistent_events))
         archive.writestr("summary.json", json.dumps(payload, ensure_ascii=False, indent=2))
         archive.writestr("incident_summary.json", json.dumps({
             k: payload[k] for k in ("schema_version", "character_id", "window", "limits", "deployment",
@@ -570,7 +662,10 @@ async def diagnostic_export(
             archive.writestr("storage_metadata.json", json.dumps(payload_storage, ensure_ascii=False, indent=2))
         archive.writestr("README.txt", (
             "Read incident_summary.json first: runtime health and export completeness differ.\n"
-            "Application logs: app-wide WARN/ERROR only, current process, bounded memory; see coverage.\n"
+            "Read manifest.json for per-source limits, omissions and truncations.\n"
+            "Application logs: current-process fallback in application_logs.jsonl; persisted safe logs/events in diagnostic_events.jsonl.\n"
+            "Persisted global lifecycle/config events are marked global; other characters' events are excluded.\n"
+            "Routing/fleet snapshots describe export-time state, not historical routing or configuration.\n"
             "Storage: current metadata of selected character's referenced objects, not a historical inventory.\n"
             "Zeabur restart/OOM/probe events remain external. No migration is implied by a missing source.\n"
         ))
@@ -582,6 +677,10 @@ async def diagnostic_export(
     return Response(content=buffer.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"',
                              "Cache-Control": "no-store",
+                             "X-Diagnostic-Collection": collection_status,
+                             "X-Diagnostic-Coverage": "partial",
+                             "X-Diagnostic-Manifest-Version": "1",
+                             "X-Diagnostic-Missing-Sources": quote(json.dumps(sorted(set(missing + historical_gaps)))),
                              "X-Diagnostic-Completeness": payload["diagnostic_completeness"]["status"]})
 
 
@@ -1419,3 +1518,14 @@ async def latency_report(
     return LatencyReportResponse(
         window_hours=since_hours, overall_count=overall, per_kind=per_kind,
     )
+
+
+@router.get("/admin/observability/diagnostic-status")
+async def diagnostic_status(
+    container: ServiceContainer = Depends(get_container),
+) -> Response:
+    """Bounded diagnostic storage health; never infer host disk from a container."""
+    from kokoro_link.infrastructure.observability.persistent_diagnostics import diagnostic_storage_status
+    status = await diagnostic_storage_status(factory_for(container))
+    return Response(content=json.dumps(redact(status), ensure_ascii=False),
+                    media_type="application/json", headers={"Cache-Control": "no-store"})

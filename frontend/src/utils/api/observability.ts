@@ -260,6 +260,39 @@ export async function getTurn(turnId: string): Promise<TurnRecordDetail> {
 export interface DiagnosticExportFile {
   blob: Blob
   filename: string
+  diagnostics?: {
+    collection: string
+    coverage: string
+    missingSources: string[]
+    manifestVersion: string | null
+  }
+}
+
+export interface DiagnosticStatus {
+  enabled: boolean
+  running: boolean
+  queue_depth: number
+  dropped_count: number
+  persist_failed_count: number
+  last_persisted_at: string | null
+  logical_bytes: number | null
+  soft_limit_bytes: number
+  hard_limit_bytes: number
+  retention_days: { info: number; error: number }
+  housekeeping: {
+    last_started_at: string | null
+    last_succeeded_at: string | null
+    deleted_rows: number
+    last_error: string | null
+  }
+  host_disk: { status: 'unknown' }
+  status: 'ok' | 'degraded' | 'unavailable'
+  reason?: string
+}
+
+export async function getDiagnosticStatus(): Promise<DiagnosticStatus> {
+  const { data } = await axios.get<DiagnosticStatus>(`${BASE}/diagnostic-status`)
+  return data
 }
 
 export type DiagnosticExportType = 'quick' | 'standard' | 'full'
@@ -288,9 +321,29 @@ export async function downloadDiagnosticExport(params: {
     },
   })
   const disposition = response.headers?.['content-disposition']
+  const collection = response.headers?.['x-diagnostic-collection']
+  const coverage = response.headers?.['x-diagnostic-coverage']
+  const missingHeader = response.headers?.['x-diagnostic-missing-sources']
+  let missingSources: string[] = []
+  if (missingHeader) {
+    try {
+      const parsed: unknown = JSON.parse(decodeURIComponent(missingHeader))
+      if (Array.isArray(parsed)) missingSources = parsed.filter((item): item is string => typeof item === 'string')
+    } catch {
+      // Older servers may omit structured missing-source metadata; the manifest remains authoritative.
+    }
+  }
   return {
     blob: response.data,
     filename: parseDiagnosticFilename(disposition) || fallbackDiagnosticFilename(params.incidentType),
+    ...(collection || coverage ? {
+      diagnostics: {
+        collection: collection || 'unknown',
+        coverage: coverage || 'unknown',
+        missingSources,
+        manifestVersion: response.headers?.['x-diagnostic-manifest-version'] || null,
+      },
+    } : {}),
   }
 }
 

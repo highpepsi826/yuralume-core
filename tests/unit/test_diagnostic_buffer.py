@@ -32,6 +32,8 @@ def test_buffer_snapshots_bounded_warning_records() -> None:
         datetime.now(timezone.utc) - timedelta(minutes=1),
         datetime.now(timezone.utc) + timedelta(minutes=1),
     )
-    assert [row["message"] for row in rows] == ["first", "second"]
+    assert [row["message"] for row in rows] == ["application log (body omitted)"] * 2
+    assert rows[0]["template_hash"] != rows[1]["template_hash"]
+    assert coverage["status"] == "partial"
     assert coverage["source"] == "in_process_ring_buffer"
     assert coverage["truncated"] is False

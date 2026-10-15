@@ -1,3 +1,5 @@
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event, observed
+
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -234,6 +236,7 @@ async def get_active_model_preference(
     "/system/preferences/active-model",
     response_model=ActiveModelPreference,
 )
+@observed("config.preference.set_active_model_preference")
 async def set_active_model_preference(
     payload: ActiveModelPreference,
     scope: str = Query(default="global"),
@@ -500,6 +503,7 @@ async def get_feature_model_preferences(
     "/system/preferences/feature-models",
     response_model=FeatureModelsPreference,
 )
+@observed("config.preference.set_feature_model_preferences")
 async def set_feature_model_preferences(
     payload: FeatureModelsPreference,
     scope: str = Query(default="global"),
@@ -619,6 +623,7 @@ async def get_feature_model_group_preferences(
     "/system/preferences/feature-model-groups",
     response_model=FeatureModelGroupsPreference,
 )
+@observed("config.preference.set_feature_model_group_preferences")
 async def set_feature_model_group_preferences(
     payload: FeatureModelGroupsUpdate,
     scope: str = Query(default="global"),
@@ -948,8 +953,10 @@ async def _set_preference(
             value,
             user_id=user_id,
         )
+        _record_routing_change(key, value, "user")
         return
     await container.preferences_repository.set(key, value)
+    _record_routing_change(key, value, "global")
 
 
 # ----------------------------------------------------------------------
@@ -1068,6 +1075,7 @@ async def get_active_image_profile_preference(
     "/system/preferences/active-image-profile",
     response_model=ActiveImageProfilePreference,
 )
+@observed("config.preference.set_active_image_profile_preference")
 async def set_active_image_profile_preference(
     payload: ActiveImageProfilePreference,
     scope: str = Query(default="global"),
@@ -1133,6 +1141,7 @@ async def get_image_feature_preferences(
     "/system/preferences/image-feature-profiles",
     response_model=ImageFeatureProfilesPreference,
 )
+@observed("config.preference.set_image_feature_preferences")
 async def set_image_feature_preferences(
     payload: ImageFeatureProfilesPreference,
     scope: str = Query(default="global"),
@@ -1247,6 +1256,7 @@ async def get_active_video_profile_preference(
     "/system/preferences/active-video-profile",
     response_model=ActiveVideoProfilePreference,
 )
+@observed("config.preference.set_active_video_profile_preference")
 async def set_active_video_profile_preference(
     payload: ActiveVideoProfilePreference,
     scope: str = Query(default="global"),
@@ -1309,6 +1319,7 @@ async def get_video_feature_preferences(
     "/system/preferences/video-feature-profiles",
     response_model=VideoFeatureProfilesPreference,
 )
+@observed("config.preference.set_video_feature_preferences")
 async def set_video_feature_preferences(
     payload: VideoFeatureProfilesPreference,
     scope: str = Query(default="global"),
@@ -1347,3 +1358,17 @@ async def set_video_feature_preferences(
         known_keys=list(VIDEO_FEATURE_KEYS),
         labels={k: FEATURE_LABELS.get(k, k) for k in VIDEO_FEATURE_KEYS},
     )
+
+
+def _record_routing_change(key, value, scope):
+    if key not in {_ACTIVE_MODEL_KEY, _FEATURE_MODELS_KEY, _FEATURE_MODEL_GROUPS_KEY,
+                   _ACTIVE_IMAGE_KEY, _IMAGE_FEATURE_KEY, _ACTIVE_VIDEO_KEY, _VIDEO_FEATURE_KEY}:
+        return
+    entries = value if isinstance(value, dict) else {}
+    if any(k in entries for k in ("provider_id", "model_id", "profile_id")):
+        entries = {key: entries}
+    event("config.routing.changed", phase=key, routing_source=scope, count=len(entries))
+    for feature, entry in list(entries.items())[:100]:
+        if isinstance(entry, dict):
+            event("config.routing.entry", feature_key=feature, routing_source=scope,
+                  **{k: entry[k] for k in ("provider_id", "model_id", "profile_id") if k in entry})

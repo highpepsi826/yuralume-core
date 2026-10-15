@@ -30,6 +30,8 @@ crash the turn.
 
 from __future__ import annotations
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event
+
 import logging
 from typing import Any
 
@@ -105,13 +107,15 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
         operator_id: str | None = None,
         content_tolerance: str | None = None,
     ) -> ChatModelPort:
-        provider_id = await self._read_preferred_provider_id(
+        source, provider_id = await self._read_preferred_provider(
             feature_key,
             character=character,
             content_tolerance=content_tolerance,
         )
         if provider_id is None:
             provider_id = self._fallback_provider_id()
+            source = ROUTING_SOURCE_RUNTIME_FALLBACK
+        preferred_provider_id = provider_id
         try:
             model = self._registry.resolve(provider_id)
         except Exception:
@@ -124,6 +128,11 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
                 fallback_provider_id,
             )
             model = self._registry.resolve(fallback_provider_id)
+            provider_id = fallback_provider_id
+            source = ROUTING_SOURCE_RUNTIME_FALLBACK
+        event("routing.llm", character_id=getattr(character, "id", None),
+              feature_key=feature_key, provider_id=provider_id, routing_source=source,
+              fallback_reason="provider_not_registered" if preferred_provider_id != provider_id else "")
         model = await self._maybe_bind_reasoning(
             model,
             feature_key,
@@ -174,11 +183,16 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
         operator_id: str | None = None,
         content_tolerance: str | None = None,
     ) -> str | None:
+        def selected(value, source):
+            event("routing.model", character_id=getattr(character, "id", None),
+                  feature_key=feature_key, model_id=value, routing_source=source)
+            return value
+
         _ = operator_id
         nsfw_target = await self._read_nsfw_target(character=character)
         if nsfw_target is not None:
             self._require_registered_nsfw_provider(nsfw_target.llm_provider_id)
-            return nsfw_target.llm_model_id
+            return selected(nsfw_target.llm_model_id, "nsfw_mode")
         if _requires_community_tolerance(content_tolerance):
             nsfw_target = await self._read_configured_nsfw_target(
                 character=character,
@@ -188,7 +202,7 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
                     "nsfw content requires configured community LLM target",
                 )
             self._require_registered_nsfw_provider(nsfw_target.llm_provider_id)
-            return nsfw_target.llm_model_id
+            return selected(nsfw_target.llm_model_id, "nsfw_content")
         # Per-character override first — may carry its own model_id
         # even if provider_id is blank (blank provider falls through to
         # the global pick but the explicit model still applies).
@@ -206,7 +220,7 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
                         override.model_id,
                     )
                 else:
-                    return override.model_id
+                    return selected(override.model_id, "character_feature")
         # Global per-feature override next.
         if feature_key:
             feature_entry = await self._read_feature_entry(
@@ -228,7 +242,7 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
                             provider_value, feature_key, value,
                         )
                     else:
-                        return value
+                        return selected(value, "global_feature")
                 # Per-feature entry present but no model_id → fall
                 # through to global so a blank override means "inherit
                 # provider-default", not "override with None".
@@ -252,12 +266,12 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
                             provider_value, feature_key, value,
                         )
                     else:
-                        return value
+                        return selected(value, "global_group")
                 # Group entry present but no model_id → fall through
                 # to active_model, mirroring feature override semantics.
         raw = await self._read_pref(_ACTIVE_MODEL_KEY, character=character)
         if not isinstance(raw, dict):
-            return None
+            return selected(None, "provider_default")
         value = raw.get("model_id")
         if isinstance(value, str) and value.strip():
             provider_value = raw.get("provider_id")
@@ -271,9 +285,9 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
                     "is not registered; ignoring its model_id %r",
                     provider_value, value,
                 )
-                return None
-            return value
-        return None
+                return selected(None, "provider_default")
+            return selected(value, "active_model")
+        return selected(None, "provider_default")
 
     async def is_fake(
         self,

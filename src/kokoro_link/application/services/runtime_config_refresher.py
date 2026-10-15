@@ -35,6 +35,8 @@ never builds one.
 
 from __future__ import annotations
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event
+
 import asyncio
 import contextlib
 import logging
@@ -171,10 +173,12 @@ class RuntimeConfigRefresher:
             if fingerprint == self._known_fingerprint:
                 return False
         try:
+            event("config.apply.started", phase=self._label, revision=fingerprint)
             await self._refresh_cb()
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            event("config.apply.failed", phase=self._label, status="failed", error_type=type(exc).__name__)
             # Fail-soft: a failed refresh leaves ``_known_fingerprint`` behind
             # the table, so the next tick retries rather than silently
             # accepting stale registries.
@@ -185,6 +189,7 @@ class RuntimeConfigRefresher:
         # which moves the fingerprint. Storing the post-sync value stops this
         # process from re-syncing in response to its own write.
         self._known_fingerprint = await self._read_fingerprint()
+        event("config.apply.completed", phase=self._label, status="succeeded", revision=self._known_fingerprint)
         return True
 
     def _wants(self, payload: str | None) -> bool:

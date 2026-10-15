@@ -10,6 +10,8 @@ compatibility (several routes/tests import them from here).
 
 from __future__ import annotations
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event, observed
+
 import asyncio
 import logging
 import weakref
@@ -166,6 +168,7 @@ async def seed_legacy_provider_connections(
             )
 
 
+@observed("config.sync")
 async def sync_provider_connections(container: ServiceContainer) -> None:
     """Register enabled DB-backed providers into mutable registries.
 

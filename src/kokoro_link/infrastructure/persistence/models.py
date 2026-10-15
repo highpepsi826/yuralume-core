@@ -37,6 +37,33 @@ class Base(DeclarativeBase):
     pass
 
 
+class DiagnosticEventRow(Base):
+    """Sanitized technical events; deliberately no business-data foreign keys."""
+    __tablename__ = "diagnostic_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    level: Mapped[str] = mapped_column(String(16))
+    character_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(64))
+    request_id: Mapped[str | None] = mapped_column(String(128))
+    details_json: Mapped[str] = mapped_column(Text)
+    logical_bytes: Mapped[int] = mapped_column(Integer)
+
+
+class DiagnosticQuotaRow(Base):
+    """Single lock/accounting row shared by diagnostic writers and cleaners."""
+    __tablename__ = "diagnostic_quota"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    logical_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    row_count: Mapped[int] = mapped_column(Integer, default=0)
+    dropped_count: Mapped[int] = mapped_column(BigInteger, default=0)
+    persist_failed_count: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_persisted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    housekeeping_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
 class CharacterRow(Base):
     __tablename__ = "characters"
 

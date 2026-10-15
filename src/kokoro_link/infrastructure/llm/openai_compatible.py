@@ -1,8 +1,11 @@
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event, observed, observed_stream, response_shape
+
 import copy
 import json
 import logging
 import re
 import time
+from uuid import uuid4
 from collections.abc import AsyncIterator, Sequence
 
 import httpx
@@ -1461,6 +1464,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
             "assistant text after one retry",
         )
 
+    @observed("provider.completion")
     async def _generate_primary(
         self,
         prompt: str,
@@ -1473,14 +1477,31 @@ class OpenAICompatibleChatModel(ChatModelPort):
             prompt, image_urls=image_urls, model=model,
         )
         async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+            attempt = 0
+            async def send_attempt(request_payload):
+                nonlocal attempt
+                attempt += 1
+                started = time.perf_counter()
+                attempt_id = uuid4().hex
+                fields = dict(provider_id=self.provider_id, model_id=str(request_payload.get("model") or model or self._model),
+                              protocol="responses" if self._uses_responses_api else "chat_completions",
+                              attempt=attempt, attempt_id=attempt_id)
+                event("provider.attempt.started", **fields)
+                try:
+                    response = await client.post(self._completion_url(), json=request_payload,
+                                                 headers=self._build_headers())
+                except Exception as exc:
+                    event("provider.attempt.failed", **fields, status="failed", error_type=type(exc).__name__,
+                          elapsed_ms=int((time.perf_counter() - started) * 1000))
+                    raise
+                event("provider.attempt.response", **fields, **response_shape(response),
+                      elapsed_ms=int((time.perf_counter() - started) * 1000))
+                return response
+
             async def post_completion(request_payload: dict) -> tuple[
                 httpx.Response, dict,
             ]:
-                response = await client.post(
-                    self._completion_url(),
-                    json=request_payload,
-                    headers=self._build_headers(),
-                )
+                response = await send_attempt(request_payload)
                 # Signal-driven adaptation loop: each round reacts to what
                 # the error body prescribes (non-chat model → default,
                 # max_tokens rename, system-role merge, unrecognized-param
@@ -1498,11 +1519,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
                     if adapted is None:
                         break
                     request_payload = adapted
-                    response = await client.post(
-                        self._completion_url(),
-                        json=request_payload,
-                        headers=self._build_headers(),
-                    )
+                    response = await send_attempt(request_payload)
                 try:
                     _raise_with_body(response)
                 except httpx.HTTPStatusError as exc:
@@ -1524,6 +1541,9 @@ class OpenAICompatibleChatModel(ChatModelPort):
             try:
                 content = parse_text(response)
             except OpenAICompatibleResponseShapeError:
+                event("provider.parse.failed", provider_id=self.provider_id,
+                      model_id=model or self._model, attempt=attempt,
+                      status="failed", error_type="OpenAICompatibleResponseShapeError")
                 _LOGGER.warning(
                     "LLM %s returned a 2xx completion without usable text; "
                     "retrying once",
@@ -1589,6 +1609,7 @@ class OpenAICompatibleChatModel(ChatModelPort):
         async for chunk in strip_think_tags_stream(raw):
             yield chunk
 
+    @observed_stream("provider.stream")
     async def _raw_generate_stream(
         self,
         prompt: str,
@@ -1639,21 +1660,31 @@ class OpenAICompatibleChatModel(ChatModelPort):
             # non-stream fallback below. Exhausting the defensive cap
             # falls through to the same fallback, whose generate() then
             # either succeeds or raises with the diagnostic body.
-            for _ in range(_MAX_PRESCRIBED_RETRIES):
+            for stream_attempt in range(_MAX_PRESCRIBED_RETRIES):
+                attempt_fields = dict(provider_id=self.provider_id,
+                                      model_id=str(payload.get("model") or self._model),
+                                      protocol="responses_stream" if self._uses_responses_api else "chat_completions_stream",
+                                      attempt=stream_attempt + 1, attempt_id=uuid4().hex)
+                event("provider.stream_attempt.started", **attempt_fields)
                 async with client.stream(
                     "POST",
                     self._completion_url(),
                     json=payload,
                     headers=self._build_headers(),
                 ) as response:
+                    event("provider.stream_attempt.headers", **attempt_fields, http_status=response.status_code)
                     if response.status_code < 400:
                         stream_iterator = (
                             _iter_responses_stream(response)
                             if self._uses_responses_api
                             else _iter_openai_stream(response)
                         )
+                        chars = 0
                         async for chunk in stream_iterator:
+                            chars += len(chunk)
                             yield chunk
+                        event("provider.stream_attempt.completed", **attempt_fields,
+                              text_chars=chars, has_text=chars > 0, status="succeeded")
                         return
                     # Read the body for diagnostics before raising —
                     # otherwise the stream is closed and the operator

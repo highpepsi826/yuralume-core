@@ -5,6 +5,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event, DiagnosticRequestMiddleware
+from kokoro_link.infrastructure.observability.persistent_diagnostics import get_diagnostic_collector
+
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -311,7 +315,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     )
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def runtime_lifespan(app: FastAPI):
         # Background schedulers run as single asyncio tasks for the
         # app's lifetime. Unit tests that instantiate ``ServiceContainer``
         # directly won't start them.
@@ -520,9 +524,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         if realtime_dispatcher is not None:
             await realtime_dispatcher.start()
         await heartbeat_publisher.publish_now()
+        event("lifecycle.ready", process_role=settings.process.role)
         try:
             yield
         finally:
+            event("lifecycle.stopping", process_role=settings.process.role)
             try:
                 await heartbeat_publisher.stop()
             except Exception as exc:  # fail-soft: never mask clean shutdown
@@ -636,17 +642,35 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                         )
                     except Exception as exc:  # fail-soft
                         print(f"[lifespan] turn recorder flush failed: {exc!r}")
-            # HOSTED_CORE_SCALING §9.1 — dispose the single shared async
-            # engine (releases its connection pool) once, in every process
-            # role. Fail-soft so a dispose error never masks a clean
-            # shutdown; ``None`` on in-memory builds is a no-op.
+            event("lifecycle.stopped", process_role=settings.process.role)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        collector = get_diagnostic_collector()
+        factory = (async_sessionmaker(container.db_engine, expire_on_commit=False)
+                   if container.db_engine is not None else None)
+        await collector.start(factory)
+        event("lifecycle.starting", process_role=settings.process.role,
+              build_commit_sha=build_info.build.commit_sha or "")
+        try:
+            async with runtime_lifespan(app):
+                yield
+        except BaseException as exc:
+            event("lifecycle.failed", process_role=settings.process.role,
+                  error_type=type(exc).__name__, status="failed")
+            raise
+        finally:
+            # Capture failure before flushing; keep the database available until
+            # diagnostics finish, including startup and shutdown failure paths.
+            await collector.stop()
             if container.db_engine is not None:
                 try:
                     await container.db_engine.dispose()
-                except Exception as exc:  # fail-soft
-                    print(f"[lifespan] db_engine dispose failed: {exc!r}")
+                except Exception as exc:
+                    _LOGGER.warning("database dispose failed: %s", type(exc).__name__)
 
     app = FastAPI(title="Yuralume", version=build_info.version, lifespan=lifespan)
+    app.add_middleware(DiagnosticRequestMiddleware)
     app.state.container = container
     app.state.settings = settings
     # Stash the process-role component matrix so the /health probe can be

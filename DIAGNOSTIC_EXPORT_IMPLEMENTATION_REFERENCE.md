@@ -1,5 +1,14 @@
 # Diagnostic Export Implementation Reference
 
+## 2026-10-15 superseding scope
+
+The user authorized diagnostic completeness and application-owned persistent
+logs with housekeeping, without Zeabur paid logs/alerts. The current source
+implementation is described in `DIAGNOSTIC_COMPLETENESS_IMPLEMENTATION_REFERENCE.md`.
+It supersedes the older no-new-log-table restriction below, while preserving
+admin/read-only export, redaction, opt-in bodies and external platform boundaries.
+Source checks are complete; production migration/deployment remain separate.
+
 ## Problem
 
 The hosted application writes useful runtime and database diagnostics, but the

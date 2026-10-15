@@ -17,6 +17,8 @@ yields only the text so ChatService's token loop stays shape-agnostic.
 
 from __future__ import annotations
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import observed, observed_stream
+
 import copy
 import json
 import logging
@@ -256,6 +258,7 @@ class AnthropicChatModel(ChatModelPort):
 
     # ---- generate -----------------------------------------------------
 
+    @observed("provider.anthropic_completion")
     async def generate(
         self,
         prompt: str,
@@ -276,6 +279,7 @@ class AnthropicChatModel(ChatModelPort):
             data = response.json()
         return _extract_text(data)
 
+    @observed_stream("provider.anthropic_stream")
     async def generate_stream(
         self,
         prompt: str,

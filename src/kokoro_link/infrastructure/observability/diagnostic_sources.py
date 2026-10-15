@@ -9,7 +9,8 @@ from typing import Any
 from sqlalchemy import func, select
 
 from kokoro_link.infrastructure.persistence.models import (
-    CharacterAlbumItemRow, CharacterRow, ConversationRow, MessageRow, TurnRecordRow,
+    CharacterAlbumItemRow, CharacterRow, ConversationRow, FeedPostRow, MessageRow,
+    PendingFeedVideoRow, TurnRecordRow,
 )
 from kokoro_link.infrastructure.persistence.sa_turn_record_repository import _row_to_domain
 
@@ -17,6 +18,28 @@ MAX_MESSAGES = 2000
 MAX_MESSAGE_CHARS = 16000
 MAX_OBJECTS = 100
 STAT_TIMEOUT = 2.0
+
+
+def safe_turn_refs(value, depth=0):
+    """Keep structural auxiliary-call evidence, excluding generated prose/bodies."""
+    if not isinstance(value, dict) or depth > 4:
+        return {}
+    groups = {"material_digest", "register_profile", "novelty_gate", "persona_curiosity",
+              "reply_quality_gate", "outcome_claim_judge", "diversity", "presence_frame"}
+    fields = {"content_mode", "source", "turn_id", "request_id", "command_id", "provider_id",
+              "model_id", "profile_id", "config_revision", "latency_ms", "prompt_tokens",
+              "completion_tokens", "enabled", "applied", "precomputed", "evaluated", "passes",
+              "retry_count", "outcome", "status", "final_verdict", "surface", "channel",
+              "forced_tool", "turn_index", "post_turn_enqueued", "artifact_count"}
+    result = {}
+    for key, item in value.items():
+        if key in groups and isinstance(item, dict):
+            result[key] = safe_turn_refs(item, depth + 1)
+        elif key == "error":
+            result["has_error"] = bool(item)
+        elif key in fields and isinstance(item, (str, int, float, bool, type(None))):
+            result[key] = item
+    return result
 
 
 def utc(value: datetime) -> datetime:
@@ -114,6 +137,18 @@ async def read_storage(container, factory, character_id, start, end, attachments
             CharacterAlbumItemRow.character_id == character_id,
             CharacterAlbumItemRow.created_at >= start, CharacterAlbumItemRow.created_at <= end,
         ).order_by(CharacterAlbumItemRow.created_at, CharacterAlbumItemRow.id).limit(MAX_OBJECTS + 1)),
+        ('feed_images', select(FeedPostRow.image_url).where(
+            FeedPostRow.character_id == character_id,
+            FeedPostRow.created_at >= start, FeedPostRow.created_at <= end,
+        ).order_by(FeedPostRow.created_at, FeedPostRow.id).limit(MAX_OBJECTS + 1)),
+        ('feed_videos', select(FeedPostRow.video_url).where(
+            FeedPostRow.character_id == character_id,
+            FeedPostRow.created_at >= start, FeedPostRow.created_at <= end,
+        ).order_by(FeedPostRow.created_at, FeedPostRow.id).limit(MAX_OBJECTS + 1)),
+        ('pending_feed_frames', select(PendingFeedVideoRow.first_frame_url).where(
+            PendingFeedVideoRow.character_id == character_id,
+            PendingFeedVideoRow.created_at >= start, PendingFeedVideoRow.created_at <= end,
+        ).order_by(PendingFeedVideoRow.created_at, PendingFeedVideoRow.id).limit(MAX_OBJECTS + 1)),
     ):
         try:
             async with factory() as session:
@@ -145,7 +180,7 @@ async def read_storage(container, factory, character_id, start, end, attachments
     objects = await asyncio.gather(*(stat(k) for k in sorted(keys)))
     return objects, {
         'status': 'partial' if errors or truncated or any(x['status'] != 'available' for x in objects) else 'complete',
-        'scope': 'current_metadata_for_character_portraits_and_window_message_album_references',
+        'scope': 'current_metadata_for_character_portraits_and_window_message_album_feed_references',
         'checked_at': datetime.now(timezone.utc).isoformat(),
         'row_count': len(objects), 'max_objects': MAX_OBJECTS, 'truncated': truncated,
         'reference_errors': errors, 'not_a_full_storage_inventory': True,

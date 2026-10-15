@@ -29,6 +29,8 @@ the operator can fix in the UI.
 
 from __future__ import annotations
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event
+
 import logging
 from typing import Any
 
@@ -73,6 +75,9 @@ class PreferenceBackedActiveImageProvider(ActiveImageProviderPort):
         profile_id = await self.resolve_profile_id(
             feature_key, character=character,
         )
+        event("routing.image", character_id=getattr(character, "id", None),
+              feature_key=feature_key, profile_id=profile_id,
+              status="resolved" if profile_id else "disabled_or_unavailable")
         if profile_id is None:
             return None
         provider = self._registry.resolve(profile_id)
@@ -98,6 +103,11 @@ class PreferenceBackedActiveImageProvider(ActiveImageProviderPort):
         *,
         character: Character | None = None,
     ) -> str | None:
+        def selected(value, source):
+            event("routing.image_profile", character_id=getattr(character, "id", None),
+                  feature_key=feature_key, profile_id=value, routing_source=source)
+            return value
+
         nsfw_target = await self._read_nsfw_target(character=character)
         if nsfw_target is not None:
             nsfw_profile_id = nsfw_target.image_profile_id
@@ -110,21 +120,21 @@ class PreferenceBackedActiveImageProvider(ActiveImageProviderPort):
                     "active image: NSFW mode image generation is disabled "
                     "by operator; refusing fallback",
                 )
-                return None
+                return selected(None, "nsfw_mode")
             if self._registry.get_profile(nsfw_profile_id) is None:
                 _LOGGER.error(
                     "active image: NSFW mode profile %r is not registered; "
                     "refusing fallback",
                     nsfw_profile_id,
                 )
-                return None
-            return nsfw_profile_id
+                return selected(None, "nsfw_mode")
+            return selected(nsfw_profile_id, "nsfw_mode")
         # Per-character override first.
         if feature_key and character is not None:
             override = character.feature_image_profile_for(feature_key)
             if override is not None and override.profile_id:
                 if self._registry.get_profile(override.profile_id) is not None:
-                    return override.profile_id
+                    return selected(override.profile_id, "character_feature")
                 _LOGGER.warning(
                     "character %s pins image profile %r which is not "
                     "registered; falling through",
@@ -140,7 +150,7 @@ class PreferenceBackedActiveImageProvider(ActiveImageProviderPort):
                 if isinstance(value, str) and value.strip():
                     candidate = value.strip()
                     if self._registry.get_profile(candidate) is not None:
-                        return candidate
+                        return selected(candidate, "global_feature")
         # Global active.
         raw = await self._read_pref(_ACTIVE_KEY, character=character)
         if isinstance(raw, dict):
@@ -148,9 +158,9 @@ class PreferenceBackedActiveImageProvider(ActiveImageProviderPort):
             if isinstance(value, str) and value.strip():
                 candidate = value.strip()
                 if self._registry.get_profile(candidate) is not None:
-                    return candidate
+                    return selected(candidate, "active_image_profile")
         # Final fallback: first registered profile.
-        return self._fallback_id()
+        return selected(self._fallback_id(), "runtime_fallback")
 
     # ---- internals ----------------------------------------------------
 

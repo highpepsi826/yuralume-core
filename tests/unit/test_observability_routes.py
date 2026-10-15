@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 import io
 import json
 import zipfile
@@ -93,6 +94,67 @@ def test_diagnostic_export_full_scope_is_bounded_and_reports_sources():
         assert "application_logs.jsonl" in archive.namelist()
         assert "diagnostic_completeness" in summary
         assert summary["limits"]["include_storage_metadata"] is True
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["schema_version"] == 1
+        assert manifest["diagnostic_coverage"]["status"] == "partial"
+        assert "historical_config_before_instrumentation" in manifest["diagnostic_coverage"]["missing_evidence"]
+        assert manifest["sources"]["application_logs"]["status"] == "partial"
+        assert manifest["host_disk_capacity"] == "unknown"
+        assert "routing_snapshot.json" in archive.namelist()
+        assert "diagnostic_events.jsonl" in archive.namelist()
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_export_prompt_opt_in_and_exact_truncation_lengths():
+    _, container = _build_container_with_observability()
+    await container.turn_record_repository.add(TurnRecord.new(
+        character_id="c1", kind="chat", prompt_assembled="x" * 18000, response_text="y" * 1500,
+        post_turn_refs={"prompt": "private-prompt-marker", "nested": {"body": "private-chat-marker"}, "provider_id": "provider-a"}))
+    client = _client(container)
+    for prompt_enabled in (False, True):
+        response = client.get("/api/v1/admin/observability/diagnostic-export?character_id=c1&include_messages=true"
+                              + ("&include_prompt=true" if prompt_enabled else ""))
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            summary = json.loads(archive.read("summary.json"))
+            row = summary["turn_records"][0]
+            assert row["response_original_chars"] == 1500
+            assert row["response_truncated"] is True
+            assert ("prompt_assembled" in row) is prompt_enabled
+            assert row["post_turn_refs"] == {"provider_id": "provider-a"}
+            assert row["post_turn_refs_omitted"] is True
+            assert "private-prompt-marker" not in archive.read("summary.json").decode()
+            if prompt_enabled:
+                assert len(row["prompt_assembled"]) == 16000
+                entry = next(t for t in summary["text_truncations"] if t["path"].endswith("prompt_assembled"))
+                assert entry["original_chars"] == 18000
+
+
+def test_generation_failed_receipt_degrades_health_without_turn_error(monkeypatch):
+    from kokoro_link.infrastructure.persistence.models import InboundMessageReceiptRow
+    _, container = _build_container_with_observability()
+    now = datetime.now(timezone.utc)
+    account = SimpleNamespace(id="account-1", platform=SimpleNamespace(value="telegram"), enabled=False,
+        delivery_mode=SimpleNamespace(value="polling"), polling_last_update_at=now, polling_last_error=None)
+    receipt = SimpleNamespace(platform="telegram", account_id="account-1", chat_ref="chat",
+        platform_message_id="message", state="generation_failed", failure_code="response_shape",
+        failure_message=None, created_at=now, completed_at=now)
+    async def accounts(_):
+        return [account]
+    class Session:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_): pass
+        async def execute(self, query):
+            rows = [receipt] if query.column_descriptions[0]["entity"] is InboundMessageReceiptRow else []
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: rows))
+    monkeypatch.setattr(container.messaging_account_service, "list_for_character", accounts)
+    monkeypatch.setattr(container.messaging_dispatcher, "_receipts", SimpleNamespace(_session_factory=Session))
+    response = _client(container).get("/api/v1/admin/observability/diagnostic-export?character_id=c1")
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        health = json.loads(archive.read("summary.json"))["inferred_health"]
+        assert health["status"] == "degraded"
+        assert health["generation_failed_receipt_count"] == 1
+        assert health["historical_failures_present"] is True
 
 
 @pytest.mark.asyncio

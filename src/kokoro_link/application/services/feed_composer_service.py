@@ -13,6 +13,8 @@ service is stateless; tick safety comes from the repo's daily-count +
 
 from __future__ import annotations
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event, observed
+
 import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone, tzinfo
@@ -454,6 +456,7 @@ class FeedComposerService:
             service is not None and deferred_pipeline_possible,
         )
 
+    @observed("feed.tick")
     async def tick(
         self,
         character: Character,
@@ -462,8 +465,10 @@ class FeedComposerService:
     ) -> FeedPost | None:
         when = now or datetime.now(timezone.utc)
         if not self._is_feed_enabled(character):
+            event("feed.skipped", reason="disabled")
             return None
         if await self._has_video_in_flight(character):
+            event("feed.skipped", reason="video_in_flight")
             # A queued clip *is* this character's next post — it lands as
             # the clip, or as the first frame it was already billed for,
             # but it lands. Until then it holds no ``feed_posts`` row, so
@@ -476,8 +481,10 @@ class FeedComposerService:
             return None
         local_tz = await self._resolve_operator_timezone(character)
         if not await self._gate_passes(character, when, local_tz):
+            event("feed.skipped", reason="gate_blocked")
             return None
         if await self._is_current_activity_high_busy(character, when):
+            event("feed.skipped", reason="high_busy")
             return None
         quota = await self._claim_runtime_feed_post_quota(
             character, when, local_tz,
@@ -763,6 +770,7 @@ class FeedComposerService:
         except Exception:  # pragma: no cover - defensive
             return timezone.utc
 
+    @observed("feed.materialise")
     async def _materialise(
         self,
         character: Character,
@@ -942,6 +950,7 @@ class FeedComposerService:
             )
             return _TickOutcome()
         await self._publish(post)
+        event("feed.published", post_id=post.id, status="succeeded")
         await self._notify_web_push(character, post)
         await self._memorialize(character, post)
         return _TickOutcome(post=post)
@@ -1399,16 +1408,22 @@ class FeedComposerService:
         """The post's picture: render → persist → bill, degrading to a
         text-only post at every step that can fail."""
         if not candidate.image_required:
+            event("feed.image.skipped", character_id=character.id, reason="not_requested")
             return None, None
         if self._image_provider is None or self._object_storage is None:
+            event("feed.image.skipped", character_id=character.id, reason="provider_or_storage_unconfigured")
             return None, None
         prompt = (composer_prompt or "").strip()
         if not prompt:
+            event("feed.image.skipped", character_id=character.id, reason="empty_composer_prompt")
             return None, None
         render = await self._render_feed_image(character, prompt)
         if render.provider is None:
+            event("feed.image.skipped", character_id=character.id, reason="no_resolved_provider")
             return None, render.styled_prompt
         if render.error is not None:
+            event("feed.image.downgraded", status="failed", error_type=type(render.error).__name__,
+                  reason="text_only_fallback", profile_id=render.profile_id)
             await self._record_image_render_usage(
                 character=character, render=render, artifact_count=0,
             )
@@ -1425,11 +1440,14 @@ class FeedComposerService:
                 )
             return None, render.styled_prompt
         if render.image_bytes is None:
+            event("feed.image.downgraded", reason="no_output", profile_id=render.profile_id)
             await self._record_image_render_usage(
                 character=character, render=render, artifact_count=0,
             )
             return None, render.styled_prompt
         url = await self._write_image_bytes(character, render.image_bytes)
+        event("feed.image.stored", status="succeeded" if url else "failed",
+              profile_id=render.profile_id, artifact_count=1 if url else 0)
         await self._record_image_render_usage(
             character=character, render=render, artifact_count=1 if url else 0,
         )
@@ -1494,6 +1512,7 @@ class FeedComposerService:
             data=render.image_bytes,
         )
 
+    @observed("feed.image")
     async def _render_feed_image(
         self,
         character: Character,
@@ -1545,6 +1564,7 @@ class FeedComposerService:
                 ),
             )
         except ImageGenerationError as exc:
+            event("feed.image.failed", profile_id=profile_id, error_type=type(exc).__name__, status="failed")
             return _RenderedImage(
                 styled_prompt=styled_prompt,
                 started_at=started_at,
@@ -1556,6 +1576,7 @@ class FeedComposerService:
                 typed_failure=True,
             )
         except Exception as exc:
+            event("feed.image.failed", profile_id=profile_id, error_type=type(exc).__name__, status="failed")
             return _RenderedImage(
                 styled_prompt=styled_prompt,
                 started_at=started_at,
@@ -1565,6 +1586,8 @@ class FeedComposerService:
                 error_code=type(exc).__name__,
                 error_message=str(exc),
             )
+        event("feed.image.generated", profile_id=profile_id, artifact_count=len(images) if images else 0,
+              status="succeeded" if images else "no_output")
         return _RenderedImage(
             styled_prompt=styled_prompt,
             started_at=started_at,
@@ -2124,6 +2147,7 @@ class FeedComposerService:
             )
             return None
 
+    @observed("feed.storage")
     async def _store_feed_image(
         self, character: Character, blob: bytes,
     ) -> StoredObject | None:

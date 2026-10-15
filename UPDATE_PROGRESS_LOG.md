@@ -1,5 +1,33 @@
 # Update and Progress Log
 
+### 2026-10-15 - PostgreSQL diagnostic rehearsal passed
+
+- User ran the prepared isolated local PostgreSQL runner; verified report
+  `diagnostic-postgres-rehearsal-5bebe969c36b.json` records all checks passed.
+- Verified migration upgrade/downgrade/re-upgrade, previous schema preservation,
+  persistence/redaction/cleanup isolation, quota serialization and 16 concurrent
+  writers. Owned disposable container was removed successfully.
+- PostgreSQL rehearsal release gate is satisfied. No production migration,
+  commit, push or deployment was performed by this verification.
+
+### 2026-10-15 - Complete diagnostic evidence and bounded persistent logs (source only)
+
+- Added manifest/coverage/truncation reporting, generation-failure health,
+  bounded generation/feed/durable/fleet/routing projections, and feed media refs.
+- Added sanitized persistent diagnostic events and application error locations,
+  correlated runtime phases/provider attempts/config/feed evidence, 14/30-day
+  retention, priority admission, logical quota and diagnostic-only cleanup.
+- Admin UI reports collection/coverage and storage/cleanup gaps; message/prompt
+  bodies remain explicit opt-ins. No Zeabur paid logs/alerts are required.
+- Verification: backend integration 495 passed, final lifecycle set 32 passed,
+  final feed/context set 68 passed, final export projections 20 passed (overlap);
+  frontend API 8 passed, i18n and production/PWA build passed. Synthetic persisted
+  event ZIP verified. SQLite migration roundtrip and single head x3l8n0p10061 pass.
+- Not committed, pushed or deployed. PostgreSQL migration rehearsal remains a
+  release gate: local Docker daemon is unavailable. No production data/settings,
+  backups, notifications or services were changed. Admin browser visual smoke
+  test has not been performed. Reference: DIAGNOSTIC_COMPLETENESS_IMPLEMENTATION_REFERENCE.md.
+
 ### 2026-09-26 - Make diagnostic bundle names collision-resistant
 
 - Source-only repair: diagnostic downloads now use

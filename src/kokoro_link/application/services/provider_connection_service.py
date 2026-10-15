@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import event
+
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -296,6 +298,9 @@ class ProviderConnectionService:
             updated_at=now,
         )
         saved = await self._repository.save(row)
+        event("config.connection.created", provider_id=runtime_provider_id(saved),
+              revision=saved.updated_at.isoformat() if saved.updated_at else "",
+              status="enabled" if saved.enabled else "disabled")
         return self._redact(saved)
 
     async def update_connection(
@@ -375,10 +380,14 @@ class ProviderConnectionService:
             updated_at=datetime.now(timezone.utc),
         )
         saved = await self._repository.save(row)
+        event("config.connection.updated", provider_id=runtime_provider_id(saved),
+              revision=saved.updated_at.isoformat() if saved.updated_at else "",
+              status="enabled" if saved.enabled else "disabled")
         return self._redact(saved)
 
     async def delete_connection(self, connection_id: str) -> None:
         await self._repository.delete(connection_id)
+        event("config.connection.deleted", request_id=connection_id)
 
     async def record_runtime_status(
         self,
