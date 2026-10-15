@@ -19,6 +19,28 @@ from kokoro_link.infrastructure.observability.persistent_diagnostics import (
 from kokoro_link.infrastructure.persistence.models import DiagnosticEventRow, DiagnosticQuotaRow
 
 
+def test_log_event_carries_correlation_and_safe_build_identity(monkeypatch):
+    from kokoro_link.infrastructure.observability import persistent_diagnostics as module
+    from kokoro_link.infrastructure.observability.runtime_diagnostics import diagnostic_scope
+    collector = DiagnosticCollector()
+    monkeypatch.setattr(module, '_process_metadata', lambda: {
+        'instance_id': 'instance-a', 'build_commit_sha': 'abcdef123456',
+        'build_source_digest': 'sha256:' + 'a' * 64})
+    with diagnostic_scope(character_id='character-a', job_id='job-a') as context:
+        record = logging.LogRecord('kokoro_link.test', logging.WARNING, __file__, 1,
+                                   'private log %s', ('private body',), None)
+        collector.handler.emit(record)
+    row = collector.queue[0]
+    metadata = json.loads(row['details_json'])
+    assert row['character_id'] == 'character-a'
+    assert row['request_id'] == context['request_id']
+    assert metadata['trace_id'] == context['trace_id']
+    assert metadata['job_id'] == 'job-a'
+    assert metadata['instance_id'] == 'instance-a'
+    assert metadata['build_source_digest'] == 'sha256:' + 'a' * 64
+    assert 'private' not in json.dumps(row, default=str)
+
+
 @pytest_asyncio.fixture
 async def diagnostics_db(tmp_path):
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "diagnostics.db"}')

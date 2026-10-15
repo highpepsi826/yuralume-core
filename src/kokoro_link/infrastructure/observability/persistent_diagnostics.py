@@ -7,6 +7,7 @@ import logging
 import re
 import traceback
 import time
+from functools import lru_cache
 from pathlib import PurePath
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,7 @@ HARD_LIMIT_BYTES = 1024 * 1024 * 1024
 ROW_CAP = 250_000
 # Text fields are structural identifiers, never arbitrary request/response payloads.
 SAFE_FIELDS = frozenset({
+    'trace_id', 'operation_id', 'parent_operation_id', 'job_id', 'build_source_digest',
     'turn_id', 'account_id', 'platform_message_id', 'binding_id', 'attempt_id',
     'source_file', 'source_function', 'source_line', 'exception_chain',
     'parent_request_id', 'feature_key', 'model_id', 'profile_id', 'routing_source',
@@ -40,6 +42,15 @@ SAFE_FIELDS = frozenset({
     'exception_stack', 'template_hash', 'target', 'source', 'queue_depth',
 })
 _IDENTIFIER = re.compile(r'^[A-Za-z0-9_.:/@+ -]{1,160}$')
+
+
+@lru_cache(maxsize=1)
+def _process_metadata():
+    from kokoro_link.infrastructure.build_info import get_build_info
+    from kokoro_link.infrastructure.runtime_identity import instance_id
+    build = get_build_info().build
+    return {"instance_id": instance_id(), "build_commit_sha": build.commit_sha,
+            "build_source_digest": build.source_digest}
 
 
 def _identifier(value, max_length=128):
@@ -107,7 +118,9 @@ class _PersistentLogHandler(logging.Handler):
         if not record.name.startswith('kokoro_link'):
             return
         try:
-            self.collector.emit('application.log', level=record.levelname, **safe_log_metadata(record))
+            from .runtime_diagnostics import current_context
+            self.collector.emit('application.log', level=record.levelname,
+                                **current_context(), **safe_log_metadata(record))
         except Exception:
             pass
 
@@ -136,6 +149,7 @@ class DiagnosticCollector:
             if level == 'DEBUG':
                 return False
             now = datetime.now(timezone.utc)
+            metadata = {**_process_metadata(), **metadata}
             name = _identifier(name)
             level = level if level in {'INFO', 'WARNING', 'WARN', 'ERROR', 'CRITICAL'} else 'INFO'
             failed = (metadata.get('status') in {'failed', 'error'} or name.endswith('failed')

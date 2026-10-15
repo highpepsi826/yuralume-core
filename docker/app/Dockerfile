@@ -44,6 +44,11 @@ COPY pyproject.toml uv.lock README.md alembic.ini usage-prices.openai.json ./
 COPY alembic ./alembic
 COPY src ./src
 COPY --from=frontend-builder /app/src/kokoro_link/frontend/dist ./src/kokoro_link/frontend/dist
+COPY docker/app/generate_build_metadata.py /tmp/generate_build_metadata.py
+
+# The file survives absent/empty runtime variables, including Zeabur source builds.
+# Build SHA is only supplied explicitly; the artifact digest is never a Git SHA.
+RUN python /tmp/generate_build_metadata.py && rm /tmp/generate_build_metadata.py
 
 RUN uv sync --frozen --no-dev \
     && uv cache clean \

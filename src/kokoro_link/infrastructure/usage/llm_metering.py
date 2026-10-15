@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import datetime, timezone
+
+from kokoro_link.infrastructure.observability.runtime_diagnostics import (
+    current_context, diagnostic_scope, observed, observed_stream,
+)
 
 from kokoro_link.application.services.feature_keys import FEATURE_CHAT
 from kokoro_link.contracts.active_llm import ActiveLLMProviderPort
@@ -59,12 +64,13 @@ class MeteredActiveLLMProvider(ActiveLLMProviderPort):
         operator_id: str | None = None,
         content_tolerance: str | None = None,
     ) -> ChatModelPort:
-        model = await self._inner.resolve(
-            feature_key,
-            character=character,
-            operator_id=operator_id,
-            content_tolerance=content_tolerance,
-        )
+        with diagnostic_scope(character_id=_character_id(character), feature_key=feature_key) as context:
+            model = await self._inner.resolve(
+                feature_key,
+                character=character,
+                operator_id=operator_id,
+                content_tolerance=content_tolerance,
+            )
         if feature_key in self._skipped:
             return model
         return MeteredChatModel(
@@ -74,6 +80,7 @@ class MeteredActiveLLMProvider(ActiveLLMProviderPort):
             character=character,
             operator_id=operator_id,
             content_tolerance=content_tolerance,
+            diagnostic_context=context,
         )
 
     async def resolve_model_id(
@@ -122,6 +129,7 @@ class MeteredChatModel(ChatModelPort):
         conversation_id: str | None = None,
         turn_record_id: str | None = None,
         metered_by: str = "active_llm_provider",
+        diagnostic_context: dict | None = None,
     ) -> None:
         self._inner = inner
         self._recorder = recorder
@@ -134,6 +142,7 @@ class MeteredChatModel(ChatModelPort):
         self._conversation_id = conversation_id
         self._turn_record_id = turn_record_id
         self._metered_by = metered_by
+        self._diagnostic_context = diagnostic_context or current_context()
         self.provider_id = inner.provider_id
         self.supports_vision = inner.supports_vision
         self.prefers_public_image_urls = bool(
@@ -145,6 +154,14 @@ class MeteredChatModel(ChatModelPort):
         return _last_request_id(self._inner)
 
     async def generate(
+        self, prompt: str, *, image_urls: Sequence[str] = (), model: str | None = None,
+    ) -> str:
+        with diagnostic_scope(captured=self._diagnostic_context,
+                              character_id=_character_id(self._character), feature_key=self._feature_key):
+            return await self._generate(prompt, image_urls=image_urls, model=model)
+
+    @observed("generation.feature")
+    async def _generate(
         self,
         prompt: str,
         *,
@@ -160,7 +177,7 @@ class MeteredChatModel(ChatModelPort):
             )
         start = time.monotonic()
         output = ""
-        error: Exception | None = None
+        error: BaseException | None = None
         try:
             output = await self._inner.generate(
                 prompt,
@@ -168,7 +185,7 @@ class MeteredChatModel(ChatModelPort):
                 model=model,
             )
             return output
-        except Exception as exc:  # noqa: BLE001 - record then re-raise
+        except (Exception, asyncio.CancelledError) as exc:  # record cancellation, never suppress it
             error = exc
             raise
         finally:
@@ -183,7 +200,15 @@ class MeteredChatModel(ChatModelPort):
                 error=error,
             )
 
-    async def generate_stream(
+    def generate_stream(
+        self, prompt: str, *, image_urls: Sequence[str] = (), model: str | None = None,
+    ) -> AsyncIterator[str]:
+        with diagnostic_scope(captured=self._diagnostic_context,
+                              character_id=_character_id(self._character), feature_key=self._feature_key):
+            return self._generate_stream(prompt, image_urls=image_urls, model=model)
+
+    @observed_stream("generation.feature_stream")
+    async def _generate_stream(
         self,
         prompt: str,
         *,
@@ -201,7 +226,7 @@ class MeteredChatModel(ChatModelPort):
             return
         start = time.monotonic()
         chunks: list[str] = []
-        error: Exception | None = None
+        error: BaseException | None = None
         try:
             async for chunk in self._inner.generate_stream(
                 prompt,
@@ -210,7 +235,7 @@ class MeteredChatModel(ChatModelPort):
             ):
                 chunks.append(chunk)
                 yield chunk
-        except Exception as exc:  # noqa: BLE001 - record then re-raise
+        except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
             error = exc
             raise
         finally:
@@ -238,7 +263,7 @@ class MeteredChatModel(ChatModelPort):
         model: str | None,
         image_urls: Sequence[str],
         stream: bool,
-        error: Exception | None,
+        error: BaseException | None,
     ) -> None:
         prompt_tokens = _estimate_tokens(prompt)
         completion_tokens = _estimate_tokens(output)
@@ -246,12 +271,14 @@ class MeteredChatModel(ChatModelPort):
         output_quantity = int(completion_tokens or 0)
         total_quantity = input_quantity + output_quantity
         completed_at = datetime.now(timezone.utc)
+        context = current_context()
         try:
             await recorder.record(UsageEventDraft(
                 capability=CAPABILITY_LLM,
+                request_id=context.get("operation_id"),
                 upstream_request_id=_last_request_id(self._inner),
-                turn_record_id=self._turn_record_id,
-                conversation_id=self._conversation_id,
+                turn_record_id=self._turn_record_id or context.get("turn_id"),
+                conversation_id=self._conversation_id or context.get("conversation_id"),
                 character_id=_character_id(self._character),
                 operator_id=_operator_id(self._character, self._operator_id),
                 feature_key=self._feature_key,
@@ -274,6 +301,7 @@ class MeteredChatModel(ChatModelPort):
                 error_code=type(error).__name__ if error else None,
                 error_message=str(error)[:500] if error else None,
                 metadata={
+                    **{key: context[key] for key in ("trace_id", "operation_id", "parent_operation_id", "job_id") if key in context},
                     "metered_by": self._metered_by,
                     "stream": stream,
                     "image_url_count": len(tuple(image_urls)),

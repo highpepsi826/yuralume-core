@@ -36,11 +36,14 @@ async def test_usage_projection_is_bounded_private_and_includes_cross_window_com
         for index in range(MAX_ROWS + 1):
             session.add(GenerationUsageEventRow(id=f"usage-{index}", character_id="c1", capability="llm",
                 created_at=start + timedelta(seconds=index), status="failed", error_code="response_shape",
-                error_message="private message", metadata_json='{"api_key":"secret","prompt":"private"}'))
+                error_message="private message", metadata_json='{"api_key":"secret","prompt":"private","trace_id":"job:trace-1","operation_id":"op-1","job_id":"job-1"}'))
         session.add(GenerationUsageEventRow(id="other-character", character_id="c2", capability="llm", created_at=start))
     sources, coverage = await read_additional_sources(factory, "c1", start, end)
     assert len(sources["generation_events"]) == MAX_ROWS
     assert coverage["generation_events"]["truncated"] is True
+    assert sources["generation_events"][0]["trace_id"] == "job:trace-1"
+    assert sources["generation_events"][0]["operation_id"] == "op-1"
+    assert sources["generation_events"][0]["job_id"] == "job-1"
     assert coverage["commands"]["status"] == "unavailable"  # missing tables remain isolated
     assert all("metadata_json" not in row and "error_message" not in row for row in sources["generation_events"])
     assert all(row["id"] != "other-character" for row in sources["generation_events"])

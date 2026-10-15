@@ -20,6 +20,7 @@ HEALTH_STATES = frozenset({"starting", "healthy", "degraded", "stopping"})
 # These are intentionally aggregate and non-sensitive.  New keys require a
 # contract change so a future publisher cannot accidentally export payloads.
 HEARTBEAT_DETAIL_KEYS = frozenset({
+    "build_source_digest", "build_time", "build_metadata_source",
     "active_jobs",
     "completed_jobs",
     "connector_accounts_enabled",

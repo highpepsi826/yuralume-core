@@ -401,6 +401,9 @@ async def diagnostic_export(
                 "image_tag": get_build_info().build.image_tag,
                 "commit_sha": get_build_info().build.commit_sha,
                 "built_at": get_build_info().build.built_at,
+                "source_digest": get_build_info().build.source_digest,
+                "metadata_source": get_build_info().build.metadata_source,
+                "missing_fields": list(get_build_info().build.missing_fields),
             },
         },
     }
@@ -593,7 +596,7 @@ async def diagnostic_export(
     # Neither successful queries nor current snapshots prove sufficient incident history.
     historical_gaps = ["platform_events", "historical_config_before_instrumentation",
                        "provider_attempts_before_instrumentation", "feed_outcomes_before_instrumentation"]
-    if not all(payload["deployment"]["build"].values()):
+    if not payload["deployment"]["build"].get("commit_sha"):
         historical_gaps.append("deployment_build_identity")
     payload["diagnostic_completeness"] = {
         "status": "partial", "collection_status": collection_status,

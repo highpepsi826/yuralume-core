@@ -276,6 +276,8 @@ if TYPE_CHECKING:
         StorySceneSessionRepositoryPort,
     )
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import observed
+
 _LOGGER = logging.getLogger(__name__)
 
 # Direction-B address resolutions worth surfacing in the proactive prompt:
@@ -654,6 +656,7 @@ class ProactiveDispatcher:
             conversation_repository=conversation_repository,
         )
 
+    @observed("background.proactive_evaluate")
     async def evaluate(
         self,
         *,

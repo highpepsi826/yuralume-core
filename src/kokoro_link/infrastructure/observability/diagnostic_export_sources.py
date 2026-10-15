@@ -9,7 +9,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import JSON, and_, cast, func, or_, select
 
 from kokoro_link.infrastructure.persistence.models import (
     BackgroundJobRow, BackgroundRuntimeLeaseRow, ChatTurnCommandRow,
@@ -28,7 +28,14 @@ async def projection(factory, row, fields, predicate, order, *, limit=MAX_ROWS, 
         return [], {"status": "unavailable", "reason": "database_source_not_available", "scope": scope}
     async def query():
         async with factory() as session:
-            columns = [(getattr(row, field[4:]).is_not(None).label(field) if field.startswith("has_")
+            json_fields = ({"trace_id", "operation_id", "parent_operation_id", "job_id"}
+                           if row is GenerationUsageEventRow else
+                           {"build_source_digest", "build_time", "build_metadata_source"} if row is RuntimeProcessHeartbeatRow else set())
+            json_column = row.metadata_json if row is GenerationUsageEventRow else row.details_json if row is RuntimeProcessHeartbeatRow else None
+            columns = [((func.json_extract(json_column, "$." + field) if session.bind.dialect.name == "sqlite"
+                         else cast(json_column, JSON)[field].as_string()).label(field)
+                        if field in json_fields
+                        else getattr(row, field[4:]).is_not(None).label(field) if field.startswith("has_")
                         else getattr(row, field)) for field in fields]
             result = await session.execute(select(*columns)
                 .where(predicate).order_by(order.desc()).limit(limit + 1))
@@ -55,7 +62,7 @@ async def read_additional_sources(factory, character_id, start, end):
     sources, coverage = {}, {}
     specs = (
         ("generation_events", GenerationUsageEventRow,
-         "id request_id upstream_request_id turn_record_id conversation_id character_id capability feature_key source_surface routing_mode provider_id model_id profile_id latency_ms status error_code artifact_count output_bytes created_at completed_at",
+         "id request_id trace_id operation_id parent_operation_id job_id upstream_request_id turn_record_id conversation_id character_id capability feature_key source_surface routing_mode provider_id model_id profile_id latency_ms status error_code artifact_count output_bytes created_at completed_at",
          overlaps(GenerationUsageEventRow, start, end, "completed_at")),
         ("feed_posts", FeedPostRow, "id character_id kind source_kind source_ref_id has_image_url has_video_url created_at",
          and_(FeedPostRow.created_at >= start, FeedPostRow.created_at <= end)),
@@ -86,7 +93,7 @@ async def read_additional_sources(factory, character_id, start, end):
             coverage["effects"]["status"] = "partial"
     for name, row, fields, order in (
         ("heartbeats", RuntimeProcessHeartbeatRow,
-         "instance_id process_role service_name build_commit_sha build_tag started_at last_seen_at health_state durable_acceptance_enabled durable_worker_enabled durable_worker_alive background_coordinator_alive connector_runtime_state", RuntimeProcessHeartbeatRow.last_seen_at),
+         "instance_id process_role service_name build_commit_sha build_tag build_source_digest build_time build_metadata_source started_at last_seen_at health_state durable_acceptance_enabled durable_worker_enabled durable_worker_alive background_coordinator_alive connector_runtime_state", RuntimeProcessHeartbeatRow.last_seen_at),
         ("leases", BackgroundRuntimeLeaseRow, "name owner_id epoch lease_until updated_at", BackgroundRuntimeLeaseRow.updated_at),
     ):
         sources[name], coverage[name] = await projection(factory, row, fields.split(), True, order,

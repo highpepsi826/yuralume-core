@@ -95,6 +95,8 @@ from kokoro_link.contracts.image_provider import ImageTimeoutError
 from kokoro_link.contracts.repositories import CharacterRepositoryPort
 from kokoro_link.contracts.video_provider import VideoTimeoutError
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import observed
+
 _LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_BUCKET_SECONDS = 300
@@ -206,6 +208,7 @@ class ExecutionModeRunner:
         # job of that kind then reports "handler unwired" like any other.
         self._feed_video_poll_handler = feed_video_poll_handler
 
+    @observed("background.job")
     async def execute(
         self,
         job: ClaimedJob,

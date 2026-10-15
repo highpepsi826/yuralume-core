@@ -34,4 +34,7 @@ def test_system_version_is_public_when_auth_is_enabled(monkeypatch) -> None:
         "image_tag": "v0.1.0",
         "commit_sha": "abcdef123456",
         "built_at": "2026-06-14T12:00:00Z",
+        "source_digest": None,
+        "metadata_source": "environment",
+        "missing_fields": ["source_digest"],
     }

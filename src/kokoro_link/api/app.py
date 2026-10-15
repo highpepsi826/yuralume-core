@@ -303,6 +303,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             "background_coordinator_alive": bool(coordinator),
             "connector_runtime_state": connector_runtime_state,
             "degraded": any(not state for state in required),
+            "details": {"build_source_digest": build_info.build.source_digest,
+                        "build_time": build_info.build.built_at,
+                        "build_metadata_source": build_info.build.metadata_source},
         }
 
     heartbeat_publisher = RuntimeProcessHeartbeatPublisher(

@@ -1,5 +1,21 @@
 # Update and Progress Log
 
+### 2026-10-15 - Background trace and image build identity (source only)
+
+- Added immutable image metadata with validated environment fallback, generated
+  UTC time and explicit source digest when no verifiable commit SHA is supplied.
+  Version API, diagnostic export, heartbeat details and events expose available identity.
+- Background job/character scopes and metering preserve trace/operation/job
+  correlation across async tasks and deferred streams; usage exports include
+  allow-listed correlation only. Fixed cancellation status and context leakage.
+- Verification: 292 primary regression tests passed; final targeted scope/
+  lifecycle 32 passed, usage/context 31 passed and safe-log 12 passed (overlap);
+  14 build helper/reader checks passed, diff check passed. Two unrelated existing
+  proactive cadence assertions fail without instrumentation as well.
+- No migration, commit, push, Docker image build or production deployment.
+  Reference: DIAGNOSTIC_TRACE_BUILD_REFERENCE.md. Exact SHA remains unknown on
+  builds that do not supply it; source digest is never presented as a Git SHA.
+
 ### 2026-10-15 - PostgreSQL diagnostic rehearsal passed
 
 - User ran the prepared isolated local PostgreSQL runner; verified report

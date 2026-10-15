@@ -9,6 +9,9 @@ class BuildMetadataResponse(BaseModel):
     image_tag: str | None = None
     commit_sha: str | None = None
     built_at: str | None = None
+    source_digest: str | None = None
+    metadata_source: str = "unknown"
+    missing_fields: tuple[str, ...] = ()
 
 
 class BuildInfoResponse(BaseModel):
@@ -27,5 +30,8 @@ def build_info_response(info: BuildInfo) -> BuildInfoResponse:
             image_tag=info.build.image_tag,
             commit_sha=info.build.commit_sha,
             built_at=info.build.built_at,
+            source_digest=info.build.source_digest,
+            metadata_source=info.build.metadata_source,
+            missing_fields=info.build.missing_fields,
         ),
     )

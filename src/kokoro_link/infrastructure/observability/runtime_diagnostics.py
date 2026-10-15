@@ -5,9 +5,39 @@ import asyncio
 import contextvars
 import functools
 import time
+from contextlib import contextmanager
 from uuid import uuid4
 
 _CONTEXT: contextvars.ContextVar[dict] = contextvars.ContextVar("diagnostic_context", default={})
+
+
+def current_context() -> dict:
+    """A copy of structural identities only; callers cannot mutate another task."""
+    return dict(_CONTEXT.get())
+
+
+def _operation_context(parent, fields):
+    context = {**parent, **{k: v for k, v in fields.items() if v is not None}}
+    context.setdefault("request_id", str(uuid4()))
+    context.setdefault("trace_id", context["request_id"])
+    if parent.get("operation_id"):
+        context["parent_operation_id"] = parent["operation_id"]
+    context["operation_id"] = str(uuid4())
+    return context
+
+
+@contextmanager
+def diagnostic_scope(*, captured=None, **fields):
+    """Restore captured identities while keeping a live descendant's operation."""
+    parent = _CONTEXT.get()
+    if captured is not None:
+        # A model may outlive its resolver task; bind it to the originating work.
+        parent = {**captured, **(parent if parent.get("trace_id") == captured.get("trace_id") else {})}
+    token = _CONTEXT.set(_operation_context(parent, fields))
+    try:
+        yield current_context()
+    finally:
+        _CONTEXT.reset(token)
 
 
 class DiagnosticRequestMiddleware:
@@ -18,7 +48,7 @@ class DiagnosticRequestMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        token = _CONTEXT.set({"request_id": str(uuid4())})
+        token = _CONTEXT.set(_operation_context({}, {}))
         started = time.perf_counter()
         status = None
         completed = False
@@ -70,8 +100,7 @@ def observed(phase: str):
         async def wrapped(*args, **kwargs):
             old = _CONTEXT.get()
             fields = dict(old)
-            fields.setdefault("request_id", str(uuid4()))
-            candidate = kwargs.get("payload", kwargs.get("character"))
+            candidate = kwargs.get("job", kwargs.get("payload", kwargs.get("character", kwargs.get("character_id"))))
             if candidate is None and len(args) > 1:
                 candidate = args[1]
             for key in ("character_id", "conversation_id"):
@@ -81,8 +110,16 @@ def observed(phase: str):
             durable_id = getattr(candidate, "durable_turn_id", None)
             if durable_id:
                 fields["turn_id"] = str(durable_id)
-            if phase.startswith("feed") and getattr(candidate, "id", None):
+            if phase.startswith(("feed", "background")) and getattr(candidate, "id", None):
                 fields["character_id"] = str(candidate.id)
+            if phase.startswith("background") and isinstance(candidate, str):
+                fields["character_id"] = candidate
+            if phase == "background.job" and getattr(candidate, "id", None):
+                fields = {"job_id": str(candidate.id), "request_id": "job:" + str(candidate.id),
+                          "trace_id": "job:" + str(candidate.id)}
+                if getattr(candidate, "character_id", None) and getattr(candidate, "kind", None) != "encounter_tick":
+                    fields["character_id"] = str(candidate.character_id)
+            fields = _operation_context(old if phase != "background.job" else {}, fields)
             token = _CONTEXT.set(fields)
             started = time.perf_counter()
             event("phase.started", phase=phase)
@@ -102,8 +139,11 @@ def observed(phase: str):
             finally:
                 completed_context = _CONTEXT.get()
                 _CONTEXT.reset(token)
-                if old and completed_context.get("request_id") == old.get("request_id"):
-                    bind(**{k: v for k, v in completed_context.items() if k in {"character_id", "conversation_id", "turn_id"}})
+                same_character = not old.get("character_id") or old.get("character_id") == completed_context.get("character_id")
+                enrich_parent = phase in {"chat.prelude", "chat.request", "chat.stream_setup"}
+                if enrich_parent and old and same_character and completed_context.get("request_id") == old.get("request_id"):
+                    bind(**{k: v for k, v in completed_context.items()
+                            if k in {"character_id", "conversation_id", "turn_id"} and not old.get(k)})
         return wrapped
     return decorate
 
@@ -146,12 +186,17 @@ def observed_stream(phase: str):
     def decorate(fn):
         @functools.wraps(fn)
         def wrapped(*args, **kwargs):
-            context = dict(_CONTEXT.get())
-            context.setdefault("request_id", str(uuid4()))
+            context = _operation_context(_CONTEXT.get(), {})
             async def iterate():
                 started = time.perf_counter()
                 event_fields = {**context, "phase": phase}
-                event("phase.started", **event_fields)
+                def report(name, **fields):
+                    token = _CONTEXT.set(context)
+                    try:
+                        event(name, **fields)
+                    finally:
+                        _CONTEXT.reset(token)
+                report("phase.started", **event_fields)
                 first = True
                 iterator = fn(*args, **kwargs).__aiter__()
                 try:
@@ -164,17 +209,17 @@ def observed_stream(phase: str):
                         finally:
                             _CONTEXT.reset(token)
                         if first:
-                            event("phase.first_chunk", **event_fields,
+                            report("phase.first_chunk", **event_fields,
                                   elapsed_ms=int((time.perf_counter() - started) * 1000))
                             first = False
                         yield chunk
-                    event("phase.completed", **event_fields, status="succeeded",
+                    report("phase.completed", **event_fields, status="succeeded",
                           elapsed_ms=int((time.perf_counter() - started) * 1000))
                 except (asyncio.CancelledError, GeneratorExit):
-                    event("phase.cancelled", **event_fields, status="cancelled")
+                    report("phase.cancelled", **event_fields, status="cancelled")
                     raise
                 except Exception as exc:
-                    event("phase.failed", **event_fields, status="failed", error_type=type(exc).__name__,
+                    report("phase.failed", **event_fields, status="failed", error_type=type(exc).__name__,
                           elapsed_ms=int((time.perf_counter() - started) * 1000))
                     raise
                 finally:

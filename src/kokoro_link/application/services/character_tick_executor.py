@@ -26,6 +26,8 @@ from kokoro_link.contracts.background_activity_gate import (
 from kokoro_link.domain.entities.character import Character
 from kokoro_link.domain.value_objects.proactive_trigger import ProactiveTrigger
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import observed
+
 _LOGGER = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
@@ -178,6 +180,7 @@ class CharacterTickExecutor:
             )
         )
 
+    @observed("background.character_tick")
     async def run(
         self,
         character: Character,
@@ -550,6 +553,7 @@ class CharacterTickExecutor:
                 character_id, ProactiveTrigger.TICK.value,
             )
 
+    @observed("background.character_warmup")
     async def run_warmup(
         self, character: Character, *, now: datetime,
         abort_check: AbortCheck | None = None,
@@ -581,6 +585,7 @@ class CharacterTickExecutor:
             return
         await self._run_ensure_window(character)
 
+    @observed("background.dispatch_beat")
     async def dispatch_beat(
         self, character_id: str, *, now: datetime, logical_slot: str,
     ) -> None:
@@ -619,6 +624,7 @@ class CharacterTickExecutor:
     # the per-kind handlers reuse the tick body verbatim (抽共用而非複製) — the
     # embedded scheduler still calls :meth:`run` and is byte-identical.
 
+    @observed("background.beat_due")
     async def step_beat_due(
         self, character: Character, *, now: datetime, logical_slot: str,
         allow_dispatch: bool = True,
@@ -638,6 +644,7 @@ class CharacterTickExecutor:
             dispatched += 1
         return dispatched
 
+    @observed("background.schedule_maintenance")
     async def step_schedule_maintenance(self, character: Character) -> None:
         """``schedule_maintenance`` kind: eager four-day schedule-ensure + horizon.
 
@@ -647,6 +654,7 @@ class CharacterTickExecutor:
         replace. The vet has its own kind below."""
         await self._run_ensure_window(character)
 
+    @observed("background.schedule_weather_vet")
     async def step_schedule_weather_vet(
         self, character: Character, *, now: datetime | None = None,
     ) -> None:
@@ -659,12 +667,14 @@ class CharacterTickExecutor:
         clock of its own)."""
         await self._run_weather_vet(character, now=now)
 
+    @observed("background.memorialize")
     async def step_memorialize(
         self, character: Character, *, now: datetime,
     ) -> None:
         """``memorialize`` kind: sweep the schedule-completion window into memory."""
         await self._run_memorialize(character, now=now)
 
+    @observed("background.goal_review")
     async def step_goal_review(
         self, character: Character, *, now: datetime | None = None,
     ) -> None:
@@ -677,6 +687,7 @@ class CharacterTickExecutor:
         paid review per day."""
         await self._run_goal_review(character, now=now)
 
+    @observed("background.story_scene_timeout")
     async def step_scene_timeout(
         self, character: Character, *, now: datetime,
     ) -> None:
@@ -689,6 +700,7 @@ class CharacterTickExecutor:
         live scene — almost always — costs one indexed read."""
         await self._run_scene_timeout(character, now=now)
 
+    @observed("background.feed_compose")
     async def step_feed_compose(
         self, character: Character, *, now: datetime | None = None,
     ) -> bool:
@@ -700,12 +712,14 @@ class CharacterTickExecutor:
         Returns whether a base-cadence retry is needed for today's first post."""
         return await self._run_feed_compose(character, now=now)
 
+    @observed("background.feed_comment_reply")
     async def step_feed_comment_reply(
         self, character: Character, *, logical_slot: str,
     ) -> None:
         """``feed_comment_reply`` kind: character → user reply on LumeGram."""
         await self._run_feed_comment_reply(character, slot=logical_slot)
 
+    @observed("background.proactive")
     async def step_proactive(
         self, character: Character, *, now: datetime, logical_slot: str,
         allow_dispatch: bool = True,
@@ -726,6 +740,7 @@ class CharacterTickExecutor:
         await self._run_dispatch(character.id, now=now, slot=logical_slot)
         return True
 
+    @observed("background.character_upkeep")
     async def step_upkeep(
         self, character: Character, *, now: datetime,
     ) -> None:

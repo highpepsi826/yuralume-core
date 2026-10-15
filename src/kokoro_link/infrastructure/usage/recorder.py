@@ -7,6 +7,8 @@ import logging
 import os
 from typing import Final
 
+from kokoro_link.infrastructure.observability.runtime_diagnostics import current_context
+
 from kokoro_link.contracts.generation_usage import (
     PriceEstimatorPort,
     UsageEventDraft,
@@ -52,12 +54,15 @@ class BackgroundUsageEventRecorder(UsageEventRecorderPort):
                     draft.capability,
                     draft.feature_key,
                 )
+        context = current_context()
+        metadata = {**{key: context[key] for key in ("trace_id", "operation_id", "parent_operation_id", "job_id") if key in context},
+                    **(draft.metadata or {})}
         event = GenerationUsageEvent.new(
-            request_id=draft.request_id,
+            request_id=draft.request_id or context.get("operation_id"),
             upstream_request_id=draft.upstream_request_id,
-            turn_record_id=draft.turn_record_id,
-            conversation_id=draft.conversation_id,
-            character_id=draft.character_id,
+            turn_record_id=draft.turn_record_id or context.get("turn_id"),
+            conversation_id=draft.conversation_id or context.get("conversation_id"),
+            character_id=draft.character_id or context.get("character_id"),
             operator_id=draft.operator_id,
             capability=draft.capability,
             feature_key=draft.feature_key,
@@ -79,7 +84,7 @@ class BackgroundUsageEventRecorder(UsageEventRecorderPort):
             output_bytes=draft.output_bytes,
             duration_seconds=draft.duration_seconds,
             content_hash=draft.content_hash,
-            metadata=draft.metadata,
+            metadata=metadata,
             completed_at=draft.completed_at,
         )
         task = asyncio.create_task(self._persist_safely(event))
