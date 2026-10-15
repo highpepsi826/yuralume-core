@@ -98,6 +98,8 @@ class VideoProfileRegistry:
                     api_key=cfg.api_key,
                     model=cfg.model,
                     protocol=cfg.video_protocol,
+                    video_size=cfg.video_size,
+                    video_duration_seconds=cfg.video_duration_seconds,
                     timeout_seconds=cfg.timeout_seconds,
                     poll_interval_seconds=cfg.poll_interval_seconds,
                 )

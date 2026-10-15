@@ -24,6 +24,36 @@ from typing import Literal
 VideoProfileKind = Literal["external_api", "comfyui_wan22"]
 
 
+def normalize_video_size(value: object) -> str:
+    """Blank preserves legacy sizing; provider_default omits the API field."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(
+            "video_size must be a size string or provider_default; "
+            "leave blank for automatic sizing",
+        )
+    return value.strip()
+
+
+def normalize_video_duration_seconds(value: object) -> int | str:
+    """Validate explicit duration without reflecting potentially sensitive input."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return ""
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "provider_default":
+            return value
+        if value.isascii() and value.isdecimal():
+            value = int(value)
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    raise ValueError(
+        "video_duration_seconds must be a positive integer or provider_default; "
+        "leave blank for automatic duration",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ExternalVideoApiProfileConfig:
     """Hosted video capability API profile.
@@ -39,6 +69,15 @@ class ExternalVideoApiProfileConfig:
     timeout_seconds: float = 1800.0
     video_protocol: str = ""
     poll_interval_seconds: float = 10.0
+    video_size: str = ""
+    video_duration_seconds: int | str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "video_size", normalize_video_size(self.video_size))
+        object.__setattr__(
+            self, "video_duration_seconds",
+            normalize_video_duration_seconds(self.video_duration_seconds),
+        )
 
 
 @dataclass(frozen=True, slots=True)

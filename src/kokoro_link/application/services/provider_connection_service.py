@@ -822,6 +822,21 @@ class ProviderConnectionService:
                 value = value.strip()
             if value in ("", None):
                 continue
+            if entry.id == "custom_openai_compatible" and normalized_key in {
+                "video_size", "video_duration_seconds",
+            }:
+                from kokoro_link.contracts.video_profile import (
+                    normalize_video_duration_seconds,
+                    normalize_video_size,
+                )
+                normalizer = (
+                    normalize_video_size if normalized_key == "video_size"
+                    else normalize_video_duration_seconds
+                )
+                try:
+                    value = normalizer(value)
+                except ValueError as exc:
+                    raise ProviderConnectionError(str(exc)) from exc
             if field.options and value not in field.options:
                 raise ProviderConnectionError(
                     f"{entry.id} {payload_name} field {normalized_key!r} "

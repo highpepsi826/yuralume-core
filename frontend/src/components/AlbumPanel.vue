@@ -32,6 +32,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { usePlayerCopy } from '@/composables/usePlayerCopy'
+import { isCloudDeployment } from '@/composables/deploymentMode'
 
 import type { AlbumItem } from '@/types/album'
 import { UiBadge, UiButton, UiImage, UiLightbox } from '@/components/ui'
@@ -40,6 +41,9 @@ import {
   deleteAlbumItem,
   listAlbum,
   promoteAlbumToStage,
+  getCharacterVideoPreviewSettings,
+  generateCharacterVideoPreview,
+  type CharacterVideoPreviewSettings,
 } from '@/utils/api/album'
 import { useTimezone } from '@/composables/useTimezone'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
@@ -78,6 +82,94 @@ const loadingMore = ref(false)
 const busyItemId = ref<string | null>(null)
 const errorMsg = ref<string | null>(null)
 const sentinel = ref<HTMLElement | null>(null)
+const videoOpen = ref(false)
+const videoSettings = ref<CharacterVideoPreviewSettings | null>(null)
+const videoPrompt = ref('')
+const videoBusy = ref(false)
+const videoLoading = ref(false)
+const videoError = ref('')
+const videoUrl = ref('')
+let videoController: AbortController | null = null
+let videoRevision = 0
+
+function clearVideoPreview() {
+  videoRevision++
+  videoController?.abort()
+  videoController = null
+  if (videoUrl.value) URL.revokeObjectURL(videoUrl.value)
+  videoUrl.value = ''
+  videoSettings.value = null
+  videoOpen.value = false
+  videoBusy.value = false
+  videoLoading.value = false
+  videoError.value = ''
+}
+
+async function openVideoPreview() {
+  const id = props.characterId
+  if (!id) return
+  clearVideoPreview()
+  const revision = videoRevision
+  videoOpen.value = true
+  videoLoading.value = true
+  try {
+    const settings = await getCharacterVideoPreviewSettings(id)
+    if (revision !== videoRevision) return
+    videoSettings.value = settings
+    videoPrompt.value = settings.prompt
+  } catch (err) {
+    if (revision === videoRevision) videoError.value = extractError(err) ?? t('albumPanel.video.failed')
+  } finally {
+    if (revision === videoRevision) videoLoading.value = false
+  }
+}
+
+const videoSettingsText = computed(() => {
+  const settings = videoSettings.value?.settings ?? {}
+  const size = settings.size ?? settings.resolution
+  const duration = settings.seconds ?? settings.duration
+  const valueLabel = (value: unknown) => value == null
+    ? t('albumPanel.video.notReported')
+    : value === 'provider_default' ? t('albumPanel.video.providerDefault') : String(value)
+  return t('albumPanel.video.settings', {
+    profile: videoSettings.value?.profile_id ?? '',
+    model: settings.model ?? t('albumPanel.video.notReported'),
+    size: valueLabel(size), seconds: valueLabel(duration),
+  })
+})
+
+async function runVideoPreview() {
+  const id = props.characterId
+  if (!id || videoBusy.value || !videoSettings.value || !videoPrompt.value.trim()) return
+  const revision = videoRevision
+  const prompt = videoPrompt.value.trim()
+  if (!await confirmDialog({
+    title: t('albumPanel.video.title'),
+    content: t('albumPanel.video.confirm'),
+    okText: t('albumPanel.video.generate'),
+  })) return
+  if (revision !== videoRevision || videoBusy.value) return
+  if (videoUrl.value) URL.revokeObjectURL(videoUrl.value)
+  videoUrl.value = ''
+  videoError.value = ''
+  const controller = new AbortController()
+  videoController = controller
+  videoBusy.value = true
+  try {
+    const blob = await generateCharacterVideoPreview(id, prompt, controller.signal)
+    if (revision !== videoRevision) return
+    videoUrl.value = URL.createObjectURL(blob)
+  } catch (err) {
+    if (revision === videoRevision) videoError.value = extractError(err) ?? t('albumPanel.video.failed')
+  } finally {
+    if (revision === videoRevision) {
+      videoBusy.value = false
+      videoController = null
+    }
+  }
+}
+
+watch(() => props.characterId, clearVideoPreview)
 
 // ---------------------------------------------------------------- 放大檢視
 
@@ -285,6 +377,7 @@ onMounted(() => {
 watch(sentinel, (el) => observeSentinel(el))
 
 onBeforeUnmount(() => {
+  clearVideoPreview()
   observer?.disconnect()
   observer = null
 })
@@ -299,6 +392,34 @@ defineExpose({ reload })
       <p class="album-hint">
         {{ pt('albumPanel.hint') }}
       </p>
+    </div>
+
+    <div v-if="characterId && !isCloudDeployment()" class="album-video">
+      <UiButton v-if="!videoOpen" type="button" @click="openVideoPreview">
+        {{ t('albumPanel.video.title') }}
+      </UiButton>
+      <template v-else>
+        <h4>{{ t('albumPanel.video.title') }}</h4>
+        <p class="album-hint">{{ t('albumPanel.video.hint') }}</p>
+        <p v-if="videoLoading" role="status">{{ t('common.state.loading') }}</p>
+        <template v-if="videoSettings">
+          <p class="album-hint">{{ videoSettingsText }}</p>
+          <label>
+            <span>{{ t('albumPanel.video.prompt') }}</span>
+            <textarea v-model="videoPrompt" rows="4" maxlength="2000" :disabled="videoBusy" />
+          </label>
+          <UiButton type="button" :loading="videoBusy" :disabled="videoBusy || !videoPrompt.trim()" @click="runVideoPreview">
+            {{ t('albumPanel.video.generate') }}
+          </UiButton>
+        </template>
+        <p v-if="videoBusy" role="status">{{ t('albumPanel.video.running') }}</p>
+        <p v-if="videoError" role="alert" class="album-error">{{ videoError }}</p>
+        <template v-if="videoUrl">
+          <video :src="videoUrl" controls playsinline preload="metadata" />
+          <a :href="videoUrl" download="character-preview.mp4">{{ t('albumPanel.video.download') }}</a>
+        </template>
+        <UiButton type="button" variant="ghost" :disabled="videoBusy" @click="clearVideoPreview">{{ t('common.actions.close') }}</UiButton>
+      </template>
     </div>
 
     <!-- EC2-C：託管角色的舞台圖是授權方資產，「晉升為舞台圖」會把相簿圖片
@@ -403,6 +524,29 @@ defineExpose({ reload })
 </template>
 
 <style scoped>
+.album-video {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.album-video h4 { margin: 0; }
+.album-video label { display: grid; gap: 6px; }
+.album-video textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font: inherit;
+  resize: vertical;
+}
+.album-video video { width: 100%; max-height: 480px; background: #000; }
+.album-video p { overflow-wrap: anywhere; }
 .album-panel {
   display: flex;
   flex-direction: column;

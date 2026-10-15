@@ -2002,6 +2002,61 @@ class FeedComposerService:
         await self._memorialize(character, post)
         return post
 
+    async def character_video_preview_settings(self, character: Character) -> dict[str, object]:
+        """Describe the self-host feed video target without making a paid request."""
+        from kokoro_link.application.services.feature_keys import FEATURE_VIDEO_FEED
+        from kokoro_link.contracts.video_provider import VideoGenerationError
+
+        if self._video_provider is None:
+            raise VideoGenerationError("No video provider is configured for this character")
+        provider = await self._video_provider.resolve(FEATURE_VIDEO_FEED, character=character)
+        if provider is None:
+            raise VideoGenerationError("No video provider is configured for this character")
+        profile_id = await self._video_provider.resolve_profile_id(FEATURE_VIDEO_FEED, character=character)
+        describe = getattr(provider, "generation_settings", None)
+        settings = describe(aspect="portrait", length_frames=81) if callable(describe) else {}
+        intent = (character.state.current_intent or "").strip()[:800]
+        scene = f"The character is {intent}." if intent else "The character relaxes in their current surroundings."
+        return {
+            "profile_id": profile_id,
+            "aspect": "portrait",
+            "settings": settings,
+            "prompt": (
+                f"{scene} A single continuous shot: first a natural small movement, "
+                "then a gentle change in expression, finally a relaxed pause. "
+                "Subtle camera movement, consistent appearance, no cuts or panels."
+            ),
+        }
+
+    async def generate_character_video_preview(self, character: Character, prompt: str) -> bytes:
+        """Use the synchronous feed render path without publishing or storing a clip."""
+        import asyncio
+        from kokoro_link.application.services.feature_keys import FEATURE_VIDEO_FEED
+        from kokoro_link.contracts.video_provider import VideoGenerationError
+
+        if not prompt.strip() or len(prompt) > 2000:
+            raise VideoGenerationError("Video scene prompt must contain 1–2000 characters")
+        if not await self._runtime_video_generation_enabled(character):
+            raise VideoGenerationError("Video generation is disabled for this account")
+        if self._video_provider is None:
+            raise VideoGenerationError("No video provider is configured for this character")
+        provider = await self._video_provider.resolve(FEATURE_VIDEO_FEED, character=character)
+        if provider is None:
+            raise VideoGenerationError("No video provider is configured for this character")
+        styled_prompt = await self._styled_prompt(prompt.strip(), character=character)
+        async with asyncio.timeout(1800):
+            blob = await self._render_feed_video_clip(character, provider, styled_prompt)
+        if not blob:
+            raise VideoGenerationError("Provider returned no video")
+        return blob
+
+    async def _render_feed_video_clip(self, character: Character, provider, styled_prompt: str) -> bytes:
+        """One source for the character/state/aspect parameters in feed and preview."""
+        return await provider.generate(
+            character=character, positive=styled_prompt,
+            aspect="portrait", use_runtime_state=True,
+        )
+
     async def _maybe_generate_video(
         self,
         character: Character,
@@ -2048,12 +2103,7 @@ class FeedComposerService:
         styled_prompt = await self._styled_prompt(prompt, character=character)
         started_at = datetime.now(timezone.utc)
         try:
-            blob = await provider.generate(
-                character=character,
-                positive=styled_prompt,
-                aspect="portrait",
-                use_runtime_state=True,
-            )
+            blob = await self._render_feed_video_clip(character, provider, styled_prompt)
         except VideoGenerationError:
             await self._record_video_usage_safely(
                 character=character,

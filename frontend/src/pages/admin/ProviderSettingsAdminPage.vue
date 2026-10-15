@@ -1549,6 +1549,17 @@ watch(
   max-width: 100%;
 }
 
+.provider-settings__video-test textarea {
+  box-sizing: border-box;
+  padding: 0.75rem;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font: inherit;
+  resize: vertical;
+}
+
 .provider-settings__video-test video {
   max-height: 420px;
   background: #000;

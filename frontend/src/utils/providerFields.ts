@@ -46,6 +46,8 @@ export const CAPABILITY_FIELD_KEYS: Record<string, ReadonlySet<string>> = {
     'default_model',
     'video_model',
     'video_protocol',
+    'video_size',
+    'video_duration_seconds',
     'video_poll_interval_seconds',
     'timeout_seconds',
   ]),

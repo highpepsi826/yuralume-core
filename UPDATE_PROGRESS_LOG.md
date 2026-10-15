@@ -1590,3 +1590,21 @@ database rows.
   call or live browser playback test. Hosted proxy timeout behavior is unverified.
 - Not committed, pushed, or deployed. Implementation details are recorded in
   VIDEO_PROVIDER_GENERATION_TEST_REFERENCE.md.
+
+# 2026-10-16 - model-compatible video controls and character album preview
+
+- Added custom video size/duration controls. Blank preserves existing behavior;
+  provider_default omits the parameter so a gateway can use model defaults.
+  Explicit duration is validated before persistence; no automatic paid retry.
+- Added Character > Memory album video trial, sharing LumeGram's character-aware
+  provider resolution, visual style, portrait framing and runtime-state inputs.
+  Shows available effective request settings and an editable scene; previews are
+  playable/downloadable without album/feed publication or persistent media writes.
+- Corrected provider test prompt textarea theme styling. Existing self-host
+  rendering remains text-to-video, without album reference-frame conditioning.
+- Verification: 114 provider/preview tests; 88 character-preview/feed/trigger tests
+  (overlapping suites); request-control compatibility tests; 25 frontend tests;
+  type/locale checks and production/PWA build passed. No paid API or live browser
+  playback test, no migration, commit, push or deployment.
+- Details: CHARACTER_VIDEO_PREVIEW_REFERENCE.md. Ignored test temp cleanup was
+  blocked by approval-service reviewer model HTTP404; temporary files retained.

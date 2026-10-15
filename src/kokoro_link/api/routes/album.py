@@ -10,12 +10,15 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field
 
 from kokoro_link.api.dependencies import (
     ensure_character_id_owned_by_user,
     ensure_owned_character_id,
     get_container,
     get_current_user_id,
+    get_owned_character,
+    is_cloud_mode,
 )
 from kokoro_link.application.dto.album import (
     AlbumItemResponse,
@@ -31,6 +34,8 @@ from kokoro_link.application.services.album_service import (
     StageImageNotFoundError,
 )
 from kokoro_link.bootstrap.container import ServiceContainer
+from kokoro_link.domain.entities.character import Character
+from kokoro_link.contracts.video_provider import VideoGenerationError
 
 router = APIRouter(tags=["album"])
 
@@ -39,6 +44,56 @@ _DEFAULT_LIMIT = 40
 the default page is larger than the feed's 20 — still comfortably
 smaller than the 500-item sanity cap."""
 _MAX_LIMIT = 100
+
+
+class CharacterVideoPreviewRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=2000)
+
+
+def _video_preview_service(container: ServiceContainer):
+    if is_cloud_mode(container):
+        raise HTTPException(status_code=403, detail="Character video previews are only available in self-host mode")
+    service = getattr(container, "feed_composer_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="Video generation service is unavailable")
+    return service
+
+
+@router.get("/characters/{character_id}/album/video-preview")
+async def character_video_preview_settings(
+    character_id: str,
+    response: Response,
+    container: ServiceContainer = Depends(get_container),
+    character: Character = Depends(get_owned_character),
+) -> dict[str, object]:
+    response.headers["Cache-Control"] = "no-store"
+    service = _video_preview_service(container)
+    try:
+        return await service.character_video_preview_settings(character)
+    except VideoGenerationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/characters/{character_id}/album/video-preview")
+async def generate_character_video_preview(
+    character_id: str,
+    payload: CharacterVideoPreviewRequest,
+    container: ServiceContainer = Depends(get_container),
+    character: Character = Depends(get_owned_character),
+) -> Response:
+    service = _video_preview_service(container)
+    try:
+        blob = await service.generate_character_video_preview(character, payload.prompt)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Video generation timed out; the upstream job may still run") from exc
+    except VideoGenerationError as exc:
+        # Provider errors can contain credentials and raw upstream bodies. The
+        # provider settings test offers a separately scrubbed diagnostic path.
+        raise HTTPException(status_code=400, detail="Video generation failed. Check this character's video provider settings and try the provider test for details.") from exc
+    return Response(
+        content=blob, media_type="video/mp4",
+        headers={"Cache-Control": "no-store", "Content-Disposition": 'inline; filename="character-preview.mp4"'},
+    )
 
 
 @router.get(

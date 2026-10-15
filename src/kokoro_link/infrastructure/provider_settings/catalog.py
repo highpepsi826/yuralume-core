@@ -147,6 +147,26 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
             "a request id."
         ),
     )
+    video_size = ProviderFieldSpec(
+        key="video_size",
+        label="Video size / resolution",
+        placeholder="provider_default",
+        hint=(
+            "Leave blank for legacy automatic sizing. Enter provider_default to omit "
+            "size/resolution and use provider defaults, or an explicitly supported value "
+            "(e.g. 1280x720 for openai_videos; 720p for generations_polling). "
+            "Check your provider documentation; accepted values vary by model."
+        ),
+    )
+    video_duration_seconds = ProviderFieldSpec(
+        key="video_duration_seconds",
+        label="Video duration (seconds)",
+        placeholder="provider_default or 6",
+        hint=(
+            "Leave blank for legacy automatic duration. Enter provider_default to omit "
+            "seconds/duration, or a positive integer supported by your model (e.g. 6)."
+        ),
+    )
     video_poll_interval_seconds = ProviderFieldSpec(
         key="video_poll_interval_seconds",
         label="Video poll interval seconds",
@@ -732,6 +752,8 @@ def list_provider_catalog() -> tuple[ProviderCatalogEntry, ...]:
                 request_dimensions,
                 video_model,
                 video_protocol,
+                video_size,
+                video_duration_seconds,
                 video_poll_interval_seconds,
                 supports_vision,
                 max_tokens,

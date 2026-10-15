@@ -117,6 +117,8 @@ def _parse_profile(raw: dict[str, Any]) -> VideoProfile | None:
                     cfg_raw.get("timeout_seconds"), default=1800.0,
                 ),
                 video_protocol=_coerce_str(cfg_raw.get("video_protocol")),
+                video_size=cfg_raw.get("video_size", ""),
+                video_duration_seconds=cfg_raw.get("video_duration_seconds", ""),
                 poll_interval_seconds=_coerce_float(
                     cfg_raw.get("video_poll_interval_seconds"), default=10.0,
                 ),

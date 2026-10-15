@@ -17,6 +17,10 @@ from uuid import uuid4
 
 import httpx
 
+from kokoro_link.contracts.video_profile import (
+    normalize_video_duration_seconds,
+    normalize_video_size,
+)
 from kokoro_link.contracts.video_provider import (
     VideoGenerationError,
     VideoNoOutputError,
@@ -77,6 +81,8 @@ class OpenAICompatibleVideoProvider(VideoProviderPort):
         protocol: str = OPENAI_VIDEOS_PROTOCOL,
         timeout_seconds: float = 1800.0,
         poll_interval_seconds: float = 10.0,
+        video_size: str = "",
+        video_duration_seconds: int | str = "",
     ) -> None:
         if not base_url.strip():
             raise ValueError("OpenAI-compatible video base_url is required")
@@ -97,6 +103,10 @@ class OpenAICompatibleVideoProvider(VideoProviderPort):
         self._protocol = normalized_protocol
         self._timeout = timeout_seconds
         self._poll_interval = max(0.01, poll_interval_seconds)
+        self._video_size = normalize_video_size(video_size)
+        self._video_duration_seconds = normalize_video_duration_seconds(
+            video_duration_seconds,
+        )
 
     async def generate(
         self,
@@ -174,7 +184,7 @@ class OpenAICompatibleVideoProvider(VideoProviderPort):
         length_frames: int,
     ) -> dict[str, str | int]:
         if self._protocol == OPENAI_VIDEOS_PROTOCOL:
-            return {
+            payload: dict[str, str | int] = {
                 "model": self._model,
                 "prompt": prompt,
                 "seconds": _openai_seconds(length_frames),
@@ -183,16 +193,48 @@ class OpenAICompatibleVideoProvider(VideoProviderPort):
                     _ASPECT_TO_OPENAI_SIZE["portrait"],
                 ),
             }
-        return {
-            "model": self._model,
-            "prompt": prompt,
-            "duration": _duration_seconds(length_frames),
-            "aspect_ratio": _ASPECT_TO_RATIO.get(
-                aspect,
-                _ASPECT_TO_RATIO["portrait"],
-            ),
-            "resolution": "720p",
-        }
+            size_key, duration_key = "size", "seconds"
+        else:
+            payload = {
+                "model": self._model,
+                "prompt": prompt,
+                "duration": _duration_seconds(length_frames),
+                "aspect_ratio": _ASPECT_TO_RATIO.get(
+                    aspect,
+                    _ASPECT_TO_RATIO["portrait"],
+                ),
+                "resolution": "720p",
+            }
+            size_key, duration_key = "resolution", "duration"
+        if self._video_size == "provider_default":
+            payload.pop(size_key)
+        elif self._video_size:
+            payload[size_key] = self._video_size
+        if self._video_duration_seconds == "provider_default":
+            payload.pop(duration_key)
+        elif self._video_duration_seconds:
+            payload[duration_key] = (
+                str(self._video_duration_seconds)
+                if self._protocol == OPENAI_VIDEOS_PROTOCOL
+                else int(self._video_duration_seconds)
+            )
+        return payload
+
+    def generation_settings(
+        self, *, aspect: str = "portrait", length_frames: int = 81,
+    ) -> dict[str, str | int]:
+        """Describe effective request controls without credentials or prompts."""
+        payload = self._request_payload(
+            prompt="", aspect=aspect, length_frames=length_frames,
+        )
+        payload.pop("prompt")
+        size_key, duration_key = (
+            ("size", "seconds") if self._protocol == OPENAI_VIDEOS_PROTOCOL
+            else ("resolution", "duration")
+        )
+        payload.setdefault(size_key, "provider_default")
+        payload.setdefault(duration_key, "provider_default")
+        return {"protocol": self._protocol, "aspect": aspect, **payload}
 
     async def _wait_for_video(
         self,

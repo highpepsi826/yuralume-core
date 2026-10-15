@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { postVideoPreview } from './videoPreview'
 
 import type { AlbumListResponse } from '@/types/album'
 import type { Character } from '@/types/character'
@@ -10,6 +11,27 @@ export interface ListAlbumParams {
 }
 
 export const ALBUM_PAGE_SIZE = 40
+
+export interface CharacterVideoPreviewSettings {
+  profile_id: string | null
+  aspect: string
+  prompt: string
+  settings: Record<string, string | number>
+}
+
+export async function getCharacterVideoPreviewSettings(characterId: string): Promise<CharacterVideoPreviewSettings> {
+  const { data } = await axios.get<CharacterVideoPreviewSettings>(
+    `/api/v1/characters/${encodeURIComponent(characterId)}/album/video-preview`,
+  )
+  return data
+}
+
+export function generateCharacterVideoPreview(characterId: string, prompt: string, signal: AbortSignal): Promise<Blob> {
+  return postVideoPreview(
+    `/api/v1/characters/${encodeURIComponent(characterId)}/album/video-preview`,
+    { prompt }, signal,
+  )
+}
 
 export async function listAlbum(
   characterId: string,

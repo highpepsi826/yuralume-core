@@ -709,6 +709,14 @@ def build_video_profile(
             provider=_config_str(row, "provider", provider),
             timeout_seconds=float(_config_int(row, "timeout_seconds", 1800)),
             video_protocol=_config_str(row, "video_protocol", ""),
+            video_size=(
+                row.config.get("video_size", "")
+                if row.provider == "custom_openai_compatible" else ""
+            ),
+            video_duration_seconds=(
+                row.config.get("video_duration_seconds", "")
+                if row.provider == "custom_openai_compatible" else ""
+            ),
             poll_interval_seconds=float(
                 _config_int(row, "video_poll_interval_seconds", 10),
             ),

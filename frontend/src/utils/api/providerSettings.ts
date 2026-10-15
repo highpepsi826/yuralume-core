@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { postVideoPreview } from './videoPreview'
 
 export interface ProviderFieldSpec {
   key: string
@@ -178,26 +179,10 @@ export async function generateProviderTestVideo(
   connectionId: string | null,
   signal: AbortSignal,
 ): Promise<Blob> {
-  try {
-    const { data } = await axios.post<Blob>(
-      '/api/v1/admin/providers/generate-test-video',
-      { ...payload, prompt, connection_id: connectionId },
-      { responseType: 'blob', timeout: 1_830_000, signal },
-    )
-    return data
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
-      const text = await error.response.data.text()
-      let detail: unknown
-      try {
-        detail = JSON.parse(text).detail
-      } catch {
-        // Gateways may return an HTML error page instead of API JSON.
-      }
-      if (typeof detail === 'string') throw new Error(detail)
-    }
-    throw error
-  }
+  return postVideoPreview(
+    '/api/v1/admin/providers/generate-test-video',
+    { ...payload, prompt, connection_id: connectionId }, signal,
+  )
 }
 
 export async function diagnoseDraftProviderPayload(
