@@ -25,6 +25,8 @@ def test_build_info_reads_project_version() -> None:
     assert info.build.image_tag is None
     assert info.build.commit_sha is None
     assert info.build.built_at is None
+    assert info.build.metadata_file_status == "missing"
+    assert info.build.metadata_file_bytes is None
 
 
 def test_build_info_uses_runtime_build_metadata() -> None:
@@ -57,6 +59,8 @@ def test_image_file_fallback_and_environment_override() -> None:
     assert fallback.built_at == "2026-10-15T12:00:00Z"
     assert fallback.metadata_source == "image"
     assert fallback.missing_fields == ()
+    assert fallback.metadata_file_status == "valid"
+    assert fallback.metadata_file_bytes is not None
     overridden = get_build_info({"YURALUME_BUILD_SHA": "c" * 40, "YURALUME_BUILD_TAG": "", "YURALUME_BUILD_TIME": "bad"}).build
     assert overridden.commit_sha == "c" * 40
     assert overridden.image_tag == "local"
@@ -65,12 +69,25 @@ def test_image_file_fallback_and_environment_override() -> None:
     assert overridden.metadata_source == "environment+image"
 
 
-@pytest.mark.parametrize("raw", [b"not json", b"[]", b'{"schema_version":true}', b'{"schema_version":2}', b"\xff", b" " * 4097], ids=["malformed", "array", "boolean-version", "future-schema", "encoding", "oversized"])
-def test_invalid_bounded_image_file_does_not_break_startup(raw: bytes) -> None:
+@pytest.mark.parametrize(
+    ("raw", "expected_status"),
+    [
+        (b"not json", "invalid_json"),
+        (b"[]", "invalid_schema"),
+        (b'{"schema_version":true}', "invalid_schema"),
+        (b'{"schema_version":2}', "invalid_schema"),
+        (b"\xff", "invalid_json"),
+        (b" " * 4097, "too_large"),
+    ],
+    ids=["malformed", "array", "boolean-version", "future-schema", "encoding", "oversized"],
+)
+def test_invalid_bounded_image_file_does_not_break_startup(raw: bytes, expected_status: str) -> None:
     build_info.BUILD_METADATA_PATH.write_bytes(raw)
     result = get_build_info({}).build
     assert result.commit_sha is None
     assert result.metadata_source == "unknown"
+    assert result.metadata_file_status == expected_status
+    assert result.metadata_file_bytes == min(len(raw), build_info.MAX_BUILD_METADATA_BYTES + 1)
     assert "commit_sha" in result.missing_fields
 
 

@@ -18,6 +18,9 @@ UNKNOWN_VERSION = "0.0.0"
 BUILD_METADATA_PATH = Path(__file__).with_name("build_metadata.json")
 MAX_BUILD_METADATA_BYTES = 4096
 METADATA_FIELDS = ("image_tag", "commit_sha", "built_at", "source_digest")
+METADATA_FILE_STATUSES = frozenset({
+    "missing", "read_error", "too_large", "invalid_json", "invalid_schema", "valid",
+})
 
 
 def _metadata_value(key: str, value: object) -> str | None:
@@ -39,26 +42,31 @@ def _metadata_value(key: str, value: object) -> str | None:
     return value if re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.:/@+-]{0,127}", value) else None
 
 
-def _image_metadata() -> dict[str, str]:
+def _image_metadata() -> tuple[dict[str, str], str, int | None]:
     try:
         with BUILD_METADATA_PATH.open("rb") as handle:
             raw = handle.read(MAX_BUILD_METADATA_BYTES + 1)
-        if len(raw) > MAX_BUILD_METADATA_BYTES:
-            return {}
+    except FileNotFoundError:
+        return {}, "missing", None
+    except OSError:
+        return {}, "read_error", None
+    if len(raw) > MAX_BUILD_METADATA_BYTES:
+        return {}, "too_large", len(raw)
+    try:
         data = json.loads(raw)
-    except (OSError, ValueError, UnicodeError, RecursionError):
-        return {}
+    except (ValueError, UnicodeError, RecursionError):
+        return {}, "invalid_json", len(raw)
     if (
         not isinstance(data, dict)
         or type(data.get("schema_version")) is not int
         or data["schema_version"] != 1
     ):
-        return {}
+        return {}, "invalid_schema", len(raw)
     return {
         key: validated
         for key in METADATA_FIELDS
         if (validated := _metadata_value(key, data.get(key))) is not None
-    }
+    }, "valid", len(raw)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +77,8 @@ class BuildMetadata:
     source_digest: str | None = None
     metadata_source: str = "unknown"
     missing_fields: tuple[str, ...] = ()
+    metadata_file_status: str = "missing"
+    metadata_file_bytes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +92,7 @@ class BuildInfo:
 def get_build_info(environ: Mapping[str, str] | None = None) -> BuildInfo:
     env = environ if environ is not None else os.environ
     app_version = _env_value(env, "YURALUME_APP_VERSION") or _project_version()
-    image = _image_metadata()
+    image, metadata_file_status, metadata_file_bytes = _image_metadata()
     runtime = {
         "image_tag": (
             _metadata_value("image_tag", _env_value(env, "YURALUME_BUILD_TAG"))
@@ -108,6 +118,8 @@ def get_build_info(environ: Mapping[str, str] | None = None) -> BuildInfo:
             **fields,
             metadata_source=source,
             missing_fields=tuple(key for key in METADATA_FIELDS if not fields[key]),
+            metadata_file_status=metadata_file_status,
+            metadata_file_bytes=metadata_file_bytes,
         ),
     )
 

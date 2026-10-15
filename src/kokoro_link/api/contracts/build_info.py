@@ -12,6 +12,8 @@ class BuildMetadataResponse(BaseModel):
     source_digest: str | None = None
     metadata_source: str = "unknown"
     missing_fields: tuple[str, ...] = ()
+    metadata_file_status: str = "missing"
+    metadata_file_bytes: int | None = None
 
 
 class BuildInfoResponse(BaseModel):
@@ -33,5 +35,7 @@ def build_info_response(info: BuildInfo) -> BuildInfoResponse:
             source_digest=info.build.source_digest,
             metadata_source=info.build.metadata_source,
             missing_fields=info.build.missing_fields,
+            metadata_file_status=info.build.metadata_file_status,
+            metadata_file_bytes=info.build.metadata_file_bytes,
         ),
     )

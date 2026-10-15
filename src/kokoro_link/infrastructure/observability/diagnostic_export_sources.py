@@ -30,7 +30,8 @@ async def projection(factory, row, fields, predicate, order, *, limit=MAX_ROWS, 
         async with factory() as session:
             json_fields = ({"trace_id", "operation_id", "parent_operation_id", "job_id"}
                            if row is GenerationUsageEventRow else
-                           {"build_source_digest", "build_time", "build_metadata_source"} if row is RuntimeProcessHeartbeatRow else set())
+                           {"build_source_digest", "build_time", "build_metadata_source",
+                            "build_metadata_file_status", "build_metadata_file_bytes"} if row is RuntimeProcessHeartbeatRow else set())
             json_column = row.metadata_json if row is GenerationUsageEventRow else row.details_json if row is RuntimeProcessHeartbeatRow else None
             columns = [((func.json_extract(json_column, "$." + field) if session.bind.dialect.name == "sqlite"
                          else cast(json_column, JSON)[field].as_string()).label(field)
@@ -93,7 +94,7 @@ async def read_additional_sources(factory, character_id, start, end):
             coverage["effects"]["status"] = "partial"
     for name, row, fields, order in (
         ("heartbeats", RuntimeProcessHeartbeatRow,
-         "instance_id process_role service_name build_commit_sha build_tag build_source_digest build_time build_metadata_source started_at last_seen_at health_state durable_acceptance_enabled durable_worker_enabled durable_worker_alive background_coordinator_alive connector_runtime_state", RuntimeProcessHeartbeatRow.last_seen_at),
+         "instance_id process_role service_name build_commit_sha build_tag build_source_digest build_time build_metadata_source build_metadata_file_status build_metadata_file_bytes started_at last_seen_at health_state durable_acceptance_enabled durable_worker_enabled durable_worker_alive background_coordinator_alive connector_runtime_state", RuntimeProcessHeartbeatRow.last_seen_at),
         ("leases", BackgroundRuntimeLeaseRow, "name owner_id epoch lease_until updated_at", BackgroundRuntimeLeaseRow.updated_at),
     ):
         sources[name], coverage[name] = await projection(factory, row, fields.split(), True, order,

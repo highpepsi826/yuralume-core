@@ -88,3 +88,27 @@
 建置後可 docker create（不 start）並 docker cp 映像的
 `/app/src/kokoro_link/infrastructure/build_metadata.json`，驗證 built_at/source_digest，
 再移除僅此次建立的停止中容器。尚未完成上述映像驗證；不得據此宣稱可部署。
+
+## 部署後 build metadata 可觀測性補強（2026-10-15）
+
+最新 Zeabur 診斷包已證實 background trace/job 關聯生效，但 `deployment.build`
+仍為 unknown。這不能由自動部署或缺少平台日誌本身解釋；需要由應用程式記錄
+映像 fallback 的安全讀取結果，才能分辨 Dockerfile 選擇、映像產檔及 runtime
+讀取三類問題。
+
+- 新增固定列舉的 `metadata_file_status`（missing/read_error/too_large/
+  invalid_json/invalid_schema/valid）和可選的 `metadata_file_bytes`；不記錄
+  絕對路徑、OS error、檔案內容或未白名單欄位。
+- 將結果帶到 version API、心跳 details、持久 lifecycle event 和 ZIP heartbeat
+  投影；不改資料表或既有 build 欄位語意。
+- 測試缺檔、壞 JSON、過大、schema 不符及有效映像檔；在無 metadata 時服務仍
+  fail-soft 正常啟動。
+
+## 可觀測性補強實作結果
+
+- `BuildMetadata` 現在提供固定列舉的 `metadata_file_status` 及有界檔案大小，
+  並同步出現在 version API、heartbeat details、lifecycle event 與 ZIP heartbeats。
+- 缺檔、讀取錯誤、超過 4096 bytes、JSON／schema 無效均不阻止啟動；不輸出路徑、
+  OS 錯誤或 metadata 內容。
+- 驗證：build/version 15 passed；heartbeat、persistent diagnostics、export 21
+  passed；尚未重新建置或部署。

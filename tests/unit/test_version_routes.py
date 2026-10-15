@@ -36,5 +36,7 @@ def test_system_version_is_public_when_auth_is_enabled(monkeypatch) -> None:
         "built_at": "2026-06-14T12:00:00Z",
         "source_digest": None,
         "metadata_source": "environment",
+        "metadata_file_status": "missing",
+        "metadata_file_bytes": None,
         "missing_fields": ["source_digest"],
     }

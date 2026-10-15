@@ -34,6 +34,7 @@ SAFE_FIELDS = frozenset({
     'has_reasoning', 'text_chars', 'finish_reason', 'upstream_request_id', 'revision',
     'post_id', 'artifact_count', 'reason',
     'process_role', 'instance_id', 'build_commit_sha', 'build_tag', 'service_name',
+    'build_metadata_file_status', 'build_metadata_file_bytes',
     'provider', 'provider_id', 'provider_type', 'model', 'route', 'feature', 'channel',
     'operation', 'phase', 'status', 'outcome', 'reason_code', 'error_code', 'exception_type',
     'attempt', 'attempt_count', 'duration_ms', 'latency_ms', 'retry_count', 'http_status',

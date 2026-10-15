@@ -64,6 +64,17 @@ def test_contract_rejects_unknown_detail_and_invalid_role() -> None:
         replace(_heartbeat(), process_role="scheduler")
 
 
+def test_contract_allows_safe_build_metadata_probe() -> None:
+    heartbeat = replace(_heartbeat(), details={
+        "build_metadata_file_status": "missing",
+        "build_metadata_file_bytes": None,
+    })
+    assert heartbeat.details == {
+        "build_metadata_file_status": "missing",
+        "build_metadata_file_bytes": None,
+    }
+
+
 @pytest.mark.asyncio
 async def test_in_memory_upsert_list_and_retention() -> None:
     repo = InMemoryRuntimeProcessHeartbeatRepository()

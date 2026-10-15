@@ -1567,3 +1567,12 @@ database rows.
 - The authorized checkpoint could not stage: automatic approval review failed
   twice with local proxy HTTP 404 for unavailable `gpt-5.6-luna`. Neither Git
   staging command executed; source remains uncommitted and unpushed.
+
+# 2026-10-15 - build metadata read-status probe (source only)
+
+- Added bounded, non-sensitive metadata-file status and byte count to version,
+  heartbeat, lifecycle diagnostics, and diagnostic ZIP heartbeat projections.
+- Missing, unreadable, oversized, malformed, and invalid-schema files remain
+  fail-soft and are distinguishable without exposing paths or file contents.
+- Verification: 15 build/version tests and 21 heartbeat/persistence/export tests
+  passed. Not committed, pushed, or deployed.

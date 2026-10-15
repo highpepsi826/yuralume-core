@@ -21,6 +21,7 @@ HEALTH_STATES = frozenset({"starting", "healthy", "degraded", "stopping"})
 # contract change so a future publisher cannot accidentally export payloads.
 HEARTBEAT_DETAIL_KEYS = frozenset({
     "build_source_digest", "build_time", "build_metadata_source",
+    "build_metadata_file_status", "build_metadata_file_bytes",
     "active_jobs",
     "completed_jobs",
     "connector_accounts_enabled",

@@ -305,7 +305,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             "degraded": any(not state for state in required),
             "details": {"build_source_digest": build_info.build.source_digest,
                         "build_time": build_info.build.built_at,
-                        "build_metadata_source": build_info.build.metadata_source},
+                        "build_metadata_source": build_info.build.metadata_source,
+                        "build_metadata_file_status": build_info.build.metadata_file_status,
+                        "build_metadata_file_bytes": build_info.build.metadata_file_bytes},
         }
 
     heartbeat_publisher = RuntimeProcessHeartbeatPublisher(
@@ -654,7 +656,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                    if container.db_engine is not None else None)
         await collector.start(factory)
         event("lifecycle.starting", process_role=settings.process.role,
-              build_commit_sha=build_info.build.commit_sha or "")
+              build_commit_sha=build_info.build.commit_sha or "",
+              build_metadata_file_status=build_info.build.metadata_file_status,
+              build_metadata_file_bytes=build_info.build.metadata_file_bytes)
         try:
             async with runtime_lifespan(app):
                 yield
