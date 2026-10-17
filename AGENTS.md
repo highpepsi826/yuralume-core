@@ -5,10 +5,30 @@ local Yuralume deployment.
 
 ## Current Hosted Production
 
-The project now has a hosted production runtime in Zeabur. Keep this section
-current when the topology changes; the Zeabur dashboard is the final source of
-truth for live status, while `deploy/zeabur/README.md` is the detailed
-operation runbook.
+### OVHcloud migration update (2026-10-18)
+
+The user has authorized migration and reports all four Zeabur program services
+stopped. The new active target is OVHcloud/Coolify at
+`https://yuralume.tototoproject.com`, with separate api/coordinator/worker/connector
+roles, PostgreSQL 18/pgvector and private storage. Technical health, TLS,
+decryption and Telegram polling ownership passed. On 2026-10-18 the user also
+confirmed login/data inspection and successful web/Telegram send-reply tests;
+OVHcloud is the accepted active production runtime.
+Do not restart Zeabur writers or connectors, and do not deploy to Zeabur as a
+routine update. The older Zeabur topology/workflow below is retained as rollback
+reference and is superseded by this note for current runtime ownership.
+Read `C:\Users\high_\Documents\ChatGPT\ai_livelife\deployment\ovh-yuralume\PLAN.md`
+and `OVHCLOUD_DEPLOYMENT_STATUS.md` in that workspace before deployment changes.
+User disabled Zeabur auto-renewal and intends to let it expire (previously shown
+as 2026-11-04; not independently reverified). Keep source services stopped and
+retain backups. Do not delete source resources or backups without authorization;
+rollback must preserve new OVHcloud writes.
+
+### Historical Zeabur topology (not the active production target)
+
+The following topology and Zeabur-specific workflow describe the former source.
+`deploy/zeabur/README.md` remains its historical operation runbook. Current
+production ownership and migration records are defined by the OVHcloud note above.
 
 - The production project is `yuralume-production` on the dedicated Tokyo
   server. The public app domain is `yuralume-prod.zeabur.app`.
