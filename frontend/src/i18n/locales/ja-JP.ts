@@ -5249,6 +5249,7 @@ export const messages: MessageSchema = {
       proactive: 'Proactive',
       observability: 'Observability',
       providers: 'Provider Keys',
+      promptSettings: 'Prompt 設定',
       models: 'LLM ルーティング',
       modelsDiscoveryHint: '新機能：チャットとバックグラウンドタスクで別のモデルを使えます',
       imageProfiles: '画像 Profile',

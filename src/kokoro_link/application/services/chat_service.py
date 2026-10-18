@@ -1115,6 +1115,7 @@ class ChatService:
         player_persona_note_repository: (
             "PlayerPersonaNoteRepositoryPort | None"
         ) = None,
+        prompt_customization_service=None,  # noqa: ANN001 - optional service
         address_change_log_repository: "AddressChangeLogRepositoryPort | None" = None,
         relationship_names_service: "RelationshipNamesService | None" = None,
         experiment_overlay_service: "ExperimentOverlayService | None" = None,
@@ -1308,6 +1309,7 @@ class ChatService:
         self._self_reflection_repository = self_reflection_repository
         self._address_preference_repository = address_preference_repository
         self._player_persona_note_repository = player_persona_note_repository
+        self._prompt_customization_service = prompt_customization_service
         self._address_change_log_repository = address_change_log_repository
         self._relationship_names_service = relationship_names_service
         self._experiment_overlay_service = experiment_overlay_service
@@ -3122,6 +3124,7 @@ class ChatService:
         operator_persona = turn_aux.operator_persona
         operator_persona_lines = turn_aux.operator_persona_lines
         player_persona_note = turn_aux.player_persona_note
+        prompt_customization = await self._load_prompt_customization(character, operator)
         peer_roster_lines = turn_aux.peer_roster_lines
         initial_relationship_lines = turn_aux.initial_relationship_lines
         persona_curiosity_plan = turn_aux.persona_curiosity_plan
@@ -3197,6 +3200,7 @@ class ChatService:
                 operator=operator,
                 operator_persona_lines=operator_persona_lines,
                 player_persona_note=player_persona_note,
+                prompt_customization=prompt_customization,
                 peer_roster_lines=peer_roster_lines,
                 initial_relationship_lines=initial_relationship_lines,
                 persona_curiosity_plan=persona_curiosity_plan,
@@ -6403,6 +6407,24 @@ class ChatService:
             )
             return ""
         return row.note if row is not None else ""
+
+    async def _load_prompt_customization(
+        self,
+        character: Character,
+        operator: "OperatorProfile | None",
+    ) -> str:
+        if operator is None:
+            return ""
+        service = self._prompt_customization_service
+        if service is None:
+            return ""
+        try:
+            return await service.render(surface="chat", user_id=operator.id)
+        except Exception:
+            _LOGGER.exception(
+                "chat prompt customization load failed character=%s", character.id,
+            )
+            return ""
 
     async def _load_peer_roster_lines(self, character_id: str) -> list[str]:
         if self._character_social_knowledge_service is None:

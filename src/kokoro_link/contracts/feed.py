@@ -308,6 +308,8 @@ class FeedComposerInput:
     """UTC instant for prompt-side local-current-time rendering."""
     local_tz: tzinfo = timezone.utc
     """Operator timezone used only for prompt-visible civil time."""
+    prompt_customization: str = ""
+    """Bounded player/admin taste additions for feed copy and media."""
 
 
 @dataclass(frozen=True, slots=True)

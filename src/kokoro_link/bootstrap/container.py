@@ -746,6 +746,9 @@ from kokoro_link.contracts.player_persona_note import (
 from kokoro_link.application.services.player_persona_note_service import (
     PlayerPersonaNoteService,
 )
+from kokoro_link.application.services.prompt_customization_service import (
+    PromptCustomizationService,
+)
 from kokoro_link.contracts.player_identity_card import (
     PlayerIdentityCardRepositoryPort,
 )
@@ -1441,6 +1444,7 @@ class ServiceContainer:
     # Player-declared identity / world premise (PP series).
     player_persona_note_repository: "PlayerPersonaNoteRepositoryPort | None" = None
     player_persona_note_service: "PlayerPersonaNoteService | None" = None
+    prompt_customization_service: "PromptCustomizationService | None" = None
     # 玩家身分卡 — reusable creation templates (IC series). Operator-level:
     # no character owns one, and none is carried by a character backup.
     player_identity_card_repository: "PlayerIdentityCardRepositoryPort | None" = None
@@ -4200,6 +4204,9 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
     player_persona_note_service = PlayerPersonaNoteService(
         player_persona_note_repository,
     )
+    prompt_customization_service = PromptCustomizationService(
+        preferences_repository,
+    )
     # IC1 — 玩家身分卡. Account-level CRUD with no runtime consumer: nothing
     # in the turn path reads a card, the creation wizard copies one.
     from kokoro_link.infrastructure.repositories.in_memory_player_identity_cards import (
@@ -5023,6 +5030,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             else None
         ),
         player_persona_note_repository=player_persona_note_repository,
+        prompt_customization_service=prompt_customization_service,
         address_change_log_repository=address_change_log_repository,
         relationship_names_service=relationship_names_service,
         experiment_overlay_service=experiment_overlay_service,
@@ -5508,6 +5516,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         # tick after the scene closes evaluates exactly as it did before.
         story_scene_sessions=story_scene_session_repository,
         player_persona_note_repository=player_persona_note_repository,
+        prompt_customization_service=prompt_customization_service,
     )
     # Phase 3 of SCENE_BEAT_PLAN — runs on every tick so an offline
     # user still sees beats land in memory by the time they come back.
@@ -5590,6 +5599,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         account_runtime_usage_repository=account_runtime_usage_repository,
         character_repository=character_repository,
         quota_overage=quota_overage_service,
+        prompt_customization_service=prompt_customization_service,
     )
     # CV4 deferred video pipeline. Built unconditionally (it is inert without
     # a provider that takes jobs) but its two *carriers* are not: the embedded
@@ -7034,6 +7044,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         relationship_names_service=relationship_names_service,
         player_persona_note_repository=player_persona_note_repository,
         player_persona_note_service=player_persona_note_service,
+        prompt_customization_service=prompt_customization_service,
         player_identity_card_repository=player_identity_card_repository,
         player_identity_card_service=player_identity_card_service,
         persona_extraction_service=persona_extraction_service,

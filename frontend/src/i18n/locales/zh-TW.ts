@@ -5178,6 +5178,7 @@ export const messages = {
       proactive: 'Proactive 設定',
       observability: 'Observability',
       providers: 'Provider Keys',
+      promptSettings: 'Prompt 設定',
       models: 'LLM 路由',
       modelsDiscoveryHint: '新功能：讓聊天與背景任務用不同的模型',
       imageProfiles: '生圖 Profile',

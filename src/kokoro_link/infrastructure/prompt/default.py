@@ -174,6 +174,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
         operator: "OperatorProfile | None" = None,
         operator_persona_lines: "list[str] | None" = None,
         player_persona_note: str | None = None,
+        prompt_customization: str = "",
         peer_roster_lines: "list[str] | None" = None,
         initial_relationship_lines: "list[str] | None" = None,
         persona_curiosity_plan: PersonaCuriosityPlan | None = None,
@@ -245,6 +246,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
                 operator=operator,
                 operator_persona_lines=operator_persona_lines,
                 player_persona_note=player_persona_note,
+                prompt_customization=prompt_customization,
                 peer_roster_lines=peer_roster_lines,
                 initial_relationship_lines=initial_relationship_lines,
                 persona_curiosity_plan=persona_curiosity_plan,
@@ -306,6 +308,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
         operator: "OperatorProfile | None",
         operator_persona_lines: "list[str] | None",
         player_persona_note: str | None,
+        prompt_customization: str,
         peer_roster_lines: "list[str] | None",
         initial_relationship_lines: "list[str] | None",
         persona_curiosity_plan: PersonaCuriosityPlan | None,
@@ -350,6 +353,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
                 operator=operator,
                 operator_persona_lines=tuple(operator_persona_lines or ()),
                 player_persona_note=player_persona_note,
+                prompt_customization=prompt_customization,
                 peer_roster_lines=tuple(peer_roster_lines or ()),
                 initial_relationship_lines=tuple(
                     initial_relationship_lines or ()

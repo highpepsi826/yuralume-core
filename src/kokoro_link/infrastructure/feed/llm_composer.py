@@ -335,6 +335,9 @@ def _build_prompt(
     )
     if language_hint:
         body = f"{language_hint}\n\n{body}"
+    customization = (payload.prompt_customization or "").strip()
+    if customization:
+        body = f"{body}\n\n{customization}"
     return body
 
 

@@ -111,6 +111,10 @@ from kokoro_link.api.routes.pending_follow_ups import (
 from kokoro_link.api.routes.player_persona_note import (
     router as player_persona_note_router,
 )
+from kokoro_link.api.routes.prompt_customizations import (
+    admin_router as admin_prompt_customizations_router,
+    router as prompt_customizations_router,
+)
 from kokoro_link.api.routes.player_identity_card import (
     router as player_identity_card_router,
 )
@@ -839,6 +843,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         player_persona_note_router, prefix="/api/v1", dependencies=_auth_dep,
     )
     app.include_router(
+        prompt_customizations_router, prefix="/api/v1", dependencies=_auth_dep,
+    )
+    app.include_router(
         player_identity_card_router, prefix="/api/v1", dependencies=_auth_dep,
     )
     app.include_router(pending_follow_ups_router, prefix="/api/v1", dependencies=_auth_dep)
@@ -848,6 +855,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.include_router(nsfw_mode_router, prefix="/api/v1", dependencies=_auth_dep)
     app.include_router(admin_providers_router, prefix="/api/v1", dependencies=_auth_dep)
     app.include_router(admin_characters_router, prefix="/api/v1", dependencies=_auth_dep)
+    app.include_router(
+        admin_prompt_customizations_router, prefix="/api/v1", dependencies=_auth_dep,
+    )
     # CV6 — admin-only full-chain video test
     # trigger. Not a player-facing surface and not on the public nginx
     # allowlist (an infra-side concern); admin auth on the route is the

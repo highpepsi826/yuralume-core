@@ -68,6 +68,7 @@ class IdentityContext:
     operator: OperatorProfile | None
     operator_persona_lines: tuple[str, ...]
     player_persona_note: str | None
+    prompt_customization: str
     peer_roster_lines: tuple[str, ...]
     initial_relationship_lines: tuple[str, ...]
     address_change_lines: tuple[str, ...]

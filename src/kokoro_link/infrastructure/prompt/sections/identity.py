@@ -386,6 +386,11 @@ def _player_persona_note(ctx: PromptSectionContext) -> list[str]:
     return render_player_persona_note_lines(ctx.identity.player_persona_note)
 
 
+def _prompt_customization(ctx: PromptSectionContext) -> list[str]:
+    text = ctx.identity.prompt_customization.strip()
+    return text.splitlines() if text else []
+
+
 def _operator_persona(ctx: PromptSectionContext) -> list[str]:
     """Built upstream by ``OperatorPersonaService.render_for_prompt`` so
     this module doesn't have to know about ProfileField shapes / layer
@@ -484,6 +489,7 @@ SECTIONS: tuple[PromptSection, ...] = (
     section("operator_identity", _operator_identity),
     section("address_change", _address_change),
     section("player_persona_note", _player_persona_note),
+    section("prompt_customization", _prompt_customization),
     section("operator_persona", _operator_persona),
     section("peer_roster", _peer_roster),
     section("character_profile", _character_profile),

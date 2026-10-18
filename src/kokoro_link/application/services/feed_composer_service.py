@@ -367,6 +367,7 @@ class FeedComposerService:
         character_repository: CharacterRepositoryPort | None = None,
         quota_overage: "QuotaOverageService | None" = None,
         video_job_service: "FeedVideoJobService | None" = None,
+        prompt_customization_service=None,  # noqa: ANN001 - optional service
     ) -> None:
         self._repo = repository
         self._candidates = candidates
@@ -424,6 +425,7 @@ class FeedComposerService:
         # historical video branch runs unchanged. Nothing about this field
         # can change a self-host tick.
         self._video_job_service = video_job_service
+        self._prompt_customization_service = prompt_customization_service
         # Whether this deployment can queue a render at all. Off (self-host,
         # and hosted until the broker knob is on) means a pending row cannot
         # exist, so the tick must not spend a query looking for one — see
@@ -770,6 +772,21 @@ class FeedComposerService:
         except Exception:  # pragma: no cover - defensive
             return timezone.utc
 
+    async def _load_prompt_customization(self, character: Character) -> str:
+        service = self._prompt_customization_service
+        if service is None:
+            return ""
+        user_id = getattr(character, "user_id", "") or "default"
+        try:
+            feed = await service.render(surface="feed", user_id=user_id)
+            media = await service.render(surface="media", user_id=user_id)
+        except Exception:
+            _LOGGER.exception(
+                "feed prompt customization load failed character=%s", character.id,
+            )
+            return ""
+        return "\n\n".join(part for part in (feed, media) if part)
+
     @observed("feed.materialise")
     async def _materialise(
         self,
@@ -787,6 +804,7 @@ class FeedComposerService:
         weather_context = await self._describe_weather(when, operator=operator)
         operator_language = _operator_language(operator)
         operator_location_context = prompt_location_fact(operator)
+        prompt_customization = await self._load_prompt_customization(character)
         composer_input = FeedComposerInput(
             character=character,
             kind=candidate.kind,
@@ -801,6 +819,7 @@ class FeedComposerService:
             operator_primary_language=operator_language,
             now=when,
             local_tz=local_tz,
+            prompt_customization=prompt_customization,
         )
         try:
             output = await self._composer.compose(composer_input)

@@ -31,6 +31,12 @@ const adminPlaceholderRoutes: RouteRecordRaw[] = [
     meta: { debugOnly: true },
   },
   {
+    path: 'prompt-settings',
+    name: 'admin-prompt-settings',
+    component: () => import('@/pages/admin/PromptCustomizationsAdminPage.vue'),
+    meta: { cloudLocked: true },
+  },
+  {
     path: 'providers',
     name: 'admin-providers',
     component: () => import('@/pages/admin/ProviderSettingsAdminPage.vue'),

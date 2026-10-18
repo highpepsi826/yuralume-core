@@ -569,6 +569,8 @@ def _build_prompt(context: ProactiveContext) -> str:
         )
         sections.append("\n".join(tool_lines))
 
+    if context.prompt_customization.strip():
+        sections.append(context.prompt_customization.strip())
     sections.append(get_default_loader().render("proactive/decider_instructions"))
 
     # HV2 — last, and only on a re-decide. See

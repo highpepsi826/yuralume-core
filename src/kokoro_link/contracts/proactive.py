@@ -176,6 +176,7 @@ class ProactiveContext:
     about the operator. Per-character and already thresholded by
     OperatorPersonaService; empty when disabled or unknown."""
     player_persona_note: str = ""
+    prompt_customization: str = ""
     """What the player *declared* about themselves for this pair — the
     counterpart of ``operator_persona_lines``, which is what the
     character worked out on its own.

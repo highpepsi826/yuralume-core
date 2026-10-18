@@ -16,6 +16,7 @@ import IdentityCardManagerPanel from './IdentityCardManagerPanel.vue'
 import NsfwModeSetting from './NsfwModeSetting.vue'
 import PlayerPasswordPanel from './PlayerPasswordPanel.vue'
 import PlayerPlaceLocaleSettings from './PlayerPlaceLocaleSettings.vue'
+import PromptCustomizationSetting from './PromptCustomizationSetting.vue'
 import QuotaOverageSettings from './QuotaOverageSettings.vue'
 import SimpleImageProfilePicker from './SimpleImageProfilePicker.vue'
 import TtsPregenSetting from './TtsPregenSetting.vue'
@@ -242,6 +243,9 @@ defineExpose({ flashWebNotification, flashAdminEntry })
 
   <section class="settings-group">
     <h3 class="settings-group__title">{{ t('playerSidebar.settings.personalPreferencesTitle') }}</h3>
+    <section class="voice-pregen-section">
+      <PromptCustomizationSetting />
+    </section>
     <section class="voice-pregen-section">
       <ChatAssistSetting />
     </section>

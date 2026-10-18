@@ -5179,6 +5179,7 @@ export const messages: MessageSchema = {
       proactive: 'Proactive',
       observability: 'Observability',
       providers: 'Provider keys',
+      promptSettings: 'Prompt settings',
       models: 'LLM routing',
       modelsDiscoveryHint: 'New: route chat and background tasks to different models',
       imageProfiles: 'Image profiles',

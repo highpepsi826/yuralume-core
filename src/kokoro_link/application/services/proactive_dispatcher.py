@@ -468,6 +468,7 @@ class ProactiveDispatcher:
         player_persona_note_repository: (
             "PlayerPersonaNoteRepositoryPort | None"
         ) = None,
+        prompt_customization_service=None,  # noqa: ANN001 - optional service
         relationship_seed_repository: (
             CharacterOperatorRelationshipSeedRepositoryPort | None
         ) = None,
@@ -557,6 +558,7 @@ class ProactiveDispatcher:
         self._schedule_service = schedule_service
         self._operator_persona_service = operator_persona_service
         self._player_persona_note_repository = player_persona_note_repository
+        self._prompt_customization_service = prompt_customization_service
         self._relationship_seed_repository = relationship_seed_repository
         self._persona_curiosity_service = persona_curiosity_service
         self._persona_curiosity_planner = persona_curiosity_planner
@@ -1018,6 +1020,9 @@ class ProactiveDispatcher:
         player_persona_note = await self._load_player_persona_note(
             character, account,
         )
+        prompt_customization = await self._load_prompt_customization(
+            character, account,
+        )
         # HUMANIZATION_ROADMAP §3.4 — surface still-active deferred motives
         # so the intention judge can re-evaluate timing on a re-tick. The
         # alarms that bought this tick were already spent above, so the
@@ -1087,6 +1092,7 @@ class ProactiveDispatcher:
             upcoming_day_schedules=tuple(upcoming_day_schedules),
             operator_persona_lines=tuple(operator_persona_lines),
             player_persona_note=player_persona_note,
+            prompt_customization=prompt_customization,
             initial_relationship_lines=tuple(initial_relationship_lines),
             persona_curiosity_plan=persona_curiosity_plan,
             deferred_intents=deferred_intents,
@@ -2586,6 +2592,26 @@ class ProactiveDispatcher:
             )
             return ""
         return row.note if row is not None else ""
+
+    async def _load_prompt_customization(
+        self,
+        character: Character,
+        account: "MessagingAccount | None",
+    ) -> str:
+        if account is not None and not persona_safe_for_account(account):
+            return ""
+        service = self._prompt_customization_service
+        if service is None:
+            return ""
+        user_id = getattr(character, "user_id", None) or DEFAULT_OPERATOR_ID
+        try:
+            return await service.render(surface="proactive", user_id=user_id)
+        except Exception:
+            _LOGGER.exception(
+                "proactive prompt customization load failed character=%s",
+                character.id,
+            )
+            return ""
 
     async def resolve_proactive_sink(
         self, character_id: str,
