@@ -5618,6 +5618,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
             object_storage=object_storage,
             public_base_url=app_settings.public_base_url,
             uploads_dir=app_settings.uploads_dir,
+            prompt_customization_service=prompt_customization_service,
         ),
         character_repository=character_repository,
         timeout_seconds=_env_int(
@@ -5662,6 +5663,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
     feed_comment_reply_composer = LLMFeedCommentReplyComposer(
         provider=active_llm_provider,
         feature_key=FEATURE_FEED_COMMENT_REPLY,
+        prompt_customization_service=prompt_customization_service,
     )
     feed_comment_reply_service = FeedCommentReplyService(
         post_repository=feed_post_repository,

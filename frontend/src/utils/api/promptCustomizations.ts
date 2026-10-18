@@ -1,38 +1,42 @@
 import axios from 'axios'
 
-export const PROMPT_CUSTOMIZATION_MAX_CHARS = 500
-
-export interface PromptCustomizations {
-  chat: string
-  feed: string
-  media: string
-  proactive: string
+export interface PromptTemplateSummary {
+  name: string
+  title: string
+  category: string
+  player_editable: boolean
+  important: boolean
+  impact: string
+  variables: string[]
+  overridden: boolean
 }
 
-const EMPTY: PromptCustomizations = {
-  chat: '', feed: '', media: '', proactive: '',
+export interface PromptTemplate extends PromptTemplateSummary {
+  default_content: string
+  content: string
 }
 
-export async function getPromptCustomizations(): Promise<PromptCustomizations> {
-  const { data } = await axios.get<PromptCustomizations>('/api/v1/prompt-customizations')
-  return { ...EMPTY, ...data }
+async function list(base: string): Promise<PromptTemplateSummary[]> {
+  const { data } = await axios.get<{ templates: PromptTemplateSummary[] }>(base)
+  return data.templates
 }
 
-export async function putPromptCustomizations(
-  values: PromptCustomizations,
-): Promise<PromptCustomizations> {
-  const { data } = await axios.put<PromptCustomizations>('/api/v1/prompt-customizations', values)
-  return { ...EMPTY, ...data }
+async function get(base: string, name: string): Promise<PromptTemplate> {
+  const { data } = await axios.get<PromptTemplate>(base + '/' + encodeURIComponent(name))
+  return data
 }
 
-export async function getAdminPromptCustomizations(): Promise<PromptCustomizations> {
-  const { data } = await axios.get<PromptCustomizations>('/api/v1/admin/prompt-customizations')
-  return { ...EMPTY, ...data }
+async function put(base: string, name: string, content: string): Promise<PromptTemplate> {
+  const { data } = await axios.put<PromptTemplate>(
+    base + '/' + encodeURIComponent(name), { content },
+  )
+  return data
 }
 
-export async function putAdminPromptCustomizations(
-  values: PromptCustomizations,
-): Promise<PromptCustomizations> {
-  const { data } = await axios.put<PromptCustomizations>('/api/v1/admin/prompt-customizations', values)
-  return { ...EMPTY, ...data }
-}
+export const listPlayerPromptTemplates = () => list('/api/v1/prompt-templates')
+export const getPlayerPromptTemplate = (name: string) => get('/api/v1/prompt-templates', name)
+export const putPlayerPromptTemplate = (name: string, content: string) => put('/api/v1/prompt-templates', name, content)
+
+export const listAdminPromptTemplates = () => list('/api/v1/admin/prompt-templates')
+export const getAdminPromptTemplate = (name: string) => get('/api/v1/admin/prompt-templates', name)
+export const putAdminPromptTemplate = (name: string, content: string) => put('/api/v1/admin/prompt-templates', name, content)

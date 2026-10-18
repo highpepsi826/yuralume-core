@@ -772,20 +772,18 @@ class FeedComposerService:
         except Exception:  # pragma: no cover - defensive
             return timezone.utc
 
-    async def _load_prompt_customization(self, character: Character) -> str:
+    async def _load_prompt_template_overrides(self, character: Character) -> dict[str, str]:
         service = self._prompt_customization_service
         if service is None:
-            return ""
+            return {}
         user_id = getattr(character, "user_id", "") or "default"
         try:
-            feed = await service.render(surface="feed", user_id=user_id)
-            media = await service.render(surface="media", user_id=user_id)
+            return await service.effective_overrides(user_id=user_id)
         except Exception:
             _LOGGER.exception(
                 "feed prompt customization load failed character=%s", character.id,
             )
-            return ""
-        return "\n\n".join(part for part in (feed, media) if part)
+            return {}
 
     @observed("feed.materialise")
     async def _materialise(
@@ -804,7 +802,7 @@ class FeedComposerService:
         weather_context = await self._describe_weather(when, operator=operator)
         operator_language = _operator_language(operator)
         operator_location_context = prompt_location_fact(operator)
-        prompt_customization = await self._load_prompt_customization(character)
+        template_overrides = await self._load_prompt_template_overrides(character)
         composer_input = FeedComposerInput(
             character=character,
             kind=candidate.kind,
@@ -819,7 +817,7 @@ class FeedComposerService:
             operator_primary_language=operator_language,
             now=when,
             local_tz=local_tz,
-            prompt_customization=prompt_customization,
+            template_overrides=template_overrides,
         )
         try:
             output = await self._composer.compose(composer_input)

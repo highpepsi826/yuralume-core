@@ -1020,7 +1020,7 @@ class ProactiveDispatcher:
         player_persona_note = await self._load_player_persona_note(
             character, account,
         )
-        prompt_customization = await self._load_prompt_customization(
+        template_overrides = await self._load_prompt_template_overrides(
             character, account,
         )
         # HUMANIZATION_ROADMAP §3.4 — surface still-active deferred motives
@@ -1092,7 +1092,7 @@ class ProactiveDispatcher:
             upcoming_day_schedules=tuple(upcoming_day_schedules),
             operator_persona_lines=tuple(operator_persona_lines),
             player_persona_note=player_persona_note,
-            prompt_customization=prompt_customization,
+            template_overrides=template_overrides,
             initial_relationship_lines=tuple(initial_relationship_lines),
             persona_curiosity_plan=persona_curiosity_plan,
             deferred_intents=deferred_intents,
@@ -2593,25 +2593,25 @@ class ProactiveDispatcher:
             return ""
         return row.note if row is not None else ""
 
-    async def _load_prompt_customization(
+    async def _load_prompt_template_overrides(
         self,
         character: Character,
         account: "MessagingAccount | None",
-    ) -> str:
+    ) -> dict[str, str]:
         if account is not None and not persona_safe_for_account(account):
-            return ""
+            return {}
         service = self._prompt_customization_service
         if service is None:
-            return ""
+            return {}
         user_id = getattr(character, "user_id", None) or DEFAULT_OPERATOR_ID
         try:
-            return await service.render(surface="proactive", user_id=user_id)
+            return await service.effective_overrides(user_id=user_id)
         except Exception:
             _LOGGER.exception(
-                "proactive prompt customization load failed character=%s",
+                "proactive prompt template overrides load failed character=%s",
                 character.id,
             )
-            return ""
+            return {}
 
     async def resolve_proactive_sink(
         self, character_id: str,

@@ -14,8 +14,8 @@ Two ports keep concerns separated:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone, tzinfo
 
 from kokoro_link.domain.entities.character import Character
@@ -308,8 +308,7 @@ class FeedComposerInput:
     """UTC instant for prompt-side local-current-time rendering."""
     local_tz: tzinfo = timezone.utc
     """Operator timezone used only for prompt-visible civil time."""
-    prompt_customization: str = ""
-    """Bounded player/admin taste additions for feed copy and media."""
+    template_overrides: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

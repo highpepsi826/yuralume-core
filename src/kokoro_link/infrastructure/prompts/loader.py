@@ -27,6 +27,8 @@ import os
 import hashlib
 import json
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
@@ -36,6 +38,20 @@ _PACKAGE_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / 
 _ENV_PROMPT_PACK_DIR = "YURALUME_PROMPT_PACK_DIR"
 _ENV_OVERRIDE_DIR = "PROMPTS_DIR"
 _LEGACY_ENV_OVERRIDE_DIR = "KOKORO_PROMPTS_DIR"
+_REQUEST_TEMPLATE_OVERRIDES: ContextVar[Mapping[str, str]] = ContextVar(
+    "yuralume_request_prompt_template_overrides", default={},
+)
+_ADMIN_TEMPLATE_OVERRIDES: Mapping[str, str] = {}
+
+
+def set_admin_template_overrides(overrides: Mapping[str, str]) -> None:
+    """Atomically replace the process-wide, database-backed admin snapshot."""
+    global _ADMIN_TEMPLATE_OVERRIDES
+    _ADMIN_TEMPLATE_OVERRIDES = dict(overrides)
+
+
+def _effective_template_overrides() -> dict[str, str]:
+    return {**_ADMIN_TEMPLATE_OVERRIDES, **_REQUEST_TEMPLATE_OVERRIDES.get()}
 
 
 class PromptTemplateNotFoundError(LookupError):
@@ -141,6 +157,10 @@ class PromptLoader:
         callers that want to inspect placeholders before rendering."""
         return self._resolve(name).raw
 
+    def raw_default(self, name: str) -> str:
+        """Read the installed template, independent of database/request overrides."""
+        return self._locate(name).read_text(encoding="utf-8")
+
     def prompt_pack_hash(self, snapshot: Mapping[str, Any] | None = None) -> str:
         """Return a stable hash for the effective prompt pack.
 
@@ -158,10 +178,12 @@ class PromptLoader:
             separators=(",", ":"),
             default=str,
         )
+        request_overrides = _effective_template_overrides()
         names = self._template_names()
         resolved_files = tuple((name, self._locate(name)) for name in names)
         fingerprint = (
             snapshot_json,
+            tuple(sorted(request_overrides.items())),
             tuple(
                 (
                     name,
@@ -185,7 +207,11 @@ class PromptLoader:
         for name, resolved in resolved_files:
             digest.update(name.encode("utf-8"))
             digest.update(b"\0")
-            digest.update(resolved.read_bytes().replace(b"\r\n", b"\n"))
+            raw = request_overrides.get(name)
+            digest.update(
+                (raw.encode("utf-8") if raw is not None else resolved.read_bytes())
+                .replace(b"\r\n", b"\n")
+            )
             digest.update(b"\0")
         value = digest.hexdigest()
         with self._lock:
@@ -235,6 +261,10 @@ class PromptLoader:
             return False
         return True
 
+    def template_names(self) -> list[str]:
+        """Return all logical template names visible to this loader."""
+        return self._template_names()
+
     def clear_cache(self) -> None:
         """Drop the in-memory cache. Tests use this to pick up files
         written after the loader was constructed; production code should
@@ -246,6 +276,12 @@ class PromptLoader:
     # -- internals --------------------------------------------------------
 
     def _resolve(self, name: str) -> _Resolved:
+        request_override = _effective_template_overrides().get(name)
+        if request_override is not None:
+            return _Resolved(
+                path=Path(f"<request-override:{name}>"), raw=request_override,
+                template=Template(request_override),
+            )
         cached = self._cache.get(name)
         if cached is not None:
             return cached
@@ -348,12 +384,27 @@ def reset_default_loader_for_tests() -> None:
         _default_loader = None
 
 
+@contextmanager
+def request_template_overrides(overrides: Mapping[str, str]):
+    """Scope database template overrides to one request/task.
+
+    Context variables propagate through awaits but never into another request,
+    so a player's template cannot leak into a concurrent turn or scheduler job.
+    """
+    token = _REQUEST_TEMPLATE_OVERRIDES.set(dict(overrides))
+    try:
+        yield
+    finally:
+        _REQUEST_TEMPLATE_OVERRIDES.reset(token)
+
+
 __all__ = [
     "PromptLoader",
     "PromptPackOverlayStatus",
     "PromptTemplateNotFoundError",
     "PromptVariableMissingError",
     "get_default_loader",
+    "request_template_overrides",
     "reset_default_loader_for_tests",
 ]
 

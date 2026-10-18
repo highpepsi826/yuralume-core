@@ -24,6 +24,7 @@ from kokoro_link.infrastructure.prompts import (
     reset_default_loader_for_tests,
     get_default_loader,
 )
+from kokoro_link.infrastructure.prompts.loader import request_template_overrides
 
 
 def _write(path: Path, content: str) -> None:
@@ -150,6 +151,19 @@ def test_prompt_pack_hash_normalizes_crlf(tmp_path: Path) -> None:
         PromptLoader(package_dir=lf_dir).prompt_pack_hash()
         == PromptLoader(package_dir=crlf_dir).prompt_pack_hash()
     )
+
+
+def test_request_template_override_is_scoped_and_changes_pack_hash(tmp_path: Path) -> None:
+    _write(tmp_path / "greet.txt", "hello ${name}\n")
+    loader = PromptLoader(package_dir=tmp_path)
+    baseline = loader.prompt_pack_hash()
+
+    with request_template_overrides({"greet": "hi ${name}\n"}):
+        assert loader.render("greet", name="A") == "hi A"
+        assert loader.prompt_pack_hash() != baseline
+
+    assert loader.render("greet", name="A") == "hello A"
+    assert loader.prompt_pack_hash() == baseline
 
 
 def test_prompt_pack_hash_includes_overlay_effective_content(tmp_path: Path) -> None:

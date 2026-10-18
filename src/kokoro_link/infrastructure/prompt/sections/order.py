@@ -41,7 +41,6 @@ SECTION_ORDER: Final[tuple[str, ...]] = (
     "operator_identity",
     "address_change",
     "player_persona_note",
-    "prompt_customization",
     "operator_persona",
     "peer_roster",
     # -- the character sheet (per-character; the longest stable run

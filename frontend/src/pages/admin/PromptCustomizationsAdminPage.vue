@@ -1,51 +1,109 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { UiBadge, UiButton, UiSection } from '@/components/ui'
+import { computed, onMounted, ref } from 'vue'
+import { UiBadge, UiButton, UiSection, UiTextarea } from '@/components/ui'
 import {
-  getAdminPromptCustomizations,
-  putAdminPromptCustomizations,
-  PROMPT_CUSTOMIZATION_MAX_CHARS,
-  type PromptCustomizations,
+  getAdminPromptTemplate,
+  listAdminPromptTemplates,
+  putAdminPromptTemplate,
+  type PromptTemplate,
+  type PromptTemplateSummary,
 } from '@/utils/api/promptCustomizations'
 
-const values = reactive<PromptCustomizations>({ chat: '', feed: '', media: '', proactive: '' })
+const templates = ref<PromptTemplateSummary[]>([])
+const selected = ref<PromptTemplate | null>(null)
+const draft = ref('')
 const loading = ref(true)
 const saving = ref(false)
 const feedback = ref('')
-const fields: Array<[keyof PromptCustomizations, string]> = [
-  ['chat', '聊天回覆'], ['feed', 'LumeGram 文案'], ['media', '圖片與短影片風格'], ['proactive', '主動訊息語氣'],
-]
+const selectedName = computed(() => selected.value?.name ?? '')
+const categories = computed(() => [...new Set(templates.value.map((item) => item.category))])
+
+async function selectTemplate(name: string) {
+  feedback.value = ''
+  try {
+    selected.value = await getAdminPromptTemplate(name)
+    draft.value = selected.value.content
+  } catch (error) {
+    feedback.value = error instanceof Error ? error.message : '無法讀取 prompt。'
+  }
+}
 
 async function load() {
   loading.value = true
-  try { Object.assign(values, await getAdminPromptCustomizations()) }
-  catch (error) { feedback.value = error instanceof Error ? error.message : '無法讀取設定。' }
-  finally { loading.value = false }
+  try {
+    templates.value = await listAdminPromptTemplates()
+    if (templates.value[0]) await selectTemplate(templates.value[0].name)
+  } catch (error) {
+    feedback.value = error instanceof Error ? error.message : '無法讀取設定。'
+  } finally {
+    loading.value = false
+  }
 }
-async function save() {
-  saving.value = true; feedback.value = ''
-  try { Object.assign(values, await putAdminPromptCustomizations({ ...values })); feedback.value = '已儲存。' }
-  catch (error) { feedback.value = error instanceof Error ? error.message : '儲存失敗。' }
-  finally { saving.value = false }
+
+async function save(content = draft.value) {
+  if (!selected.value) return
+  saving.value = true
+  feedback.value = ''
+  try {
+    selected.value = await putAdminPromptTemplate(selected.value.name, content)
+    draft.value = selected.value.content
+    templates.value = await listAdminPromptTemplates()
+    feedback.value = content.trim() ? '已儲存全站覆寫。' : '已還原內建預設。'
+  } catch (error) {
+    feedback.value = error instanceof Error ? error.message : '儲存失敗。'
+  } finally {
+    saving.value = false
+  }
 }
+
 onMounted(load)
 </script>
 
 <template>
   <div class="prompt-admin">
-    <header><div><h1>Prompt 設定</h1><p>為所有使用者與角色加入受控的表現偏好。</p></div><UiBadge variant="primary">Admin</UiBadge></header>
-    <UiSection title="重要提示" bordered>
-      <p class="prompt-admin__warning">這些內容影響所有使用者與角色。它們只能補充表現口味，不能取代角色設定、事實、工具、輸出格式或核心規則。</p>
-      <p v-if="loading">載入中…</p>
-      <template v-else>
-        <label v-for="[key, label] in fields" :key="key" class="field-label">{{ label }}<textarea v-model="values[key]" class="field-input" rows="4" :maxlength="PROMPT_CUSTOMIZATION_MAX_CHARS" /></label>
-        <UiButton variant="primary" :loading="saving" @click="save">儲存重要提示</UiButton>
-      </template>
-      <p v-if="feedback" class="prompt-admin__feedback">{{ feedback }}</p>
-    </UiSection>
+    <header>
+      <div><h1>Prompt Studio</h1><p>管理所有已登錄的 prompt 模板與全站預設。儲存後其他服務會在約 10 秒內套用。</p></div>
+      <UiBadge variant="primary">Admin</UiBadge>
+    </header>
+    <p v-if="loading" class="prompt-admin__hint">載入中…</p>
+    <template v-else>
+      <UiSection v-for="category in categories" :key="category" :title="category" bordered>
+        <div class="prompt-admin__templates">
+          <UiButton
+            v-for="template in templates.filter((item) => item.category === category)"
+            :key="template.name"
+            size="sm"
+            :variant="template.name === selectedName ? 'primary' : 'secondary'"
+            :active="template.name === selectedName"
+            @click="selectTemplate(template.name)"
+          >{{ template.title }}</UiButton>
+        </div>
+      </UiSection>
+      <UiSection v-if="selected" :title="selected.title" bordered>
+        <div class="prompt-admin__meta">
+          <UiBadge :variant="selected.overridden ? 'primary' : 'default'">{{ selected.overridden ? '已覆寫' : '內建預設' }}</UiBadge>
+          <UiBadge v-if="selected.important" variant="danger">重要 prompt</UiBadge>
+        </div>
+        <p :class="selected.important ? 'prompt-admin__warning' : 'prompt-admin__hint'">
+          {{ selected.important ? `重要 prompt，改了會影響：${selected.impact}` : selected.impact }}
+        </p>
+        <p class="prompt-admin__hint">必須保留的變數：{{ selected.variables.length ? selected.variables.map((name) => `$${name}`).join('、') : '無' }}</p>
+        <UiTextarea v-model="draft" :rows="18" :maxlength="24000" label="Prompt 模板" />
+        <div class="prompt-admin__actions">
+          <UiButton variant="primary" :loading="saving" @click="save()">儲存全站覆寫</UiButton>
+          <UiButton variant="ghost" :disabled="saving || !selected.overridden" @click="save('')">還原內建預設</UiButton>
+        </div>
+      </UiSection>
+    </template>
+    <p v-if="feedback" class="prompt-admin__feedback">{{ feedback }}</p>
   </div>
 </template>
 
 <style scoped>
-.prompt-admin { display: flex; flex-direction: column; gap: 16px; }.prompt-admin header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }.prompt-admin h1, .prompt-admin p { margin: 0; }.prompt-admin header p, .prompt-admin__feedback { color: var(--color-text-secondary); margin-top: 4px; }.prompt-admin__warning { margin-bottom: 12px !important; color: #e9bb72; line-height: 1.55; }.field-label { display: flex; flex-direction: column; gap: 5px; margin: 12px 0; }.field-input { resize: vertical; }
+.prompt-admin { display: flex; flex-direction: column; gap: 16px; }
+.prompt-admin header, .prompt-admin__meta, .prompt-admin__actions, .prompt-admin__templates { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.prompt-admin header, .prompt-admin__meta { justify-content: space-between; }
+.prompt-admin h1, .prompt-admin p { margin: 0; }
+.prompt-admin header p, .prompt-admin__hint, .prompt-admin__feedback { color: var(--color-text-secondary); margin-top: 4px; line-height: 1.55; }
+.prompt-admin__warning { color: #e9bb72; line-height: 1.55; }
 </style>

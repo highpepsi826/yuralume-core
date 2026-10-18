@@ -53,6 +53,7 @@ from kokoro_link.infrastructure.prompt.timing_utils import (
     render_current_time_fact_lines,
 )
 from kokoro_link.infrastructure.prompts import get_default_loader
+from kokoro_link.infrastructure.prompts.loader import request_template_overrides
 from kokoro_link.llm_output import (
     extract_object_outcome,
     iter_embedded_json,
@@ -132,7 +133,8 @@ class LLMFeedComposer(FeedComposerPort):
     ) -> FeedComposerOutput:
         if await self._resolver.is_fake(character=payload.character):
             return FeedComposerOutput(content_text="")
-        prompt = _build_prompt(payload, video_enabled=self._video_enabled)
+        with request_template_overrides(payload.template_overrides):
+            prompt = _build_prompt(payload, video_enabled=self._video_enabled)
         try:
             raw = await self._resolver.generate(
                 prompt, character=payload.character,
@@ -182,7 +184,8 @@ class LLMFeedComposer(FeedComposerPort):
         """
         character = payload.character
         try:
-            instruction = _build_first_frame_prompt(payload, output)
+            with request_template_overrides(payload.template_overrides):
+                instruction = _build_first_frame_prompt(payload, output)
             raw = await self._resolver.generate(
                 instruction, character=character,
             )
@@ -315,6 +318,7 @@ def _build_prompt(
         fact_block = "\n".join(fact_block_lines) + "\n"
     body = get_default_loader().render(
         "feed/composer",
+        style_instruction=get_default_loader().render("feed/composer_style"),
         schema_line=schema_line,
         max_body_chars=MAX_BODY_CHARS,
         prompts_clause=prompts_clause,
@@ -335,9 +339,6 @@ def _build_prompt(
     )
     if language_hint:
         body = f"{language_hint}\n\n{body}"
-    customization = (payload.prompt_customization or "").strip()
-    if customization:
-        body = f"{body}\n\n{customization}"
     return body
 
 

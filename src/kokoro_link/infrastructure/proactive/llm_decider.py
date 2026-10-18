@@ -78,6 +78,7 @@ from kokoro_link.infrastructure.prompt.weather_freshness import (
     render_weather_fact_lines,
 )
 from kokoro_link.infrastructure.prompts import get_default_loader
+from kokoro_link.infrastructure.prompts.loader import request_template_overrides
 from kokoro_link.llm_output import ParseReason, extract_object_outcome, log_parse_outcome
 
 _LOGGER = logging.getLogger(__name__)
@@ -157,7 +158,8 @@ class LLMProactiveDecider(ProactiveDeciderPort):
                 reason="fake provider selected",
                 message=None,
             )
-        prompt = _build_prompt(context)
+        with request_template_overrides(context.template_overrides):
+            prompt = _build_prompt(context)
         decision = await self._decide_with_prompt(context, prompt)
         # Every exit below this point came out of ``prompt``; stamping it
         # once here beats threading it through a dozen early returns and
@@ -569,9 +571,10 @@ def _build_prompt(context: ProactiveContext) -> str:
         )
         sections.append("\n".join(tool_lines))
 
-    if context.prompt_customization.strip():
-        sections.append(context.prompt_customization.strip())
-    sections.append(get_default_loader().render("proactive/decider_instructions"))
+    sections.append(get_default_loader().render(
+        "proactive/decider_instructions",
+        style_instruction=get_default_loader().render("proactive/decider_instructions_style"),
+    ))
 
     # HV2 — last, and only on a re-decide. See
     # ``ProactiveContext.honesty_correction`` for why the tail is the only

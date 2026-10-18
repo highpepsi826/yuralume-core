@@ -42,6 +42,7 @@ from kokoro_link.infrastructure.prompt.player_persona_note_lines import (
     render_player_persona_note_lines,
 )
 from kokoro_link.infrastructure.prompts import get_default_loader
+from kokoro_link.infrastructure.prompts.loader import request_template_overrides
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,7 +64,9 @@ class LLMFeedCommentReplyComposer(FeedCommentReplyComposerPort):
         *,
         provider: ActiveLLMProviderPort | None = None,
         feature_key: str | None = None,
+        prompt_customization_service=None,
     ) -> None:
+        self._prompt_customization_service = prompt_customization_service
         self._resolver = ModelResolver(
             provider=provider, model=model, feature_key=feature_key,
         )
@@ -73,7 +76,16 @@ class LLMFeedCommentReplyComposer(FeedCommentReplyComposerPort):
     ) -> FeedCommentReplyOutput:
         if await self._resolver.is_fake(character=payload.character):
             return FeedCommentReplyOutput(content_text="")
-        prompt = _build_prompt(payload)
+        overrides = {}
+        if self._prompt_customization_service is not None:
+            try:
+                overrides = await self._prompt_customization_service.effective_overrides(
+                    user_id=getattr(payload.character, "user_id", None),
+                )
+            except Exception:
+                _LOGGER.exception("feed reply prompt overrides unavailable character=%s", payload.character.id)
+        with request_template_overrides(overrides):
+            prompt = _build_prompt(payload)
         try:
             raw = await self._resolver.generate(
                 prompt, character=payload.character,
@@ -130,6 +142,7 @@ def _build_prompt(payload: FeedCommentReplyInput) -> str:
         busy_clause = "\n".join([busy_clause, *note_lines])
     body = get_default_loader().render(
         "feed/comment_reply",
+        style_instruction=get_default_loader().render("feed/comment_reply_style"),
         max_reply_chars=MAX_REPLY_CHARS,
         persona_block="\n".join(persona),
         busy_clause=busy_clause,

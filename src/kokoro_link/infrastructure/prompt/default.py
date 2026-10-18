@@ -68,6 +68,7 @@ from kokoro_link.infrastructure.prompt.sections.schedule import (
     _operator_timezone,
 )
 from kokoro_link.infrastructure.prompts import get_default_loader
+from kokoro_link.infrastructure.prompts.loader import request_template_overrides
 
 # Compatibility re-exports. These block renderers moved into
 # ``infrastructure.prompt.sections`` when ``build()`` was split into a
@@ -174,7 +175,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
         operator: "OperatorProfile | None" = None,
         operator_persona_lines: "list[str] | None" = None,
         player_persona_note: str | None = None,
-        prompt_customization: str = "",
+        template_overrides: Mapping[str, str] | None = None,
         peer_roster_lines: "list[str] | None" = None,
         initial_relationship_lines: "list[str] | None" = None,
         persona_curiosity_plan: PersonaCuriosityPlan | None = None,
@@ -204,14 +205,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
         render and concatenate it. Every block's content, order and
         mutual exclusion lives in ``infrastructure.prompt.sections``.
         """
-        self.last_prompt_pack_hash = get_default_loader().prompt_pack_hash(
-            prompt_pack_hash_snapshot(
-                self._humanization_settings,
-                self._prompt_quality_settings,
-            ),
-        )
-        return assemble(
-            self._build_context(
+        context = self._build_context(
                 character=character,
                 conversation=conversation,
                 recent_messages=recent_messages,
@@ -246,7 +240,6 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
                 operator=operator,
                 operator_persona_lines=operator_persona_lines,
                 player_persona_note=player_persona_note,
-                prompt_customization=prompt_customization,
                 peer_roster_lines=peer_roster_lines,
                 initial_relationship_lines=initial_relationship_lines,
                 persona_curiosity_plan=persona_curiosity_plan,
@@ -268,8 +261,15 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
                 resolved_character_address=resolved_character_address,
                 address_change_lines=address_change_lines,
                 stage_nudge=stage_nudge,
-            )
         )
+        with request_template_overrides(template_overrides or {}):
+            self.last_prompt_pack_hash = get_default_loader().prompt_pack_hash(
+                prompt_pack_hash_snapshot(
+                    self._humanization_settings,
+                    self._prompt_quality_settings,
+                ),
+            )
+            return assemble(context)
 
     def _build_context(
         self,
@@ -308,7 +308,6 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
         operator: "OperatorProfile | None",
         operator_persona_lines: "list[str] | None",
         player_persona_note: str | None,
-        prompt_customization: str,
         peer_roster_lines: "list[str] | None",
         initial_relationship_lines: "list[str] | None",
         persona_curiosity_plan: PersonaCuriosityPlan | None,
@@ -353,7 +352,6 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
                 operator=operator,
                 operator_persona_lines=tuple(operator_persona_lines or ()),
                 player_persona_note=player_persona_note,
-                prompt_customization=prompt_customization,
                 peer_roster_lines=tuple(peer_roster_lines or ()),
                 initial_relationship_lines=tuple(
                     initial_relationship_lines or ()

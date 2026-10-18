@@ -679,6 +679,7 @@ def _instructions_footer(ctx: PromptSectionContext) -> list[str]:
     return [
         get_default_loader().render(
             "chat/instructions_footer",
+            style_instruction=get_default_loader().render("chat/instructions_footer_style"),
             response_format_instruction=_render_response_format_instruction(
                 ctx.dialogue.presence_frame,
             ),

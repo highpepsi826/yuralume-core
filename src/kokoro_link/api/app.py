@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from kokoro_link.api.dependencies import get_current_user, is_cloud_mode
 from kokoro_link.application.exceptions import CharacterNotOwned
+from kokoro_link.application.services.prompt_customization_service import AdminPromptTemplateRefresher
 
 from kokoro_link.api.routes.album import router as album_router
 from kokoro_link.api.routes.branching_drama import router as branching_drama_router
@@ -655,6 +656,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        prompt_service = getattr(container, "prompt_customization_service", None)
+        prompt_refresher = AdminPromptTemplateRefresher(prompt_service) if prompt_service else None
         collector = get_diagnostic_collector()
         factory = (async_sessionmaker(container.db_engine, expire_on_commit=False)
                    if container.db_engine is not None else None)
@@ -664,6 +667,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
               build_metadata_file_status=build_info.build.metadata_file_status,
               build_metadata_file_bytes=build_info.build.metadata_file_bytes)
         try:
+            if prompt_refresher is not None:
+                await prompt_refresher.start()
             async with runtime_lifespan(app):
                 yield
         except BaseException as exc:
@@ -671,6 +676,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                   error_type=type(exc).__name__, status="failed")
             raise
         finally:
+            if prompt_refresher is not None:
+                await prompt_refresher.stop()
             # Capture failure before flushing; keep the database available until
             # diagnostics finish, including startup and shutdown failure paths.
             await collector.stop()

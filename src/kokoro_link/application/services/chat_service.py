@@ -3124,7 +3124,7 @@ class ChatService:
         operator_persona = turn_aux.operator_persona
         operator_persona_lines = turn_aux.operator_persona_lines
         player_persona_note = turn_aux.player_persona_note
-        prompt_customization = await self._load_prompt_customization(character, operator)
+        template_overrides = await self._load_prompt_template_overrides(character, operator)
         peer_roster_lines = turn_aux.peer_roster_lines
         initial_relationship_lines = turn_aux.initial_relationship_lines
         persona_curiosity_plan = turn_aux.persona_curiosity_plan
@@ -3200,7 +3200,7 @@ class ChatService:
                 operator=operator,
                 operator_persona_lines=operator_persona_lines,
                 player_persona_note=player_persona_note,
-                prompt_customization=prompt_customization,
+                template_overrides=template_overrides,
                 peer_roster_lines=peer_roster_lines,
                 initial_relationship_lines=initial_relationship_lines,
                 persona_curiosity_plan=persona_curiosity_plan,
@@ -4636,6 +4636,7 @@ class ChatService:
             character, operator,
         )
         tool_messages = tool_context_messages or recent_messages
+        template_overrides = await self._load_prompt_template_overrides(character, operator)
         if not tool_descriptors or self._tool_orchestrator is None:
             async def generate_no_tool_once(
                 retry_directive: str | None = None,
@@ -4671,6 +4672,7 @@ class ChatService:
                     operator=operator,
                     operator_persona_lines=operator_persona_lines,
                     player_persona_note=player_persona_note,
+                    template_overrides=template_overrides,
                     peer_roster_lines=peer_roster_lines,
                     initial_relationship_lines=initial_relationship_lines,
                     persona_curiosity_plan=persona_curiosity_plan,
@@ -4938,6 +4940,7 @@ class ChatService:
                 operator=operator,
                 operator_persona_lines=operator_persona_lines,
                 player_persona_note=player_persona_note,
+                template_overrides=template_overrides,
                 peer_roster_lines=peer_roster_lines,
                 initial_relationship_lines=initial_relationship_lines,
                 persona_curiosity_plan=persona_curiosity_plan,
@@ -5279,6 +5282,7 @@ class ChatService:
                 operator=operator,
                 operator_persona_lines=operator_persona_lines,
                 player_persona_note=player_persona_note,
+                template_overrides=template_overrides,
                 peer_roster_lines=peer_roster_lines,
                 initial_relationship_lines=initial_relationship_lines,
                 persona_curiosity_plan=persona_curiosity_plan,
@@ -6408,23 +6412,23 @@ class ChatService:
             return ""
         return row.note if row is not None else ""
 
-    async def _load_prompt_customization(
+    async def _load_prompt_template_overrides(
         self,
         character: Character,
         operator: "OperatorProfile | None",
-    ) -> str:
+    ) -> dict[str, str]:
         if operator is None:
-            return ""
+            return {}
         service = self._prompt_customization_service
         if service is None:
-            return ""
+            return {}
         try:
-            return await service.render(surface="chat", user_id=operator.id)
+            return await service.effective_overrides(user_id=operator.id)
         except Exception:
             _LOGGER.exception(
-                "chat prompt customization load failed character=%s", character.id,
+                "chat prompt template overrides load failed character=%s", character.id,
             )
-            return ""
+            return {}
 
     async def _load_peer_roster_lines(self, character_id: str) -> list[str]:
         if self._character_social_knowledge_service is None:

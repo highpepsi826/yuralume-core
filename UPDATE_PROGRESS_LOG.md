@@ -1608,3 +1608,42 @@ database rows.
   playback test, no migration, commit, push or deployment.
 - Details: CHARACTER_VIDEO_PREVIEW_REFERENCE.md. Ignored test temp cleanup was
   blocked by approval-service reviewer model HTTP404; temporary files retained.
+
+# 2026-10-16 - distinguish video defaults from placeholder text (source only)
+
+- Replaced misleading video size/duration placeholders with explicit blank-field
+  behavior and added per-field Use provider defaults buttons. The UI confirms
+  when a field actually contains provider_default and will be omitted upstream.
+- Existing saved settings and adapter defaults are unchanged. Screenshot suggests
+  an empty size field; no live input value or upstream success was asserted.
+- Verification: Vue type checks, locale checks, production/PWA build and diff
+  checks passed. No paid API request, commit, push or deployment.
+
+# 2026-10-19 - prompt customization release to OVHcloud
+
+- Published `2947918` (`local: add bounded prompt customization`) and
+  `c3ab6bb` (`local: document Coolify release workflow`) on
+  `local/customizations`. Both GitHub Actions image-publication runs passed.
+- Updated Coolify's four app-role services (`app`, `coordinator`, `worker`,
+  `connector`) to immutable app digest
+  `sha256:c3da3e296d13fcb4fe61e82c802492530f826806488be83c1215338747f7025c`.
+  PostgreSQL and storage images/volumes were preserved. Protected before-change
+  compose copies exist on the host and in Coolify's local storage.
+- All six production services were healthy after deployment. Public health
+  returned `status=ok`; the version endpoint reported build commit `c3ab6bb`.
+  Recent role logs had no error lines and the enabled Telegram polling account
+  count remained one. No schema migration or data operation was performed.
+
+# 2026-10-19 - Prompt Studio release preparation
+
+- Replaced additive preferences with direct editing of five style templates;
+  all other registered templates are administrator-only with impact warnings.
+- Admin defaults refresh in all four process roles every 10 seconds. Chat,
+  feed, comment, storyboard and proactive paths apply owner-scoped style edits.
+  Dynamic facts remain injected and template variables are validated.
+- Release review fixed a missing tool-cycle binding and removed obsolete
+  Zeabur restart automation. Unconfigured defaults reproduce original prompts.
+- Verification: integrated suite 228 passed; consumer/golden suite 204 passed
+  (overlap); frontend production/PWA build, compilation and diff checks pass.
+- User authorized commit/push/publication and four-role Coolify rollout.
+  Production rollout pending; no migration is needed.

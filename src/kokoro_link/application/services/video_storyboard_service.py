@@ -69,6 +69,7 @@ from kokoro_link.infrastructure.prompt.visual_subject import (
     render_character_visual_subject_lines,
 )
 from kokoro_link.infrastructure.prompts import get_default_loader
+from kokoro_link.infrastructure.prompts.loader import request_template_overrides
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -153,7 +154,9 @@ class VideoStoryboardService:
         object_storage: ObjectStoragePort | None = None,
         public_base_url: str = "",
         uploads_dir: Path | None = None,
+        prompt_customization_service=None,
     ) -> None:
+        self._prompt_customization_service = prompt_customization_service
         self._resolver = resolver
         self._object_storage = object_storage
         self._public_base_url = public_base_url
@@ -196,8 +199,17 @@ class VideoStoryboardService:
         if not frame_url:
             return self._fallback(request, REASON_NO_FRAME)
 
+        overrides = {}
+        if self._prompt_customization_service is not None:
+            try:
+                overrides = await self._prompt_customization_service.effective_overrides(
+                    user_id=operator_id,
+                )
+            except Exception:
+                _LOGGER.exception("video storyboard prompt overrides unavailable character=%s", character.id)
         try:
-            instruction = build_storyboard_prompt(request)
+            with request_template_overrides(overrides):
+                instruction = build_storyboard_prompt(request)
         except Exception as exc:  # noqa: BLE001 — advisory step, never fatal
             # Practically only reachable through a stale external prompt
             # pack asking for a variable this release no longer supplies.
@@ -304,6 +316,7 @@ def build_storyboard_prompt(request: VideoStoryboardRequest) -> str:
 
     return get_default_loader().render(
         PROMPT_TEMPLATE_NAME,
+        style_instruction=get_default_loader().render("feed/video_storyboard_style"),
         clip_seconds=clip_seconds,
         max_prompt_chars=MAX_STORYBOARD_CHARS,
         # V0's single-field schema line. The shipped template no longer

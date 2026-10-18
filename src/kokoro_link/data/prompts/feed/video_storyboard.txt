@@ -68,7 +68,7 @@ non_diegetic_music（英文、1-3 句）
 - 只有氣氛真的需要時才給。用**樂器、速度、節奏變化**描述，例如
   "Sparse solo piano, slow tempo, sustained notes that thin out toward the end"。
   不要用 warm / melancholic / dreamy / nostalgic 這類抽象情緒形容詞。
-- 不需要配樂就寫 "N/A"。多數日常貼文靠環境音就夠了。
+- 不需要配樂就寫 "N/A"。${style_instruction}
 
 通用紅線
 - `visual`、`overall_soundscape`、`non_diegetic_music` 一律用英文；

@@ -109,39 +109,3 @@ jobs:
           # base-image + dependency layers.
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }},mode=max
-
-  restart-zeabur-storage:
-    name: Restart Zeabur storage
-    needs: publish
-    if: github.event_name == 'push' && github.ref_name == 'local/customizations'
-    runs-on: ubuntu-latest
-    env:
-      ZEABUR_TOKEN: ${{ secrets.ZEABUR_TOKEN }}
-      ZEABUR_ENV_ID: 6a9834092504b02ec1521a4e
-      ZEABUR_SERVICE_NAME: storage
-    steps:
-      - name: Report missing Zeabur token
-        if: env.ZEABUR_TOKEN == ''
-        run: echo "::notice::ZEABUR_TOKEN is not configured; local was published but storage restart was skipped."
-
-      - name: Restart storage with the freshly published local image
-        if: env.ZEABUR_TOKEN != ''
-        shell: bash
-        run: |
-          npx --yes zeabur@latest auth login --token "$ZEABUR_TOKEN"
-          npx --yes zeabur@latest service restart \
-            --env-id "$ZEABUR_ENV_ID" \
-            --service-name "$ZEABUR_SERVICE_NAME" \
-            -i=false
-
-      - name: Check deployment and public application health
-        if: env.ZEABUR_TOKEN != ''
-        shell: bash
-        run: |
-          npx --yes zeabur@latest deployment get \
-            --env-id "$ZEABUR_ENV_ID" \
-            --service-name "$ZEABUR_SERVICE_NAME" \
-            -i=false
-          curl --fail --silent --show-error \
-            --retry 12 --retry-all-errors --retry-delay 5 \
-            https://yuralume-prod.zeabur.app/health
