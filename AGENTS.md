@@ -5,39 +5,41 @@ local Yuralume deployment.
 
 ## Current Hosted Production
 
-The project now has a hosted production runtime in Zeabur. Keep this section
-current when the topology changes; the Zeabur dashboard is the final source of
-truth for live status, while `deploy/zeabur/README.md` is the detailed
-operation runbook.
+OVHcloud/Coolify is the accepted production runtime as of 2026-10-18. Read
+`C:\Users\high_\Documents\ChatGPT\ai_livelife\deployment\ovh-yuralume\PLAN.md`
+and `OVHCLOUD_DEPLOYMENT_STATUS.md` before a production operation.
 
-- The production project is `yuralume-production` on the dedicated Tokyo
-  server. The public app domain is `yuralume-prod.zeabur.app`.
-- The active app service is the only production runtime and must stay at one
-  replica using the default `all` role. It is the sole owner of Telegram
-  polling and scheduled background work.
-- The active database service is `postgresql` with `pgvector`, reachable from
-  the project only through `postgresql.zeabur.internal:5432`. The obsolete
-  suspended `postgres` rollback service and its `postgres-data` volume were
-  explicitly deleted on 2026-09-04; do not recreate or target them.
-- The active object-storage service is `storage`, reachable only through
-  `http://storage.zeabur.internal:9000`. It uses the personal-fork moving image
-  `ghcr.io/highpepsi826/yuralume-core/storage-local:local`, with
-  `YURALUME_STORAGE_MAX_OBJECT_BYTES=2147483648`. Its `storage-data` volume is
-  mounted at `/data` and contains both `objects/` and `metadata` restored from
-  the encrypted migration backup. The temporary migration public domain has
-  been removed; never expose the storage or database services publicly.
-- The initial admin account has been configured through the hosted `/setup`
-  flow. Do not reset it or add bootstrap credentials unless the user asks.
-- The database and storage migration has been validated. Keep the local
-  encrypted backup and the cloud rollback/restore protection in place until
-  the user explicitly approves retention cleanup.
+- Public application: `https://yuralume.tototoproject.com`.
+- Coolify service: `yuralume` (`lg4wotyohbnhgs5y2mlhwb5z`) with six services:
+  `postgresql`, `storage`, `app`, `coordinator`, `worker`, and `connector`.
+- The four app roles use an explicitly selected immutable GHCR image digest.
+  Database/storage volumes and secrets must be preserved for an app update.
+- Zeabur program services are stopped and retained for rollback evidence only.
+  Do not restart them or treat the historical Zeabur workflow step as a deploy.
 
 ## Hosted Development and Deployment
 
 - Edit source in `C:\Entertainment\yuralume-src` and push reviewed commits on
-  `local/customizations`; Zeabur builds the hosted app from that branch. Do
-  not edit a running cloud container or treat a manual dashboard build as a
-  substitute for a source commit.
+  `local/customizations`. GitHub Actions `Publish container images` publishes
+  the moving `local` tag and an immutable `sha-<commit>` tag to GHCR. It does
+  not deploy Coolify. Do not edit a running cloud container or treat a manual
+  dashboard build as a substitute for a source commit.
+- After image publication succeeds, resolve the new immutable digest. Updating
+  Coolify's `app`, `coordinator`, `worker`, and `connector` services to that
+  digest and deploying them is a separate production action. A later GitHub
+  push never changes services pinned to an earlier digest. Preserve the
+  `postgresql` and `storage` images, volumes, secrets, and role environments
+  for a no-migration app release.
+- Once the user authorizes deployment of a named reviewed commit, continue
+  through publication, digest selection, Coolify deployment, and verification
+  without repeatedly asking which stage to perform. Stop for a new
+  migration/data/destructive approval boundary, a material discrepancy, or a
+  failed check.
+- At each material stage, report and persist: source commit, GitHub Actions
+  run/result, published immutable digest, Coolify configuration/deployment
+  state, and health/login/representative-media checks. Update
+  `UPDATE_PROGRESS_LOG.md` after verified completion; do not wait for the user
+  to ask which deployment stage has been reached.
 - Local development on this computer or another notebook must use an isolated
   local Compose stack. Never point a default local runtime at the hosted
   database or storage, and never run local Telegram polling or schedulers at
@@ -47,36 +49,24 @@ operation runbook.
   restore it into an isolated local stack. Disable Telegram and other external
   connectors there. Reproduce, test, and repair locally; never write a local
   development database back into production.
-- Before any production migration or data operation, read the Zeabur runbook,
+- Before any production migration or data operation, read the OVHcloud runbook,
   check the current service status, obtain explicit user confirmation, and
   create and verify a PostgreSQL custom-format backup. Migrations run once in
   a controlled environment; never run Alembic concurrently from local and
   cloud. Prefer an app-only redeploy when no schema change is involved.
 - A storage migration must move `objects/` and `metadata/` together. Use the
-  staged encrypted transfer procedure in the runbook; do not use Zeabur
-  `Restore from File` for the storage archive, and do not expose plaintext
-  storage during transfer.
-- `local/customizations` publishes personal-fork images under the moving
-  `local` tag and an immutable `sha-<commit>` tag. Zeabur normally follows
-  `storage-local:local`; `latest` remains reserved for `main`/`master`.
-  Pushing the branch updates GHCR, but Zeabur may not notice a moving-tag
-  change automatically. Without the optional `ZEABUR_TOKEN` GitHub Actions
-  secret, manually restart the existing `storage` service after a storage
-  image publication; never recreate the service or volume. Keep
-  `storage-data` mounted at `/data`, and verify a known media object after
-  restart. Roll back by temporarily selecting the last known-good immutable
-  SHA tag.
-- After a hosted deployment, verify the app is `Running` with one replica,
-  `GET https://yuralume-prod.zeabur.app/health` returns `status=ok` with the
-  database overlay active, representative media can be read, and admin login
-  works. Only after those checks should Telegram polling be considered
-  operational.
+  staged encrypted transfer procedure in the OVHcloud runbook and do not
+  expose plaintext storage during transfer.
+- After a Coolify deployment, verify all six services are healthy, `GET
+  https://yuralume.tototoproject.com/health` returns `status=ok`, representative
+  media can be read, admin login works, and only the live connector owns
+  Telegram polling. Only after those checks should a release be accepted.
 - Keep `CONFIG_ENCRYPTION_KEY` stable across deployments so encrypted Admin
-  provider configuration remains readable. Store all secrets only in Zeabur
+  provider configuration remains readable. Store all secrets only in Coolify
   variables or local ignored environment files; never commit, log, paste, or
   print them.
 - Production uploads, deletes, rollback changes, public-port changes, and
-  actions that may incur Zeabur charges require explicit confirmation at the
+  actions that may incur OVHcloud charges require explicit confirmation at the
   point of action. Preserve rollback backups until the resulting deployment
   and data have been verified.
 
