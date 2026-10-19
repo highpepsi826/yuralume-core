@@ -67,18 +67,6 @@ onMounted(load)
     </header>
     <p v-if="loading" class="prompt-admin__hint">載入中…</p>
     <template v-else>
-      <UiSection v-for="category in categories" :key="category" :title="category" bordered>
-        <div class="prompt-admin__templates">
-          <UiButton
-            v-for="template in templates.filter((item) => item.category === category)"
-            :key="template.name"
-            size="sm"
-            :variant="template.name === selectedName ? 'primary' : 'secondary'"
-            :active="template.name === selectedName"
-            @click="selectTemplate(template.name)"
-          >{{ template.title }}</UiButton>
-        </div>
-      </UiSection>
       <UiSection v-if="selected" :title="selected.title" bordered>
         <div class="prompt-admin__meta">
           <UiBadge :variant="selected.overridden ? 'primary' : 'default'">{{ selected.overridden ? '已覆寫' : '內建預設' }}</UiBadge>
@@ -92,6 +80,18 @@ onMounted(load)
         <div class="prompt-admin__actions">
           <UiButton variant="primary" :loading="saving" @click="save()">儲存全站覆寫</UiButton>
           <UiButton variant="ghost" :disabled="saving || !selected.overridden" @click="save('')">還原內建預設</UiButton>
+        </div>
+      </UiSection>
+      <UiSection v-for="category in categories" :key="category" :title="category" bordered>
+        <div class="prompt-admin__templates">
+          <UiButton
+            v-for="template in templates.filter((item) => item.category === category)"
+            :key="template.name"
+            size="sm"
+            :variant="template.name === selectedName ? 'primary' : 'secondary'"
+            :active="template.name === selectedName"
+            @click="selectTemplate(template.name)"
+          >{{ template.title }}</UiButton>
         </div>
       </UiSection>
     </template>

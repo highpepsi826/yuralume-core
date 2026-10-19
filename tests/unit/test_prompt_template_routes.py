@@ -50,6 +50,8 @@ def test_admin_core_warning_and_variable_validation(studio):
     assert response.status_code == 200
     items = response.json()["templates"]
     assert any(item["name"] == "schedule/planner" and item["important"] and item["impact"] for item in items)
+    assert all("（" in item["title"] and item["title"].endswith("）") for item in items)
+    assert all("（" in item["category"] and item["category"].endswith("）") for item in items)
     path = "/api/v1/admin/prompt-templates/feed/composer"
     template = client.get(path).json()
     assert client.put(path, json={"content": "missing variables"}).status_code == 400
