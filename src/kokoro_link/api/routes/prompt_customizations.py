@@ -54,6 +54,40 @@ async def _put(
         raise HTTPException(400, str(exc)) from None
 
 
+async def _draft(
+    name: str, payload: PromptTemplateWrite, container: ServiceContainer,
+    user: OperatorProfile, admin: bool,
+) -> dict[str, Any]:
+    try:
+        return await _service(container).set_draft(
+            name=name, content=payload.content, user_id=user.id, admin=admin,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+async def _discard_draft(
+    name: str, container: ServiceContainer, user: OperatorProfile, admin: bool,
+) -> dict[str, Any]:
+    try:
+        return await _service(container).discard_draft(
+            name=name, user_id=user.id, admin=admin,
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from None
+
+
+async def _publish_draft(
+    name: str, container: ServiceContainer, user: OperatorProfile, admin: bool,
+) -> dict[str, Any]:
+    try:
+        return await _service(container).publish_draft(
+            name=name, user_id=user.id, admin=admin,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 @router.get("")
 async def list_player_templates(
     container: ServiceContainer = Depends(get_container),
@@ -70,6 +104,31 @@ async def get_player_template(
     user: OperatorProfile = Depends(get_current_user),
 ) -> dict[str, Any]:
     return await _get(name, container, user, False)
+
+
+@router.put("/{name:path}/draft")
+async def put_player_template_draft(
+    name: str, payload: PromptTemplateWrite,
+    container: ServiceContainer = Depends(get_container),
+    user: OperatorProfile = Depends(get_current_user),
+) -> dict[str, Any]:
+    return await _draft(name, payload, container, user, False)
+
+
+@router.delete("/{name:path}/draft")
+async def delete_player_template_draft(
+    name: str, container: ServiceContainer = Depends(get_container),
+    user: OperatorProfile = Depends(get_current_user),
+) -> dict[str, Any]:
+    return await _discard_draft(name, container, user, False)
+
+
+@router.post("/{name:path}/publish-draft")
+async def publish_player_template_draft(
+    name: str, container: ServiceContainer = Depends(get_container),
+    user: OperatorProfile = Depends(get_current_user),
+) -> dict[str, Any]:
+    return await _publish_draft(name, container, user, False)
 
 
 @router.put("/{name:path}")
@@ -97,6 +156,31 @@ async def get_admin_template(
     user: OperatorProfile = Depends(get_current_user),
 ) -> dict[str, Any]:
     return await _get(name, container, user, True)
+
+
+@admin_router.put("/{name:path}/draft")
+async def put_admin_template_draft(
+    name: str, payload: PromptTemplateWrite,
+    container: ServiceContainer = Depends(get_container),
+    user: OperatorProfile = Depends(get_current_user),
+) -> dict[str, Any]:
+    return await _draft(name, payload, container, user, True)
+
+
+@admin_router.delete("/{name:path}/draft")
+async def delete_admin_template_draft(
+    name: str, container: ServiceContainer = Depends(get_container),
+    user: OperatorProfile = Depends(get_current_user),
+) -> dict[str, Any]:
+    return await _discard_draft(name, container, user, True)
+
+
+@admin_router.post("/{name:path}/publish-draft")
+async def publish_admin_template_draft(
+    name: str, container: ServiceContainer = Depends(get_container),
+    user: OperatorProfile = Depends(get_current_user),
+) -> dict[str, Any]:
+    return await _publish_draft(name, container, user, True)
 
 
 @admin_router.put("/{name:path}")

@@ -23,6 +23,8 @@ _LOGGER = logging.getLogger(__name__)
 
 PLAYER_PROMPT_CUSTOMIZATION_KEY: Final = "player_prompt_template_overrides"
 ADMIN_PROMPT_CUSTOMIZATION_KEY: Final = "admin_prompt_template_overrides"
+PLAYER_PROMPT_DRAFT_KEY: Final = "player_prompt_template_drafts"
+ADMIN_PROMPT_DRAFT_KEY: Final = "admin_prompt_template_drafts"
 
 
 def normalise_prompt_customizations(value: object) -> dict[str, str]:
@@ -70,14 +72,22 @@ class PromptCustomizationService:
         set_admin_template_overrides(cleaned)
         return cleaned
 
+    async def get_drafts(self, *, user_id: str, admin: bool) -> dict[str, str]:
+        return await self._read(
+            ADMIN_PROMPT_DRAFT_KEY if admin else PLAYER_PROMPT_DRAFT_KEY,
+            user_id=user_id,
+        )
+
     async def list_templates(self, *, user_id: str, admin: bool) -> list[dict]:
         overrides = await (self.get_admin() if admin else self.get_player(user_id=user_id))
+        drafts = await self.get_drafts(user_id=user_id, admin=admin)
         return [
             {
                 "name": item.name, "title": item.title, "category": item.category,
                 "player_editable": item.player_editable, "important": item.important,
                 "impact": item.impact, "variables": item.variables,
                 "overridden": item.name in overrides,
+                "has_draft": item.name in drafts,
             }
             for item in prompt_template_catalog().values()
             if admin or item.player_editable
@@ -91,20 +101,45 @@ class PromptCustomizationService:
         default = template_default(name)
         if not admin:
             default = (await self.get_admin()).get(name, default)
+        drafts = await self.get_drafts(user_id=user_id, admin=admin)
         return {
             "name": name, "title": item.title, "category": item.category,
             "player_editable": item.player_editable,
             "important": item.important, "impact": item.impact,
             "variables": item.variables, "default_content": default,
             "content": overrides.get(name, default), "overridden": name in overrides,
+            "draft_content": drafts.get(name, ""), "has_draft": name in drafts,
         }
+
+    async def set_draft(
+        self, *, name: str, content: object, user_id: str, admin: bool,
+    ) -> dict:
+        self._ensure_available(name=name, admin=admin)
+        cleaned = validate_template_override(name, content)
+        key = ADMIN_PROMPT_DRAFT_KEY if admin else PLAYER_PROMPT_DRAFT_KEY
+        drafts = await self.get_drafts(user_id=user_id, admin=admin)
+        if cleaned:
+            drafts[name] = cleaned
+        else:
+            drafts.pop(name, None)
+        await set_user_preference(self._preferences, key, drafts, user_id=user_id)
+        return await self.get_template(name=name, user_id=user_id, admin=admin)
+
+    async def discard_draft(self, *, name: str, user_id: str, admin: bool) -> dict:
+        return await self.set_draft(name=name, content="", user_id=user_id, admin=admin)
+
+    async def publish_draft(self, *, name: str, user_id: str, admin: bool) -> dict:
+        self._ensure_available(name=name, admin=admin)
+        draft = (await self.get_drafts(user_id=user_id, admin=admin)).get(name)
+        if draft is None:
+            raise ValueError("prompt template draft is not available")
+        await self.set_template(name=name, content=draft, user_id=user_id, admin=admin)
+        return await self.discard_draft(name=name, user_id=user_id, admin=admin)
 
     async def set_template(
         self, *, name: str, content: object, user_id: str, admin: bool,
     ) -> dict:
-        item = prompt_template_catalog().get(name)
-        if item is None or (not admin and not item.player_editable):
-            raise ValueError("prompt template is not available")
+        self._ensure_available(name=name, admin=admin)
         cleaned = validate_template_override(name, content)
         key = ADMIN_PROMPT_CUSTOMIZATION_KEY if admin else PLAYER_PROMPT_CUSTOMIZATION_KEY
         current = await (self.get_admin() if admin else self.get_player(user_id=user_id))
@@ -118,6 +153,12 @@ class PromptCustomizationService:
         else:
             await set_user_preference(self._preferences, key, current, user_id=user_id)
         return await self.get_template(name=name, user_id=user_id, admin=admin)
+
+    @staticmethod
+    def _ensure_available(*, name: str, admin: bool) -> None:
+        item = prompt_template_catalog().get(name)
+        if item is None or (not admin and not item.player_editable):
+            raise ValueError("prompt template is not available")
 
     async def effective_overrides(
         self, *, user_id: str | None = None,

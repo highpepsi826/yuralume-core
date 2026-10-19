@@ -57,3 +57,31 @@ def test_admin_core_warning_and_variable_validation(studio):
     assert client.put(path, json={"content": "missing variables"}).status_code == 400
     assert client.put(path, json={"content": template["content"] + "\nExtra instruction."}).status_code == 200
     assert not client.put(path, json={"content": ""}).json()["overridden"]
+
+
+def test_player_draft_routes_publish_and_discard(studio):
+    app, client = studio
+    app.dependency_overrides[get_current_user] = lambda: OperatorProfile(id="alice", display_name="Alice")
+    path = "/api/v1/prompt-templates/chat/instructions_footer_style"
+    draft = client.get(path).json()["content"] + "\nDraft text."
+
+    saved = client.put(path + "/draft", json={"content": draft})
+    assert saved.status_code == 200
+    assert saved.json()["has_draft"]
+    assert not saved.json()["overridden"]
+    assert client.post(path + "/publish-draft").json()["content"] == draft.strip() + "\n"
+    assert not client.get(path).json()["has_draft"]
+    assert client.put(path + "/draft", json={"content": draft + "\nDiscard me."}).status_code == 200
+    assert not client.delete(path + "/draft").json()["has_draft"]
+
+
+def test_admin_draft_routes_require_admin_and_publish_globally(studio):
+    app, client = studio
+    path = "/api/v1/admin/prompt-templates/chat/instructions_footer"
+    app.dependency_overrides[get_current_user] = lambda: OperatorProfile(id="owner", display_name="Owner")
+    assert client.put(path + "/draft", json={"content": "nope"}).status_code == 403
+
+    app.dependency_overrides[get_current_user] = lambda: OperatorProfile(id="admin", display_name="Admin", is_admin=True)
+    draft = client.get(path).json()["content"] + "\nGlobal draft note."
+    assert client.put(path + "/draft", json={"content": draft}).json()["has_draft"]
+    assert client.post(path + "/publish-draft").json()["content"] == draft.strip() + "\n"

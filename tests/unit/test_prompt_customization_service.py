@@ -119,3 +119,51 @@ async def test_template_override_rejects_invalid_template_syntax() -> None:
             user_id="owner",
             admin=False,
         )
+
+
+@pytest.mark.asyncio
+async def test_player_draft_is_private_until_published() -> None:
+    service = PromptCustomizationService(InMemoryPreferencesRepository())
+    name = "chat/instructions_footer_style"
+
+    saved = await service.set_draft(
+        name=name, content="draft reply style", user_id="alice", admin=False,
+    )
+    assert saved["has_draft"]
+    assert saved["draft_content"] == "draft reply style\n"
+    assert not saved["overridden"]
+    assert not (await service.get_template(name=name, user_id="bob", admin=False))["has_draft"]
+
+    published = await service.publish_draft(name=name, user_id="alice", admin=False)
+    assert published["content"] == "draft reply style\n"
+    assert published["overridden"]
+    assert not published["has_draft"]
+    assert (await service.get_template(name=name, user_id="bob", admin=False))["content"] != "draft reply style\n"
+
+
+@pytest.mark.asyncio
+async def test_admin_draft_only_changes_global_override_when_published() -> None:
+    service = PromptCustomizationService(InMemoryPreferencesRepository())
+    name = "chat/instructions_footer"
+    default = (await service.get_template(name=name, user_id="admin", admin=True))["content"]
+    draft = default + "\nAdmin draft note."
+
+    await service.set_draft(name=name, content=draft, user_id="admin", admin=True)
+    assert (await service.effective_overrides(user_id="player")).get(name) != draft.strip() + "\n"
+
+    published = await service.publish_draft(name=name, user_id="admin", admin=True)
+    assert published["content"] == draft.strip() + "\n"
+    assert not published["has_draft"]
+    assert (await service.effective_overrides(user_id="player"))[name] == draft.strip() + "\n"
+
+
+@pytest.mark.asyncio
+async def test_effective_reset_does_not_discard_player_draft() -> None:
+    service = PromptCustomizationService(InMemoryPreferencesRepository())
+    name = "chat/instructions_footer_style"
+    await service.set_draft(name=name, content="keep draft", user_id="owner", admin=False)
+    await service.set_template(name=name, content="effective", user_id="owner", admin=False)
+    reset = await service.set_template(name=name, content="", user_id="owner", admin=False)
+
+    assert reset["has_draft"]
+    assert reset["draft_content"] == "keep draft\n"
