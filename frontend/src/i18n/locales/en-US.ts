@@ -12,6 +12,7 @@ import type { MessageSchema } from './zh-TW'
 
 export const messages: MessageSchema = {
   common: {
+    promptPlayground: 'Prompt Playground',
     listSeparator: ', ',
     operatorPlaceholder: 'Operator',
     sentenceJoiner: '; ',

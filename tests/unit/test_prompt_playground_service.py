@@ -167,3 +167,46 @@ async def test_stored_core_template_never_applies_to_player_draft(playground):
     result = await run(p)
     assert result.draft_reply is None
     assert 'CORE_DRAFT' not in p.model.generate.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_preview_lists_saved_used_and_unused_drafts_without_generation(playground):
+    p = playground
+    await p.prompts.set_draft(name=STYLE, content='CHAT_DRAFT_MARKER', user_id='alice', admin=False)
+    await p.prompts.set_draft(name='feed/composer_style', content='FEED_DRAFT_MARKER', user_id='alice', admin=False)
+    preview = await p.service.preview(character_id=p.character.id, user_id='alice', admin=False)
+    p.model.generate.assert_not_awaited()
+    drafts = {item['name']: item for item in preview['draft_templates']}
+    assert drafts[STYLE]['used']
+    assert not drafts['feed/composer_style']['used']
+    assert all('content' not in item for item in preview['template_usage']['published'])
+    result = await run(p)
+    assert result.template_usage == preview['template_usage']
+    assert any(item['name'] == STYLE and item['source'] == 'draft' for item in result.template_usage['draft'])
+    assert all(item['source'] == 'effective' for item in result.template_usage['published'])
+    assert result.draft_templates == preview['draft_templates']
+
+
+@pytest.mark.asyncio
+async def test_preview_enforces_ownership_and_scope(playground):
+    p = playground
+    with pytest.raises(PromptPlaygroundAccessError):
+        await p.service.preview(character_id=p.character.id, user_id='bob', admin=False)
+    with pytest.raises(PromptPlaygroundAccessError):
+        await p.service.preview(character_id=p.character.id, user_id='alice', admin=False, draft_scope='admin')
+    p.model.generate.assert_not_awaited()
+
+
+def test_render_trace_is_nested_and_excludes_raw_reads():
+    from kokoro_link.infrastructure.prompts.loader import capture_template_renders, get_default_loader
+    loader = get_default_loader()
+    with capture_template_renders() as outer:
+        loader.raw(STYLE)
+        with capture_template_renders() as inner:
+            loader.render(STYLE)
+        assert outer == []
+        loader.render('shared/role_boundary')
+    assert [name for name, _ in inner] == [STYLE]
+    assert [name for name, _ in outer] == ['shared/role_boundary']
+    loader.render(STYLE)
+    assert len(outer) == 1

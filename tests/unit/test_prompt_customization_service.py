@@ -167,3 +167,50 @@ async def test_effective_reset_does_not_discard_player_draft() -> None:
 
     assert reset["has_draft"]
     assert reset["draft_content"] == "keep draft\n"
+
+
+@pytest.mark.asyncio
+async def test_bulk_publish_preserves_other_overrides_and_other_owner_drafts():
+    repo = InMemoryPreferencesRepository()
+    service = PromptCustomizationService(repo)
+    style = 'chat/instructions_footer_style'
+    await service.set_template(name='feed/composer_style', content='Existing', user_id='alice', admin=False)
+    await service.set_draft(name=style, content='Alice draft', user_id='alice', admin=False)
+    await service.set_draft(name=style, content='Bob draft', user_id='bob', admin=False)
+    result = await service.publish_drafts(user_id='alice', admin=False)
+    assert result['published_names'] == [style]
+    assert (await service.get_player(user_id='alice')) == {'feed/composer_style': 'Existing\n', style: 'Alice draft\n'}
+    assert await service.get_drafts(user_id='alice', admin=False) == {}
+    assert (await service.get_drafts(user_id='bob', admin=False))[style] == 'Bob draft\n'
+    assert await service.get_admin() == {}
+    assert (await service.publish_drafts(user_id='alice', admin=False))['published_names'] == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_publish_rejects_core_or_invalid_entry_before_any_write():
+    from kokoro_link.application.services.scoped_preferences import user_preference_key
+    from kokoro_link.application.services.prompt_customization_service import PLAYER_PROMPT_DRAFT_KEY
+    from unittest.mock import AsyncMock
+    repo = InMemoryPreferencesRepository()
+    service = PromptCustomizationService(repo)
+    for bad in ({'chat/instructions_footer_style': 'valid', 'shared/role_boundary': 'core'},
+                {'chat/instructions_footer_style': 'valid', 'unknown/template': 'invalid'}):
+        await repo.set(user_preference_key('alice', PLAYER_PROMPT_DRAFT_KEY), bad)
+        original = repo.set
+        repo.set = AsyncMock(wraps=original)
+        with pytest.raises(ValueError):
+            await service.publish_drafts(user_id='alice', admin=False)
+        repo.set.assert_not_awaited()
+        repo.set = original
+
+
+@pytest.mark.asyncio
+async def test_admin_bulk_publish_uses_own_drafts_and_global_effective_map():
+    service = PromptCustomizationService(InMemoryPreferencesRepository())
+    await service.set_draft(name='shared/role_boundary', content='Core draft', user_id='root', admin=True)
+    await service.set_draft(name='chat/instructions_footer_style', content='Personal', user_id='root', admin=False)
+    result = await service.publish_drafts(user_id='root', admin=True)
+    assert result['published_names'] == ['shared/role_boundary']
+    assert (await service.get_admin())['shared/role_boundary'] == 'Core draft\n'
+    assert await service.get_drafts(user_id='root', admin=True) == {}
+    assert await service.get_drafts(user_id='root', admin=False)

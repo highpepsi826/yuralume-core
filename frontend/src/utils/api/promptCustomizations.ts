@@ -58,3 +58,16 @@ export const putAdminPromptTemplate = (name: string, content: string) => put('/a
 export const putAdminPromptTemplateDraft = (name: string, content: string) => put('/api/v1/admin/prompt-templates', name + '/draft', content)
 export const deleteAdminPromptTemplateDraft = (name: string) => remove('/api/v1/admin/prompt-templates', name)
 export const publishAdminPromptTemplateDraft = (name: string) => publish('/api/v1/admin/prompt-templates', name)
+
+export interface PromptDraftPublishResult {
+  published_names: string[]
+  templates: PromptTemplateSummary[]
+}
+
+async function publishAll(base: string): Promise<PromptDraftPublishResult> {
+  const { data } = await axios.post<PromptDraftPublishResult>(base + '/publish-drafts')
+  return data
+}
+
+export const publishPlayerPromptTemplateDrafts = () => publishAll('/api/v1/prompt-templates')
+export const publishAdminPromptTemplateDrafts = () => publishAll('/api/v1/admin/prompt-templates')

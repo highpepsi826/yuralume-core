@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuth } from '@/composables/useAuth'
 import { useLocale } from '@/composables/useLocale'
@@ -589,6 +589,7 @@ function sidebarTabLabel(tab: (typeof SIDEBAR_TABS)[number]): string {
          所有 tab 都看得到，跟 admin topbar 的切換器同一條 reactive
          state（i18n.global.locale），任一處切換另一處立即同步。 -->
     <footer class="sidebar-foot">
+      <RouterLink to="/prompt-playground">{{ t('common.promptPlayground') }}</RouterLink>
       <div
         v-if="buildVersionLabel"
         class="sidebar-version"

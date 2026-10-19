@@ -19,6 +19,15 @@ and `OVHCLOUD_DEPLOYMENT_STATUS.md` before a production operation.
 
 ## Hosted Development and Deployment
 
+- After completing a user-requested source change and its proportionate checks,
+  automatically create a scoped `local:` commit, push `local/customizations`,
+  wait for the immutable image publication, and deploy the four application
+  roles in Coolify. Treat this as standing authorization unless the user says
+  to stop, the release crosses a migration/data/destructive boundary, checks
+  fail, or an unrelated dirty change makes the intended commit ambiguous.
+  Preserve unrelated work through explicit staging and report each release
+  stage; never auto-deploy support images, volumes, secrets, or data changes.
+
 - Edit source in `C:\Entertainment\yuralume-src` and push reviewed commits on
   `local/customizations`. GitHub Actions `Publish container images` publishes
   the moving `local` tag and an immutable `sha-<commit>` tag to GHCR. It does

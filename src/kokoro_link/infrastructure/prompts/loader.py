@@ -42,6 +42,21 @@ _REQUEST_TEMPLATE_OVERRIDES: ContextVar[Mapping[str, str]] = ContextVar(
     "yuralume_request_prompt_template_overrides", default={},
 )
 _ADMIN_TEMPLATE_OVERRIDES: Mapping[str, str] = {}
+_TEMPLATE_RENDER_TRACE: ContextVar[list[tuple[str, str]] | None] = ContextVar(
+    "prompt_template_render_trace", default=None,
+)
+
+
+@contextmanager
+def capture_template_renders():
+    """Collect successful renders within one task; never log prompt contents."""
+    entries: list[tuple[str, str]] = []
+    token = _TEMPLATE_RENDER_TRACE.set(entries)
+    try:
+        yield entries
+    finally:
+        _TEMPLATE_RENDER_TRACE.reset(token)
+
 
 
 def set_admin_template_overrides(overrides: Mapping[str, str]) -> None:
@@ -140,6 +155,9 @@ class PromptLoader:
                 ) from exc
         if rendered.endswith("\n"):
             rendered = rendered[:-1]
+        trace = _TEMPLATE_RENDER_TRACE.get()
+        if trace is not None:
+            trace.append((name, rendered))
         return rendered
 
     def render_lines(self, name: str, /, **variables: Any) -> list[str]:

@@ -10,6 +10,7 @@ import type { MessageSchema } from './zh-TW'
 
 export const messages: MessageSchema = {
   common: {
+    promptPlayground: 'Playground（プロンプトテスト）',
     listSeparator: '、',
     operatorPlaceholder: 'オペレーター',
     sentenceJoiner: '；',

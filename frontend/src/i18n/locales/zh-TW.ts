@@ -11,6 +11,7 @@
 
 export const messages = {
   common: {
+    promptPlayground: 'Playground（提示詞測試場）',
     listSeparator: '、',
     operatorPlaceholder: '操作者',
     sentenceJoiner: '；',

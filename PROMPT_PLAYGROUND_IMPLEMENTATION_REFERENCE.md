@@ -162,3 +162,52 @@ or response bodies are not persisted by this feature.
 - The model port has no fixed-seed argument. The UI states that two calls can
   vary randomly and both can consume provider credit. Non-chat templates are
   explicitly labelled as outside this chat-only Playground's evaluated paths.
+
+### Prompt Playground deployed — 2026-10-19
+
+- Commit `45601abf7208d94b82dbcbbb4fd2d07b06daf3c5`; GitHub Actions
+  `39215660557` succeeded for all four image jobs.
+- Updated exactly four app image references to immutable index digest
+  `sha256:053543ef6b6b91d82f4788bc637ae9665df936e9f0ee3d91e63dc7c66131915b`.
+  Exact replacement verified; PostgreSQL/storage images, volumes and role
+  configuration preserved. Coolify stack Restart applied the saved configuration.
+- All six resources healthy; configuration-not-applied indicator cleared.
+  Public health status ok/db overlay, root HTTP 200, version commit matches
+  `45601abf7208d94b82dbcbbb4fd2d07b06daf3c5`. Brief HTTP 503 during restart resolved.
+  Playground character API unauthenticated HTTP 401; login page renders.
+- No schema migration or paid model call. Browser lacked Yuralume login session;
+  authenticated Playground visual acceptance, representative media and Telegram
+  ownership checks remain unverified for this release. Coolify session remained
+  authenticated. Screenshot: temp/playground-deployed-45601ab.jpg.
+
+## Usability follow-up — 2026-10-19 (authorized implementation)
+
+1. Add player/admin menu entry to Playground, retaining explicit scope.
+2. Before generation display private saved Draft names and which templates
+   participate in a read-only preview of the selected character/progress.
+3. Capture request-local template rendering provenance for both actual prompts.
+   Results list names/titles, effective source, Draft use and content hashes;
+   unused Drafts are explicitly labelled. No full core prompt exposure to players.
+   This identifies assembled template use, not proof of model attention.
+4. Studio displays saved Draft count/list and one batch publish action. Validate
+   all raw entries and permissions before writing one merged effective map;
+   clear published Drafts after success. Admin confirmation lists important
+   templates and impacts. No automatic publish during Playground tests.
+5. No migration; preserve read-only/no-memory-write Playground contract. Test
+   trace isolation, actual-vs-unused Drafts, bulk validation/permissions and build.
+6. This follow-up is local implementation only; no new commit/push/deploy yet.
+
+### Usability follow-up local verification — 2026-10-19
+
+- Added player sidebar/admin navigation entries, scoped Draft preview/list,
+  actual run template titles/source hashes and unused Draft labels. Trace is
+  task-local and only includes nonempty rendered output retained in final text;
+  it does not claim model attention. Non-template dynamic context is separate.
+- Studio shows saved Draft count/list and publishes own collection in one
+  validated merged effective map write. Admin confirmation lists impacts.
+  Effective-map write and Draft cleanup use existing separate preference writes;
+  this is not a database transaction across the two keys. No schema migration.
+- Verification: 109 backend tests, 5 frontend API tests; Vue typecheck and
+  production/PWA build passed. git diff --check passed. No paid calls.
+- Browser visual acceptance not performed for this follow-up. Local changes
+  only; no new commit, push or production deployment. Preserve unrelated edits.

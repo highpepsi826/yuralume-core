@@ -45,6 +45,7 @@ const navItems: AdminNavItem[] = [
 
   { labelKey: 'admin.nav.providers', to: '/admin/providers', group: 'media', cloudLocked: true },
   { labelKey: 'admin.nav.promptSettings', to: '/admin/prompt-settings', group: 'behavior', cloudLocked: true },
+  { labelKey: 'common.promptPlayground', to: '/prompt-playground?scope=admin', group: 'behavior', cloudLocked: true },
   { labelKey: 'admin.nav.models', to: '/admin/models', group: 'media', cloudLocked: true },
   { labelKey: 'admin.nav.imageProfiles', to: '/admin/image-profiles', group: 'media', cloudLocked: true },
   { labelKey: 'admin.nav.videoProfiles', to: '/admin/video-profiles', group: 'media', cloudLocked: true },

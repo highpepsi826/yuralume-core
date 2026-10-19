@@ -7,6 +7,7 @@ import {
   getAdminPromptTemplate,
   listAdminPromptTemplates,
   publishAdminPromptTemplateDraft,
+  publishAdminPromptTemplateDrafts,
   putAdminPromptTemplateDraft,
   type PromptTemplate,
   type PromptTemplateSummary,
@@ -21,6 +22,7 @@ const feedback = ref('')
 const selectedName = computed(() => selected.value?.name ?? '')
 const categories = computed(() => [...new Set(templates.value.map((item) => item.category))])
 const showDiff = ref(false)
+const savedDrafts = computed(() => templates.value.filter((item) => item.has_draft))
 
 async function selectTemplate(name: string) {
   feedback.value = ''
@@ -59,6 +61,19 @@ async function publishDraft() {
   catch (error) { feedback.value = error instanceof Error ? error.message : '發布 Draft 失敗。' }
   finally { saving.value = false }
 }
+async function publishAllDrafts() {
+  if (saving.value || !savedDrafts.value.length) return
+  const details = savedDrafts.value.map((item) => `${item.important ? '【重要】' : ''}${item.title}：${item.impact}`).join('\n')
+  if (!window.confirm(`即將正式發布 ${savedDrafts.value.length} 份已儲存 Draft，影響全站所有玩家；各服務約 10 秒內套用。\n未儲存的編輯不會發布。\n\n${details}\n\n確認發布全部？`)) return
+  saving.value = true; feedback.value = ''
+  try {
+    const result = await publishAdminPromptTemplateDrafts()
+    await refresh()
+    feedback.value = `已發布 ${result.published_names.length} 份 Draft。全站各服務約 10 秒內套用。`
+  } catch (error) { feedback.value = error instanceof Error ? error.message : '發布全部 Draft 失敗。' }
+  finally { saving.value = false }
+}
+
 async function discardDraft() {
   if (!selected.value) return
   saving.value = true; feedback.value = ''
@@ -76,6 +91,11 @@ onMounted(load)
     <header><div><h1>Prompt Studio</h1><p>先用 Draft 測試與比較，再正式發布全站版本。發布後各服務約 10 秒內套用。</p></div><UiBadge variant="primary">Admin</UiBadge></header>
     <p v-if="loading" class="prompt-admin__hint">載入中…</p>
     <template v-else>
+      <div class="prompt-admin__actions">
+        <UiBadge :variant="savedDrafts.length ? 'warning' : 'default'">已儲存 Draft：{{ savedDrafts.length }} 份</UiBadge>
+        <UiButton variant="secondary" :disabled="saving || !savedDrafts.length" @click="publishAllDrafts">發布全部已儲存 Draft</UiButton>
+      </div>
+      <p class="prompt-admin__hint">{{ savedDrafts.length ? savedDrafts.map((item) => item.title).join('、') : '目前沒有已儲存 Draft。' }} 未儲存的編輯不會發布。</p>
       <UiSection v-if="selected" :title="selected.title" bordered>
         <div class="prompt-admin__meta"><UiBadge :variant="selected.has_draft ? 'warning' : selected.overridden ? 'primary' : 'default'">{{ selected.has_draft ? '有 Draft' : selected.overridden ? '已發布覆寫' : '內建預設' }}</UiBadge><UiBadge v-if="selected.important" variant="danger">重要 prompt</UiBadge></div>
         <p :class="selected.important ? 'prompt-admin__warning' : 'prompt-admin__hint'">{{ selected.important ? `重要 prompt，改了會影響：${selected.impact}` : selected.impact }}</p>

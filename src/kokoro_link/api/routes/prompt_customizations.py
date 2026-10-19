@@ -98,6 +98,17 @@ async def list_player_templates(
     )}
 
 
+@router.post("/publish-drafts")
+async def publish_player_template_drafts(
+    container: ServiceContainer = Depends(get_container),
+    user: OperatorProfile = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await _service(container).publish_drafts(user_id=user.id, admin=False)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 @router.get("/{name:path}")
 async def get_player_template(
     name: str, container: ServiceContainer = Depends(get_container),
@@ -148,6 +159,17 @@ async def list_admin_templates(
     return {"templates": await _service(container).list_templates(
         user_id=user.id, admin=True,
     )}
+
+
+@admin_router.post("/publish-drafts")
+async def publish_admin_template_drafts(
+    container: ServiceContainer = Depends(get_container),
+    user: OperatorProfile = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await _service(container).publish_drafts(user_id=user.id, admin=True)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 @admin_router.get("/{name:path}")

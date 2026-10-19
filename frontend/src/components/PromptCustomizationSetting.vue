@@ -7,6 +7,7 @@ import {
   getPlayerPromptTemplate,
   listPlayerPromptTemplates,
   publishPlayerPromptTemplateDraft,
+  publishPlayerPromptTemplateDrafts,
   putPlayerPromptTemplateDraft,
   type PromptTemplate,
   type PromptTemplateSummary,
@@ -20,6 +21,7 @@ const saving = ref(false)
 const feedback = ref('')
 const selectedName = computed(() => selected.value?.name ?? '')
 const showDiff = ref(false)
+const savedDrafts = computed(() => templates.value.filter((item) => item.has_draft))
 
 async function selectTemplate(name: string) {
   feedback.value = ''
@@ -69,6 +71,17 @@ async function publishDraft() {
   finally { saving.value = false }
 }
 
+async function publishAllDrafts() {
+  if (saving.value || !savedDrafts.value.length) return
+  saving.value = true; feedback.value = ''
+  try {
+    const result = await publishPlayerPromptTemplateDrafts()
+    await refresh()
+    feedback.value = `已發布 ${result.published_names.length} 份 Draft。之後的生成會使用你的新覆寫。`
+  } catch (error) { feedback.value = error instanceof Error ? error.message : '發布全部 Draft 失敗。' }
+  finally { saving.value = false }
+}
+
 async function discardDraft() {
   if (!selected.value) return
   saving.value = true; feedback.value = ''
@@ -93,6 +106,11 @@ onMounted(load)
     <p class="prompt-studio__hint">先儲存 Draft，再發布才會改變你的有效覆寫。角色資料、記憶、時間、行程與對話內容仍會在每次生成時動態注入；請保留 <code>$變數</code>。</p>
     <p v-if="loading" class="prompt-studio__hint">載入中…</p>
     <template v-else>
+      <div class="prompt-studio__actions">
+        <UiBadge :variant="savedDrafts.length ? 'warning' : 'default'">已儲存 Draft：{{ savedDrafts.length }} 份</UiBadge>
+        <UiButton variant="secondary" :disabled="saving || !savedDrafts.length" @click="publishAllDrafts">發布全部已儲存 Draft</UiButton>
+      </div>
+      <p class="prompt-studio__hint">{{ savedDrafts.length ? savedDrafts.map((item) => item.title).join('、') : '目前沒有已儲存 Draft。' }} 未儲存的編輯不會發布。</p>
       <div class="prompt-studio__tabs" role="tablist" aria-label="可自訂 prompt">
         <UiButton v-for="template in templates" :key="template.name" size="sm" :variant="template.name === selectedName ? 'primary' : 'secondary'" :active="template.name === selectedName" @click="selectTemplate(template.name)">{{ template.title }}</UiButton>
       </div>

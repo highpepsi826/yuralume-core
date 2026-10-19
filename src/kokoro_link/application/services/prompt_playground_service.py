@@ -11,7 +11,7 @@ import hashlib
 import time
 from collections import deque
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -23,7 +23,7 @@ from kokoro_link.domain.value_objects.goal_status import GoalStatus
 from kokoro_link.domain.value_objects.timezone import timezone_for_id, to_timezone
 from kokoro_link.infrastructure.memory.ranker import rank
 from kokoro_link.infrastructure.prompts.registry import prompt_template_catalog, template_default
-from kokoro_link.infrastructure.prompts.loader import request_template_overrides
+from kokoro_link.infrastructure.prompts.loader import request_template_overrides, capture_template_renders
 from kokoro_link.application.services.dialogue_window_loader import load_unified_recent_messages
 from kokoro_link.infrastructure.observability.runtime_diagnostics import diagnostic_scope
 
@@ -66,6 +66,8 @@ class PromptPlaygroundRun:
     draft_prompt_hash: str | None = None
     provider_id: str = ""
     elapsed_ms: int = 0
+    template_usage: dict = field(default_factory=dict)
+    draft_templates: list[dict] = field(default_factory=list)
 
 
 class PromptPlaygroundService:
@@ -137,29 +139,10 @@ class PromptPlaygroundService:
         async with lock:
             self._check_rate(user_id)
             started = time.monotonic()
-            snapshot = await self._snapshot(
-                character=character, user_id=user_id,
-                include_current_progress=include_current_progress,
+            snapshot, model, model_id, published_prompt, draft_prompt, template_usage, draft_templates = await self._prepare(
+                character=character, user_id=user_id, admin_drafts=admin_drafts,
+                text=text, include_current_progress=include_current_progress,
             )
-            stored_effective = await self._prompt_customization_service.effective_overrides(
-                user_id=None if admin_drafts else user_id,
-            )
-            catalog = prompt_template_catalog()
-            # Fully materialise the template base now. The process-global admin
-            # refresher must not change the second prompt while the model runs.
-            effective = {name: template_default(name) for name in catalog}
-            effective.update(stored_effective)
-            drafts = await self._prompt_customization_service.get_drafts(
-                user_id=user_id, admin=admin_drafts,
-            )
-            drafts = {name: value for name, value in drafts.items() if admin_drafts or catalog[name].player_editable}
-            model = await self._active_llm_provider.resolve(FEATURE_CHAT, character=character)
-            model_id = await self._active_llm_provider.resolve_model_id(
-                FEATURE_CHAT, character=character,
-            )
-            tolerance = content_tolerance_for_llm_provider(getattr(model, 'provider_id', ''))
-            published_prompt = self._render(snapshot, text, effective, tolerance)
-            draft_prompt = self._render(snapshot, text, {**effective, **drafts}, tolerance) if drafts else None
             published_reply = await self._generate(model, published_prompt, model_id)
             draft_reply = None
             if draft_prompt is not None:
@@ -170,11 +153,61 @@ class PromptPlaygroundService:
                 model_id=model_id,
                 prompt_hash=hashlib.sha256(published_prompt.encode("utf-8")).hexdigest()[:12],
                 snapshot_summary=snapshot.summary,
-                has_draft=bool(drafts),
+                has_draft=bool(draft_templates),
                 draft_prompt_hash=(hashlib.sha256(draft_prompt.encode('utf-8')).hexdigest()[:12] if draft_prompt is not None else None),
                 provider_id=str(getattr(model, 'provider_id', '')),
                 elapsed_ms=int((time.monotonic() - started) * 1000),
+                template_usage=template_usage, draft_templates=draft_templates,
             )
+
+    async def preview(self, *, character_id: str, user_id: str, admin: bool,
+                      include_current_progress: bool = True, draft_scope: str = "player") -> dict:
+        character = await self._load_character(character_id, user_id=user_id, admin=admin)
+        if draft_scope not in {"player", "admin"} or (draft_scope == "admin" and not admin):
+            raise PromptPlaygroundAccessError("Draft scope is not available")
+        prepared = await self._prepare(character=character, user_id=user_id,
+            admin_drafts=draft_scope == "admin", text="測試訊息", include_current_progress=include_current_progress)
+        return {"template_usage": prepared[5], "draft_templates": prepared[6]}
+
+    async def _prepare(self, *, character, user_id, admin_drafts, text, include_current_progress):
+        snapshot = await self._snapshot(
+            character=character, user_id=user_id,
+            include_current_progress=include_current_progress,
+        )
+        stored_effective = await self._prompt_customization_service.effective_overrides(
+            user_id=None if admin_drafts else user_id,
+        )
+        catalog = prompt_template_catalog()
+        # Fully materialise the template base now. The process-global admin
+        # refresher must not change the second prompt while the model runs.
+        effective = {name: template_default(name) for name in catalog}
+        effective.update(stored_effective)
+        drafts = await self._prompt_customization_service.get_drafts(
+            user_id=user_id, admin=admin_drafts,
+        )
+        drafts = {name: value for name, value in drafts.items() if admin_drafts or catalog[name].player_editable}
+        model = await self._active_llm_provider.resolve(FEATURE_CHAT, character=character)
+        model_id = await self._active_llm_provider.resolve_model_id(
+            FEATURE_CHAT, character=character,
+        )
+        tolerance = content_tolerance_for_llm_provider(getattr(model, 'provider_id', ''))
+        with capture_template_renders() as published_trace:
+            published_prompt = self._render(snapshot, text, effective, tolerance)
+        with capture_template_renders() as draft_trace:
+            draft_prompt = self._render(snapshot, text, {**effective, **drafts}, tolerance) if drafts else None
+        def usage(trace, prompt, draft_version):
+            return [
+                {"name": name, "title": catalog[name].title,
+                 "source": "draft" if draft_version and name in drafts else "effective",
+                 "content_hash": hashlib.sha256((drafts[name] if draft_version and name in drafts else effective[name]).encode()).hexdigest()[:12]}
+                for name in sorted({name for name, rendered in trace if name in catalog and rendered.strip() and rendered in (prompt or '')})
+            ]
+        template_usage = {"published": usage(published_trace, published_prompt, False), "draft": usage(draft_trace, draft_prompt, True)}
+        used_drafts = {item["name"] for item in template_usage["draft"] if item["source"] == "draft"}
+        draft_templates = [{"name": name, "title": catalog[name].title, "used": name in used_drafts,
+                            "content_hash": hashlib.sha256(content.encode()).hexdigest()[:12]}
+                           for name, content in sorted(drafts.items())]
+        return snapshot, model, model_id, published_prompt, draft_prompt, template_usage, draft_templates
 
     def _check_rate(self, user_id: str) -> None:
         now = time.monotonic()

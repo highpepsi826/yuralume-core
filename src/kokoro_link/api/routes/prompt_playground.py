@@ -38,6 +38,24 @@ async def list_prompt_playground_characters(
     return {"characters": [{"id": item.id, "name": item.name} for item in characters]}
 
 
+@router.get("/characters/{character_id}/prompt-playground/preview")
+async def preview_prompt_playground(
+    character_id: str,
+    include_current_progress: bool = True,
+    draft_scope: Literal["player", "admin"] = "player",
+    container: ServiceContainer = Depends(get_container),
+    user: OperatorProfile = Depends(get_current_user),
+) -> dict:
+    service = container.prompt_playground_service
+    if service is None:
+        raise HTTPException(503, "prompt playground is unavailable")
+    try:
+        return await service.preview(character_id=character_id, user_id=user.id, admin=user.is_admin,
+            include_current_progress=include_current_progress, draft_scope=draft_scope)
+    except PromptPlaygroundAccessError as exc:
+        raise HTTPException(404, str(exc)) from None
+
+
 @router.post("/characters/{character_id}/prompt-playground/runs")
 async def run_prompt_playground(
     character_id: str,
@@ -75,4 +93,6 @@ async def run_prompt_playground(
         "draft_prompt_hash": result.draft_prompt_hash,
         "provider_id": result.provider_id,
         "elapsed_ms": result.elapsed_ms,
+        "template_usage": result.template_usage,
+        "draft_templates": result.draft_templates,
     }

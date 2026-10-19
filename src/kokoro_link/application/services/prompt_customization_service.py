@@ -136,6 +136,30 @@ class PromptCustomizationService:
         await self.set_template(name=name, content=draft, user_id=user_id, admin=admin)
         return await self.discard_draft(name=name, user_id=user_id, admin=admin)
 
+    async def publish_drafts(self, *, user_id: str, admin: bool) -> dict:
+        """Validate the complete private collection before publishing one override map."""
+        key = ADMIN_PROMPT_DRAFT_KEY if admin else PLAYER_PROMPT_DRAFT_KEY
+        raw = await self._preferences.get(user_preference_key(user_id, key))
+        drafts = normalise_prompt_customizations(raw if raw is not None else {})
+        for name in drafts:
+            self._ensure_available(name=name, admin=admin)
+        # Validate even empty stored entries: they must not bypass scope checks.
+        if isinstance(raw, Mapping):
+            for name in raw:
+                self._ensure_available(name=name, admin=admin)
+        if drafts:
+            current = await (self.get_admin() if admin else self.get_player(user_id=user_id))
+            current.update(drafts)
+            if admin:
+                await self.set_admin(values=current)
+            else:
+                await self.set_player(user_id=user_id, values=current)
+            await set_user_preference(self._preferences, key, {}, user_id=user_id)
+        return {
+            "published_names": list(drafts),
+            "templates": await self.list_templates(user_id=user_id, admin=admin),
+        }
+
     async def set_template(
         self, *, name: str, content: object, user_id: str, admin: bool,
     ) -> dict:

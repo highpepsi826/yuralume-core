@@ -17,6 +17,7 @@ from kokoro_link.domain.entities.operator_profile import OperatorProfile
 @pytest.fixture
 def api():
     service = SimpleNamespace(
+        preview=AsyncMock(return_value={'template_usage': {'published': [], 'draft': []}, 'draft_templates': []}),
         run=AsyncMock(return_value=PromptPlaygroundRun('reply', None, 'model', 'hash', {}, False)),
         list_characters=AsyncMock(return_value=[SimpleNamespace(id='c', name='Character')]),
     )
@@ -93,3 +94,13 @@ async def test_real_container_fake_model_run_does_not_write_game_data():
     assert result.snapshot_summary['recent_message_count'] == 1
     for method in writes:
         method.assert_not_awaited()
+
+
+def test_preview_uses_identity_and_never_calls_generation(api):
+    _, client, service = api
+    response = client.get('/api/v1/characters/c/prompt-playground/preview?draft_scope=player&include_current_progress=false')
+    assert response.status_code == 200
+    service.preview.assert_awaited_once_with(character_id='c', user_id='alice', admin=False,
+        include_current_progress=False, draft_scope='player')
+    service.run.assert_not_awaited()
+    assert client.get('/api/v1/characters/c/prompt-playground/preview?draft_scope=unknown').status_code == 422

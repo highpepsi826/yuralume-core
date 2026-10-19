@@ -85,3 +85,16 @@ def test_admin_draft_routes_require_admin_and_publish_globally(studio):
     draft = client.get(path).json()["content"] + "\nGlobal draft note."
     assert client.put(path + "/draft", json={"content": draft}).json()["has_draft"]
     assert client.post(path + "/publish-draft").json()["content"] == draft.strip() + "\n"
+
+
+def test_bulk_publish_routes_are_scoped_and_admin_guarded(studio):
+    app, client = studio
+    app.dependency_overrides[get_current_user] = lambda: OperatorProfile(id='alice', display_name='Alice')
+    path = '/api/v1/prompt-templates'
+    assert client.put(path + '/chat/instructions_footer_style/draft', json={'content': 'New style'}).status_code == 200
+    response = client.post(path + '/publish-drafts')
+    assert response.status_code == 200
+    assert response.json()['published_names'] == ['chat/instructions_footer_style']
+    assert client.post('/api/v1/admin/prompt-templates/publish-drafts').status_code == 403
+    app.dependency_overrides[get_current_user] = lambda: OperatorProfile(id='root', display_name='Root', is_admin=True)
+    assert client.post('/api/v1/admin/prompt-templates/publish-drafts').status_code == 200
