@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { UiBadge, UiButton, UiTextarea } from '@/components/ui'
 import {
   deletePlayerPromptTemplateDraft,
@@ -88,6 +89,7 @@ onMounted(load)
 
 <template>
   <div class="prompt-studio">
+    <RouterLink to="/prompt-playground">開啟 Playground（提示詞測試場）</RouterLink>
     <p class="prompt-studio__hint">先儲存 Draft，再發布才會改變你的有效覆寫。角色資料、記憶、時間、行程與對話內容仍會在每次生成時動態注入；請保留 <code>$變數</code>。</p>
     <p v-if="loading" class="prompt-studio__hint">載入中…</p>
     <template v-else>
@@ -102,6 +104,7 @@ onMounted(load)
         <div class="prompt-studio__actions">
           <UiButton variant="primary" size="sm" :loading="saving" @click="saveDraft">儲存 Draft</UiButton>
           <UiButton variant="secondary" size="sm" :disabled="saving || !selected.has_draft" @click="publishDraft">發布 Draft</UiButton>
+          <UiButton variant="ghost" size="sm" :disabled="saving || !selected.has_draft" @click="draft = selected.draft_content">載入 Draft</UiButton>
           <UiButton variant="ghost" size="sm" :disabled="saving" @click="loadEffective">載入目前有效版本</UiButton>
           <UiButton variant="ghost" size="sm" :disabled="!selected.has_draft" @click="showDiff = !showDiff">{{ showDiff ? '收起差異' : '查看差異' }}</UiButton>
           <UiButton variant="ghost" size="sm" :disabled="saving || !selected.has_draft" @click="discardDraft">捨棄 Draft</UiButton>

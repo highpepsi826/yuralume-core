@@ -200,6 +200,12 @@ const router = createRouter({
       ],
     },
     {
+      path: '/prompt-playground',
+      name: 'prompt-playground',
+      component: () => import('@/pages/PromptPlaygroundPage.vue'),
+      meta: { layout: 'player' },
+    },
+    {
       path: '/fusion-story',
       redirect: { name: 'studio-fusion-stories' },
     },

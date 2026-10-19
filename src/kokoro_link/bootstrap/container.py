@@ -749,6 +749,9 @@ from kokoro_link.application.services.player_persona_note_service import (
 from kokoro_link.application.services.prompt_customization_service import (
     PromptCustomizationService,
 )
+from kokoro_link.application.services.prompt_playground_service import (
+    PromptPlaygroundService,
+)
 from kokoro_link.contracts.player_identity_card import (
     PlayerIdentityCardRepositoryPort,
 )
@@ -1445,6 +1448,7 @@ class ServiceContainer:
     player_persona_note_repository: "PlayerPersonaNoteRepositoryPort | None" = None
     player_persona_note_service: "PlayerPersonaNoteService | None" = None
     prompt_customization_service: "PromptCustomizationService | None" = None
+    prompt_playground_service: "PromptPlaygroundService | None" = None
     # 玩家身分卡 — reusable creation templates (IC series). Operator-level:
     # no character owns one, and none is carried by a character backup.
     player_identity_card_repository: "PlayerIdentityCardRepositoryPort | None" = None
@@ -6869,6 +6873,27 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         execution_lease=studio_execution_lease,
     )
 
+    prompt_playground_service = PromptPlaygroundService(
+        character_repository=character_repository,
+        conversation_repository=conversation_repository,
+        memory_repository=memory_repository,
+        goal_repository=goal_repository,
+        story_arc_repository=story_arc_repository,
+        schedule_service=schedule_service,
+        operator_profile_repository=operator_profile_repository,
+        prompt_context_builder=prompt_context_builder,
+        prompt_customization_service=prompt_customization_service,
+        active_llm_provider=active_llm_provider,
+        player_persona_note_repository=player_persona_note_repository,
+        relationship_seed_repository=relationship_seed_repository,
+        story_event_repository=story_event_repository,
+        story_scene_session_repository=story_scene_session_repository,
+        world_event_repository=world_event_repository,
+        address_preference_repository=address_preference_repository,
+        operator_persona_repository=persona_repository,
+        operator_persona_renderer=(operator_persona_service.render_for_prompt if operator_persona_service is not None else None),
+    )
+
     return ServiceContainer(
         character_service=character_service,
         chat_service=chat_service,
@@ -7047,6 +7072,7 @@ def build_container(settings: AppSettings | None = None) -> ServiceContainer:
         player_persona_note_repository=player_persona_note_repository,
         player_persona_note_service=player_persona_note_service,
         prompt_customization_service=prompt_customization_service,
+        prompt_playground_service=prompt_playground_service,
         player_identity_card_repository=player_identity_card_repository,
         player_identity_card_service=player_identity_card_service,
         persona_extraction_service=persona_extraction_service,

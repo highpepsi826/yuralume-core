@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { UiBadge, UiButton, UiSection, UiTextarea } from '@/components/ui'
 import {
   deleteAdminPromptTemplateDraft,
@@ -71,6 +72,7 @@ onMounted(load)
 
 <template>
   <div class="prompt-admin">
+    <RouterLink to="/prompt-playground?scope=admin">開啟 Playground（提示詞測試場）</RouterLink>
     <header><div><h1>Prompt Studio</h1><p>先用 Draft 測試與比較，再正式發布全站版本。發布後各服務約 10 秒內套用。</p></div><UiBadge variant="primary">Admin</UiBadge></header>
     <p v-if="loading" class="prompt-admin__hint">載入中…</p>
     <template v-else>
@@ -82,6 +84,7 @@ onMounted(load)
         <div class="prompt-admin__actions">
           <UiButton variant="primary" :loading="saving" @click="saveDraft">儲存 Draft</UiButton>
           <UiButton variant="secondary" :disabled="saving || !selected.has_draft" @click="publishDraft">正式發布 Draft</UiButton>
+          <UiButton variant="ghost" :disabled="saving || !selected.has_draft" @click="draft = selected.draft_content">載入 Draft</UiButton>
           <UiButton variant="ghost" :disabled="saving" @click="loadPublished">檢視已發布版本</UiButton>
           <UiButton variant="ghost" :disabled="!selected.has_draft" @click="showDiff = !showDiff">{{ showDiff ? '收起差異' : '查看差異' }}</UiButton>
           <UiButton variant="ghost" :disabled="saving || !selected.has_draft" @click="discardDraft">捨棄 Draft</UiButton>

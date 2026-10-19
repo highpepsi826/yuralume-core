@@ -116,6 +116,7 @@ from kokoro_link.api.routes.prompt_customizations import (
     admin_router as admin_prompt_customizations_router,
     router as prompt_customizations_router,
 )
+from kokoro_link.api.routes.prompt_playground import router as prompt_playground_router
 from kokoro_link.api.routes.player_identity_card import (
     router as player_identity_card_router,
 )
@@ -799,6 +800,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.include_router(character_cards_router, prefix="/api/v1", dependencies=_auth_dep)
     app.include_router(character_relationships_router, prefix="/api/v1", dependencies=_auth_dep)
     app.include_router(chat_router, prefix="/api/v1", dependencies=_auth_dep)
+    app.include_router(prompt_playground_router, prefix="/api/v1", dependencies=_auth_dep)
     app.include_router(chat_assist_router, prefix="/api/v1", dependencies=_auth_dep)
     # Cloud-only player surfaces (U3 credit badge). Mounted unconditionally —
     # the handlers 404 outside cloud mode, matching /auth/cloud/session — so the

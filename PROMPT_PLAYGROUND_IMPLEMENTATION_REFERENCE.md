@@ -105,9 +105,60 @@ or response bodies are not persisted by this feature.
 
 ## Progress
 
-1. Completed locally: Draft service/API implementation and focused tests.
-2. Completed locally: Prompt Studio Draft controls, including save/load/diff/discard/publish.
-3. In progress: read-only Playground backend. Existing ChatService helpers were
-   inventoried, but its normal prompt preparation can schedule memory/schedule
-   bookkeeping; Playground must instead use a dedicated read-only snapshot.
-4. Pending: Playground UI and end-to-end focused verification.
+1. Draft service/API and Prompt Studio controls deployed at `758c281`.
+2. Completed locally: dedicated Playground service, authenticated API and
+   read-only character listing. Character access bypasses `CharacterService`
+   because its read-time refresh can write rest-recovery state.
+3. Completed locally: player/admin Prompt Studio links, explicit Load Draft
+   buttons, Playground page, two-result display, clear/loading/error states.
+4. Verification: 101 backend tests passed (Playground service/routes, Drafts,
+   prompt loader and container wiring); 3 frontend API tests passed; Vue
+   typecheck and production/PWA build passed. A real in-memory container/fake
+   model test fenced character/conversation/memory/preference writes.
+5. User authorized commit, push and Coolify deployment on 2026-10-19. Release in progress; no paid model call for this slice.
+   Browser visual acceptance is not yet performed.
+
+## Implemented Snapshot and Comparison Contract
+
+- Player access uses repository ownership; administrators can select every
+  character. Role checks come from authenticated identity, never request data.
+- `draft_scope=player|admin` selects the caller's private Draft collection;
+  only administrators may request admin scope. Admin Studio links set admin
+  scope; the player Studio link uses player scope even for an admin account.
+- Selected character owner supplies operator identity, persona, declared note,
+  relationship seed and address preference. No cross-owner fallback is used
+  for a missing operator profile.
+- Optional progress reads 12 recent cross-source messages with shared mirror
+  deduplication, an 80-item memory pool ranked to 8 using the chat fallback
+  ranker, active goals, existing current/future schedules, active story arc,
+  recent story events, open scene and eligible stored world events. World
+  events are read from the repository; no RSS ingestion occurs.
+- Both prompts are fully rendered before the first model call using a copied
+  snapshot, fixed timestamp, full template defaults/effective overrides and
+  the same resolved chat model. An admin refresh or intervening game write
+  cannot change the second run's source. Drafts never become global overrides.
+- The `FEATURE_CHAT` route deliberately skips automatic auxiliary usage rows;
+  Playground does not call the main-chat usage recorder. Body-free diagnostic
+  correlation uses `source_surface=prompt_playground`.
+- Request data allows only text (2,000 characters), progress toggle and Draft
+  scope. It rejects client prompt bodies, arbitrary user IDs and attachments.
+  No Draft means one model call and `draft_reply=null`.
+
+## First-Release Limits
+
+- Context is representative rather than a replay of the full formal-chat
+  workflow. No new dialogue summary, semantic embedding, schedule, material
+  digest or auxiliary LLM context is generated. Memory selection uses the
+  formal chat's salience/recency fallback, not its embedding-based branch.
+- Disabling progress omits historical conversations, memories, goals,
+  schedules and story/world progress. Character card/current stored state,
+  declared player identity and initial relationship remain available.
+- One run per user at a time, 6 attempts/minute and 30/hour are in-process
+  limits for the current single-API deployment. They are not distributed
+  quotas and are not yet editable in admin runtime settings; multiple API
+  replicas require a shared limiter before relying on these as fleet quotas.
+- Each generation times out after 120 seconds; outputs are bounded to 1,200
+  characters plus an ellipsis. Provider failures return a generic error.
+- The model port has no fixed-seed argument. The UI states that two calls can
+  vary randomly and both can consume provider credit. Non-chat templates are
+  explicitly labelled as outside this chat-only Playground's evaluated paths.
