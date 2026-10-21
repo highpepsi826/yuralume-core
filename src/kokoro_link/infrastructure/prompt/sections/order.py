@@ -43,6 +43,7 @@ SECTION_ORDER: Final[tuple[str, ...]] = (
     "player_persona_note",
     "operator_persona",
     "peer_roster",
+    "companion_roster",
     # -- the character sheet (per-character; the longest stable run
     #    in the prompt, so nothing turn-derived may sit inside it) --
     #    ``character_profile`` must precede ``state_behavior``: that

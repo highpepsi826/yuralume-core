@@ -398,6 +398,70 @@ def _peer_roster(ctx: PromptSectionContext) -> list[str]:
     return list(ctx.identity.peer_roster_lines)
 
 
+_COMPANION_HEADER = (
+    "你生活裡的同伴（你自己的關係圈，不是玩家認識的人；"
+    "僅供內部理解，不要逐字背誦這份清單）："
+)
+
+_COMPANION_RAIL: tuple[str, ...] = (
+    "- 這些是已經在你生活裡的人或動物。對方提到他們的名字、或在對話裡談到"
+    "跟他們有關的事時，直接當成你本來就知道的事接住，不要反問「那是誰」。",
+    "- 只有在對方的問題真的超出上面寫的內容時，才依角色個性自然承認細節記不清，"
+    "不要為了顯得記性好而編造沒寫的經歷。",
+)
+
+_COMPANION_MAX_CHARS = 1200
+"""Cap for the whole block.
+
+Companions are capped at twelve per character upstream, and each one
+renders as at most a name, a role, a personality sketch and two short
+prose fields. The cap exists so a character with a full roster cannot
+crowd out the transcript; it drops whole trailing entries rather than
+truncating mid-sentence.
+"""
+
+
+def _render_companion_roster_block(character: Character) -> list[str]:
+    """Render the character's own private NPC circle into the prompt.
+
+    These are ``Character.companions`` — the lightweight NPCs configured
+    on the character sheet (a shopkeeper, a cat, a roommate). Until now
+    they reached only the schedule planner and the story-scene writers,
+    so a chat turn had no idea who 「糰子」 was and asked the player. The
+    roster is stable per character, which is why it sits in the cacheable
+    prefix next to ``peer_roster`` rather than with the turn-derived
+    blocks.
+    """
+    companions = tuple(getattr(character, "companions", ()) or ())
+    if not companions:
+        return []
+    lines: list[str] = ["", _COMPANION_HEADER, *_COMPANION_RAIL]
+    total = sum(len(line) for line in lines)
+    for companion in companions:
+        parts = [companion.name]
+        if companion.role:
+            parts.append(companion.role)
+        line = "- " + "｜".join(parts)
+        details: list[str] = []
+        if companion.brief_profile:
+            details.append(companion.brief_profile)
+        if companion.personality_sketch:
+            details.append("個性：" + "、".join(companion.personality_sketch))
+        if companion.relationship_snippet:
+            details.append("你們的關係：" + companion.relationship_snippet)
+        if details:
+            line += "：" + "；".join(details)
+        if total + len(line) > _COMPANION_MAX_CHARS:
+            break
+        lines.append(line)
+        total += len(line)
+    return lines
+
+
+def _companion_roster(ctx: PromptSectionContext) -> list[str]:
+    return _render_companion_roster_block(ctx.identity.character)
+
+
 def _character_profile(ctx: PromptSectionContext) -> list[str]:
     character = ctx.identity.character
     return [
@@ -486,6 +550,7 @@ SECTIONS: tuple[PromptSection, ...] = (
     section("player_persona_note", _player_persona_note),
     section("operator_persona", _operator_persona),
     section("peer_roster", _peer_roster),
+    section("companion_roster", _companion_roster),
     section("character_profile", _character_profile),
     section("disposition", _disposition),
     section("personality_type", _personality_type),
