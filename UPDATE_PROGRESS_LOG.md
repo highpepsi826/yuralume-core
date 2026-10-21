@@ -1647,3 +1647,171 @@ database rows.
   (overlap); frontend production/PWA build, compilation and diff checks pass.
 - User authorized commit/push/publication and four-role Coolify rollout.
   Production rollout pending; no migration is needed.
+
+## Prompt Studio production rollout verified
+
+- Pushed source commit `e3ecc19abdc09e1ecb09d0fb29f9ea312b6b9f4e`.
+  GitHub Actions `Publish container images` run `39161956226` succeeded for
+  all four images. Pulled immutable app digest
+  `sha256:c5499b1e90fca26bcc3cc54e09a8634e3db8a5a660181a49a26c531d5c693c8a`;
+  OCI revision and public version both match the source commit.
+- Backed up Coolify raw/generated compose and role image metadata inside its
+  protected storage (`prompt-studio-before-e3ecc19.json`) and host compose
+  (`docker-compose.before-prompt-studio-e3ecc19.yml`). Aligned raw/generated
+  compose and application records, then recreated exactly app/coordinator/
+  worker/connector. Coolify configuration hash synchronized after verification.
+- All six services healthy. Support container IDs, mounts and runtime settings
+  unchanged (application build metadata updated with the image). Schema remains
+  `x3l8n0p10061`; no migration run. Provider settings still decrypt.
+- Public health 200/status ok, authenticated admin identity 200, player catalog
+  200 with five style templates, admin catalog 200 with 68 entries and warnings,
+  all five style editors readable; unauthenticated admin request correctly 401.
+  Representative existing image 200. Telegram enabled/polling lease counts 1/1,
+  zero polling errors; four role recent logs had zero detected error lines.
+- No paid generation or fresh user web/Telegram conversation was triggered.
+  Existing Zeabur services were not restarted. Release accepted by operational
+  checks; browser visual acceptance and player taste tuning remain user follow-up.
+
+## Prompt Studio editing-label rollout verified
+
+- Published `e62a77e` (`local: improve prompt studio editing labels`) through GitHub Actions run `39200050839`; four app roles use immutable digest `sha256:1c4b43e891b335daf0cfebfc6a94d9d6bef308e454d0940746fb8cc6fec2e346`.
+- Admin editor is before the template chooser. Templates/categories display technical path followed by Chinese explanation in parentheses. Production version reports build commit `e62a77e`.
+- Raw/generated Coolify Compose and application records were aligned and config hash synchronized. Host/Coolify backups use `e62a77e` suffixes. All six services healthy; PostgreSQL/storage IDs, mounts and settings unchanged. Health/auth/catalog/media/provider/schema and Telegram ownership checks passed; no migration or paid generation occurred.
+
+## Prompt template Draft rollout verified (2026-10-19)
+
+- Published `758c28191c22270f049ee6de5ba64ba59d17304f` (`local: add prompt template drafts`) through GitHub Actions run `39207302917`, which completed successfully at 06:07 UTC.
+- Updated Coolify Compose so exactly `app`, `coordinator`, `worker`, and `connector` use immutable app digest `sha256:ace89a8d719585bf044b53ba1869d183466707f0b8922a903e3d304307254437`. PostgreSQL and storage retain their existing immutable images and persistent configuration.
+- Coolify required a stack-wide redeploy to apply the saved Compose. User explicitly authorized it; all six services subsequently reported Running (healthy). Public health returned `status=ok`, and `/api/v1/system/version` reported the expected full source commit `758c28191c22270f049ee6de5ba64ba59d17304f`. No migration or production data operation occurred.
+
+## Prompt Playground implementation (2026-10-19, local only)
+
+- Added private Draft/effective chat comparison, read-only character listing,
+  player/admin Prompt Studio links, and an in-memory result page. Selected
+  character context is copied once and both prompts render before generation.
+  No formal chat, post-turn, scheduler, memory writes, tools, media or connector
+  paths are invoked. No Draft produces one call and a null Draft result.
+- Verification: 101 backend tests and 3 frontend API tests passed; frontend
+  typecheck/production/PWA build passed. Includes real in-memory-container
+  fake-model calls with game/preference writes fenced. No paid model calls,
+  database migration, production connections, commit, push or deployment.
+- Details and first-release limits (fallback memory ranking, process-local
+  limits and pending browser visual acceptance) are recorded in
+  `PROMPT_PLAYGROUND_IMPLEMENTATION_REFERENCE.md`.
+
+## 2026-10-19 — Prompt Playground publication
+
+- User authorized commit, push and Coolify deployment. Scoped commit
+  `45601abf7208d94b82dbcbbb4fd2d07b06daf3c5` pushed to `local/customizations`.
+- GitHub Actions publication run `39215660557` is in progress. Production
+  remains on prior digest `sha256:ace89a8d719585bf044b53ba1869d183466707f0b8922a903e3d304307254437`.
+- Validation: 101 backend tests, 3 frontend API tests and production/PWA build
+  passed. No schema migration or paid generation test. Other dirty work excluded.
+
+### Prompt Playground deployed — 2026-10-19
+
+- Commit `45601abf7208d94b82dbcbbb4fd2d07b06daf3c5`; GitHub Actions
+  `39215660557` succeeded for all four image jobs.
+- Updated exactly four app image references to immutable index digest
+  `sha256:053543ef6b6b91d82f4788bc637ae9665df936e9f0ee3d91e63dc7c66131915b`.
+  Exact replacement verified; PostgreSQL/storage images, volumes and role
+  configuration preserved. Coolify stack Restart applied the saved configuration.
+- All six resources healthy; configuration-not-applied indicator cleared.
+  Public health status ok/db overlay, root HTTP 200, version commit matches
+  `45601abf7208d94b82dbcbbb4fd2d07b06daf3c5`. Brief HTTP 503 during restart resolved.
+  Playground character API unauthenticated HTTP 401; login page renders.
+- No schema migration or paid model call. Browser lacked Yuralume login session;
+  authenticated Playground visual acceptance, representative media and Telegram
+  ownership checks remain unverified for this release. Coolify session remained
+  authenticated. Screenshot: temp/playground-deployed-45601ab.jpg.
+
+### Usability follow-up local verification — 2026-10-19
+
+- Added player sidebar/admin navigation entries, scoped Draft preview/list,
+  actual run template titles/source hashes and unused Draft labels. Trace is
+  task-local and only includes nonempty rendered output retained in final text;
+  it does not claim model attention. Non-template dynamic context is separate.
+- Studio shows saved Draft count/list and publishes own collection in one
+  validated merged effective map write. Admin confirmation lists impacts.
+  Effective-map write and Draft cleanup use existing separate preference writes;
+  this is not a database transaction across the two keys. No schema migration.
+- Verification: 109 backend tests, 5 frontend API tests; Vue typecheck and
+  production/PWA build passed. git diff --check passed. No paid calls.
+- Browser visual acceptance not performed for this follow-up. Local changes
+  only; no new commit, push or production deployment. Preserve unrelated edits.
+
+### Prompt Playground visibility release deployed — 2026-10-19
+
+- Commit `c9b3c155fe01c50b501bdee2981858b7db70831a`; GitHub Actions
+  `39249105928` succeeded. Immutable application index digest:
+  `sha256:1e6e60dc4e13c5cc89cb69de609a74d90565ddd1bacf1c9b4e15f9351cd8956d`.
+- Replaced exactly four application role image references; PostgreSQL and
+  storage images, volumes, secrets and configuration were preserved. Coolify
+  restart completed with all six resources healthy.
+- Public health returned `status=ok` with DB overlay; root returned HTTP 200;
+  version endpoint reports commit `c9b3c155fe01c50b501bdee2981858b7db70831a`.
+  Unauthenticated Playground endpoint returns HTTP 401. No migration or paid
+  model call was run. Authenticated UI, representative media and Telegram
+  ownership were not re-tested for this release.
+
+### DH3 dialogue checkpoint enabled — 2026-10-21 (by Claude)
+
+- Enabled `KOKORO_DIALOGUE_CHECKPOINT_ENABLED=true` with
+  `WINDOW_MESSAGES=30`, `PROMPT_BUDGET_TOKENS=2400`,
+  `BACKLOG_TRIGGER_TOKENS=400` on the `app`, `coordinator`, `worker` and
+  `connector` roles, in both the on-disk compose and Coolify's stored copies.
+- No source commit, no image change, no migration (the `dialogue_checkpoints`
+  table already existed; Alembic remained at `x3l8n0p10061`), and no data write.
+  PostgreSQL and storage images, volumes, secrets and mounts were untouched.
+- Pre-change backup retained at
+  `/data/coolify/services/lg4wotyohbnhgs5y2mlhwb5z/dh3-enable-backup-20261021.json`.
+- Verified: all four roles carry the four variables, all six services healthy,
+  public health returns `status=ok`. The feature only starts writing checkpoint
+  rows after enough turns accumulate, so no behavioural confirmation yet.
+
+### Chat transcript time anchors deployed — 2026-10-22 (by Claude)
+
+- Commit `a4951f01b0857ddb6ce9a7c5627c7fba871a1ed1`; GitHub Actions
+  `39643700531` succeeded. Immutable application index digest:
+  `sha256:7187e024a43e294d9926fa55b64a695632ab8354bd7775a1040d29123323e2a2`.
+- Replaced exactly the four application role image references; PostgreSQL and
+  storage images, container IDs, volumes and mounts were preserved (verified).
+  All six services healthy.
+- Public health returned `status=ok`; build reports commit `a4951f0`; admin
+  `/api/v1/auth/me` 200; 24 provider secrets decrypted; schema unchanged at
+  `x3l8n0p10061`; Telegram still shows one enabled account with one active
+  lease and no errors; representative media readable (1.9 MB). No migration.
+- Previous release backups were renamed to `*.previous` (copies kept as
+  `*.keep-c9b3c15`) so this release could write its own.
+
+### Private NPC companions in chat prompt deployed — 2026-10-22 (by Claude)
+
+- Commit `5372ae9365ece1b4c1990c6ce9502e0f0f683daf`; GitHub Actions
+  `39648264446` succeeded. Immutable application index digest:
+  `sha256:22c623fddb7b705e088eb984f474add8b8eaf0ae0a84f5bb0572f12b8edd5224`.
+- New `companion_roster` prompt section renders `Character.companions` (name,
+  role, brief profile, personality sketch, relationship snippet) between
+  `peer_roster` and `character_profile`. Capped at 1200 characters, dropping
+  whole trailing entries. Empty roster renders nothing.
+- Replaced exactly the four application role image references; PostgreSQL and
+  storage images, container IDs, volumes and mounts preserved. All six
+  services healthy.
+- Verified: build reports commit `5372ae9`, health `status=ok`, admin auth 200,
+  24 provider secrets decrypted, schema still `x3l8n0p10061`, Telegram one
+  enabled account / one active lease / no errors, representative media 1.9 MB.
+  No migration and no data change.
+- 5 new unit tests in `tests/unit/test_companion_roster_prompt.py`.
+
+### I-09 session wrap-up — 2026-10-22 (by Claude)
+
+- Session closed with two releases deployed (commits `a4951f0`, `5372ae9`)
+  and one production configuration change (DH3 checkpoint enabled on
+  2026-10-21). All three are live and verified on the hosted deployment.
+- Remaining I-09 work is recorded in `IDEAS_BACKLOG.md` under I-09 progress
+  (2026-10-22) and is not started: player name/gender injection, proactive
+  message time anchoring, and session boundaries (I-15, deliberately parked).
+- `dialogue_checkpoints` is still empty, which is expected until enough turns
+  accumulate; the chain is unverified end to end until then.
+- NPC roster: `_MAX_COMPANIONS` is 12 and the character Jc already holds 12,
+  so the 糰子 companion entry cannot be added until the user prunes the list.
+  No production data was written.

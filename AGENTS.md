@@ -124,6 +124,11 @@ and `OVHCLOUD_DEPLOYMENT_STATUS.md` before a production operation.
 
 ## Persistent Change References
 
+- When a new plan discussed with the user (a change or a new idea) is about to
+  be executed, first create a dedicated design Markdown file for that plan.
+  Present it to the user and wait for explicit confirmation before executing;
+  then implement according to that design file. Record any later design change
+  in the file and confirm it with the user before acting on it.
 - Before starting a non-trivial implementation that spans multiple files,
   services, persistence surfaces, migrations, user-visible behavior, or a
   deployment boundary, create or update a scoped Markdown implementation
@@ -142,11 +147,23 @@ and `OVHCLOUD_DEPLOYMENT_STATUS.md` before a production operation.
   COMMITMENT_RECONCILIATION_IMPLEMENTATION_REFERENCE.md. Read it before
   changing that behavior, and do not replace it with a large
   context-dependent patch.
-- For the current repair's execution state, read `待修.md` and
-  `.codex-round.md` after checking `git status` and the latest commit. Update
+- For every task, read `.codex-round.md` (and `待修.md` when it applies)
+  after checking `git status` and the latest commit. Update
   `.codex-round.md` after each verified small step with the exact next action,
   test result, changed files, and any blocker. Do not restart completed
   inventory after context compaction.
+- Claude Code also works in this repository; see `CLAUDE.md` for the shared
+  Claude/Codex conventions. Mark new entries in `.codex-round.md` and
+  `UPDATE_PROGRESS_LOG.md` with `(by Codex)` or `(by Claude)`.
+
+## Ideas Backlog
+
+- `IDEAS_BACKLOG.md` tracks the user's brainstormed feature ideas (IDs
+  `I-xx`) and their status. It is a backlog, not an approval: an idea still
+  needs its own design file and explicit user approval before implementation.
+- When starting, designing, or finishing work for a backlog idea, update its
+  status, `Ref` link, and the Change Log there, marked `(by Claude)` or
+  `(by Codex)`.
 
 ## Safety Checks
 
@@ -163,3 +180,80 @@ and `OVHCLOUD_DEPLOYMENT_STATUS.md` before a production operation.
 
 - The diagnostic download UI should support time ranges (default: recent 1 hour), incident-type presets, and advanced checkboxes for detailed data. Keep full prompts, chat bodies, and credentials opt-in; show estimated size and sensitivity.
 - A debug integration may let Codex sign in to and authorize the Yuralume diagnostic page, then fetch a bounded bundle through a protected, read-only diagnostic export API. Scope authorization to admin, short-lived tokens, and explicit export scopes. Fall back to manual download or shared workspace when the connector/session is unavailable.
+
+## Read-only Production Investigation Access
+
+Both Claude and Codex may inspect the hosted deployment to diagnose production
+bugs. This is read-only investigation, not a deployment path.
+
+### What is allowed
+
+- SSH to the OVH host with the existing deploy key at
+  `C:\Users\high_\Documents\ChatGPT\ai_livelife\.deploy-ssh\ovh_deploy_ed25519`
+  (host `ubuntu@54.39.231.18`, `known_hosts` in the same directory).
+- Read-only inspection: `docker ps`, `docker logs`, `docker inspect`,
+  `docker compose config`, and read-only SQL against PostgreSQL.
+- `GET /api/v1/admin/observability/diagnostic-export` with a short-lived admin
+  token (see `src/kokoro_link/api/routes/observability.py`).
+- Read-only Coolify API calls using a token stored **only** in
+  `C:\Users\high_\Documents\ChatGPT\ai_livelife\.deploy-ssh\coolify-api.env`
+  (a local file outside the repository).
+
+### What is not allowed
+
+- No writes to the production database, storage volumes, schedules, deferred
+  intents, character records, or chat history.
+- No `docker exec` into a running container to edit files.
+- No production restart, redeploy, migration, or image change as part of
+  investigation.
+- Never print, commit, or paste secrets (SSH key material, Coolify token,
+  provider credentials, `.env.container` contents) into chat or logs.
+
+### Diagnostics are opt-in
+
+Diagnostic export never includes prompts or message bodies unless
+`include_prompt` / `include_messages` are explicitly enabled. Enable them only
+for the specific window being investigated, and treat the resulting bundle as
+sensitive. Do not write chat content into `UPDATE_PROGRESS_LOG.md` or any
+committed reference file; record only file paths, timings, and conclusions.
+
+### Permission configuration is per-machine
+
+- Shared policy lives here in `AGENTS.md` so both assistants follow it.
+- The actual tool allow-rules live in `.claude/settings.local.json`, which is
+  gitignored (`.gitignore`), and in Codex's own local configuration. Do not
+  commit either.
+- Credentials live only in `.deploy-ssh/`, outside the repository.
+
+### When Auto Mode Blocks a Step
+
+The user runs Claude Code in **auto mode** by default because
+`default` mode's per-command prompts are too disruptive. Some read-only
+investigation steps (SSH, `docker exec`, provider API calls) are
+nonetheless rejected by auto mode's classifier, and an `allow` rule in
+`settings.local.json` does **not** override that rejection.
+
+Handle it in one of two ways, chosen by whether the blocked step is
+optional or essential:
+
+1. **Optional step** — finish the whole task with what is reachable,
+   then report at the end which steps were skipped and offer to re-run
+   them in `default` mode if the user wants them.
+2. **Essential step** — stop, persist a checkpoint, and hand the mode
+   switch to the user:
+   - Write the exact commands still needed, what each one is for, and
+     why it cannot be replaced, into `.codex-round.md` under a heading
+     marked `(by Claude)` or `(by Codex)`.
+   - Tell the user plainly: switch to `default`, approve this list,
+     switch back to auto.
+   - Do not mark the task done, and do not guess at the missing data.
+
+Do not fall back to an unreviewed workaround, and do not silently widen
+the scope of a permitted command to accomplish a blocked one.
+
+
+Follow the existing rule: fetch a labelled encrypted snapshot, restore it into
+an isolated local stack, disable Telegram and other external connectors there,
+and reproduce locally. Never write a local development database back to
+production.
+
