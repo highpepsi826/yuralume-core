@@ -89,7 +89,10 @@ def test_history_inserts_gap_marker_between_distant_turns() -> None:
 
     prompt = _build(recent, now=now)
 
-    idx_b = prompt.index("角色：B")
+    # Lines older than the anchor threshold carry their own relative-time
+    # anchor, so the role label is no longer adjacent to the colon. ``C``
+    # is only five minutes old and stays unanchored by design.
+    idx_b = prompt.index("角色（約 2 天前）：B")
     idx_c = prompt.index("使用者：C")
     seam = prompt[idx_b:idx_c]
     assert "中間隔了" in seam

@@ -43,19 +43,72 @@ from kokoro_link.infrastructure.prompt.sections.vision import (
 from kokoro_link.infrastructure.prompt.timing_utils import (
     format_elapsed_ago_label,
     format_gap_duration_label,
+    format_relative_past_label,
 )
 from kokoro_link.infrastructure.prompts import get_default_loader
 
 _ROLE_LABELS: dict[str, str] = {"user": "使用者", "assistant": "角色"}
 
+_HISTORY_LINE_TIME_ANCHOR_MINUTES = 30.0
+"""Age past which one transcript line carries its own relative-time anchor.
 
-def _format_history_line(message: Message, marker_numbers: list[int]) -> str:
+The flat transcript is the reason a yesterday evening reads as this
+morning: without a per-line clock the model has nothing to place
+"我先去睡了" against, and it treats whatever sits directly above the
+new message as a live exchange. The six-hour gap separator only helps
+across long absences; a four-hour one left every line undated.
+
+Thirty minutes is the threshold rather than zero because a live back-
+and-forth would otherwise get 「（約 3 分鐘前）」 on every line — noise
+that teaches the model to ignore the anchors exactly where they matter.
+Past half an hour the line is no longer "the current exchange" and the
+anchor earns its tokens. The formatter is the same coarse one the
+long-term memory lines use (:func:`format_relative_past_label`), so a
+memory and a transcript line that describe the same moment agree.
+"""
+
+
+def _format_history_line(
+    message: Message,
+    marker_numbers: list[int],
+    *,
+    now: datetime | None = None,
+) -> str:
     """Render one ``role：text`` line, prefixing any ``[圖 N]`` markers
     that belong to this turn so the model can tell which of the
-    images it received goes with which historical message."""
+    images it received goes with which historical message.
+
+    A line older than :data:`_HISTORY_LINE_TIME_ANCHOR_MINUTES` also
+    carries a coarse relative-time anchor between the role label and the
+    colon. Unset ``now`` (replay / legacy callers) renders exactly the
+    old shape, so nothing that has no clock invents one.
+    """
     role_label = _ROLE_LABELS.get(message.role.value, message.role.value)
     prefix = _format_marker_prefix(marker_numbers)
-    return f"{role_label}：{prefix}{message.content}"
+    anchor = _format_history_time_anchor(message, now)
+    return f"{role_label}{anchor}：{prefix}{message.content}"
+
+
+def _format_history_time_anchor(
+    message: Message, now: datetime | None,
+) -> str:
+    """``（約 2 天前）`` for an old line, ``""`` for a recent or undated one.
+
+    Future timestamps (clock skew, replay fixtures) fall through to the
+    empty string rather than rendering a negative age — the same rule
+    :func:`memory_time_tag` applies.
+    """
+    if now is None:
+        return ""
+    created = _message_created_at(message)
+    if created is None:
+        return ""
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    elapsed_min = (now - created).total_seconds() / 60.0
+    if elapsed_min < _HISTORY_LINE_TIME_ANCHOR_MINUTES:
+        return ""
+    return f"（{format_relative_past_label(elapsed_min)}）"
 
 
 _HISTORY_GAP_MARKER_THRESHOLD_MINUTES = 6 * 60.0
@@ -110,7 +163,11 @@ def _render_history_lines(
             gap = (current_at - previous_at).total_seconds() / 60.0
             if gap >= gap_threshold_minutes:
                 lines.append(_format_history_gap_marker(gap, trailing=False))
-        lines.append(_format_history_line(message, markers.get(idx, [])))
+        lines.append(
+            _format_history_line(
+                message, markers.get(idx, []), now=now,
+            ),
+        )
         if current_at is not None:
             previous_at = current_at
     if now is not None and previous_at is not None:
