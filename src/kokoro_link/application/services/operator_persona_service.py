@@ -75,7 +75,7 @@ _LAYER_INJECT_THRESHOLD: dict[int, float] = {
 
 # Layer 1: rendered in a single compact line — "對方叫 X，N 歲，職業…"
 _LAYER1_RENDER_ORDER: tuple[str, ...] = (
-    "name", "nickname", "age", "occupation",
+    "name", "nickname", "gender", "age", "occupation",
     "company_or_school", "residence", "family",
 )
 
@@ -482,6 +482,8 @@ def _format_layer1_clause(key: str, value: str) -> str:
         return f"叫 {value}"
     if key == "nickname":
         return f"小名 {value}"
+    if key == "gender":
+        return f"性別：{value}"
     if key == "age":
         return f"{value} 歲"
     if key == "occupation":

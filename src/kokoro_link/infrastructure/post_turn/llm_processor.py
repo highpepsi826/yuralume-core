@@ -199,6 +199,7 @@ class LLMPostTurnProcessor(PostTurnProcessorPort):
             raw,
             character_id=character.id,
             conversation_id=conversation_id,
+            user_message=user_message,
             known_activity_ids=known_ids,
             activity_key_ids=activity_keys,
             known_beat_ids=known_beat_ids,
@@ -575,6 +576,7 @@ def _parse_response(
     *,
     character_id: str,
     conversation_id: str,
+    user_message: str | None = None,
     known_activity_ids: set[str] | None = None,
     activity_key_ids: dict[str, set[str]] | None = None,
     known_beat_ids: set[str] | None = None,
@@ -617,7 +619,9 @@ def _parse_response(
         known_peer_name_to_id=peer_names,
     )
     emotion_events = _parse_emotion_events(obj.get("emotion_events"))
-    address_changes = _parse_address_changes(obj.get("address_changes"))
+    address_changes = _parse_address_changes(
+        obj.get("address_changes"), user_message=user_message,
+    )
     disclosed_memory_ids = _parse_disclosed_memory_ids(
         obj.get("disclosed_memory_ids"),
         known_ids=known_disclosure_ids or set(),
@@ -750,13 +754,18 @@ more than one direction of address; >2 is the model over-emitting."""
 _VALID_ADDRESS_DIRECTIONS = frozenset({"player", "character"})
 
 
-def _parse_address_changes(raw: Any) -> list:
+def _parse_address_changes(raw: Any, *, user_message: str | None = None) -> list:
     """Parse the LLM's ``address_changes`` array into the contract DTO.
 
     Each entry is a typed directional rename (「叫我森森」 → direction
     ``player``; 「我以後叫你小美」 → direction ``character``). Malformed
     entries drop silently, mirroring the other parsers. ``new_value`` is
-    required and trimmed to the seed name length budget."""
+    required and trimmed to the seed name length budget.
+
+    Evidence guard: when ``user_message`` is supplied (``None`` skips the
+    guard), an entry must carry a non-empty ``source_text`` that is a
+    verbatim substring of the player's message — an unquotable rename is
+    not a rename. Mirrors the persona extractor's quote guard."""
     from kokoro_link.contracts.post_turn import AddressChangeSignal
 
     if not isinstance(raw, list):
@@ -783,6 +792,16 @@ def _parse_address_changes(raw: Any) -> list:
         # here.
         if direction == "player" and subject != "operator_self":
             continue
+        source_text = _coerce_adj_text(
+            entry.get("source_text"), limit=200,
+        ) or ""
+        # Evidence guard: the rename must be quotable from the player's own
+        # message. Empty or non-verbatim ``source_text`` means the model
+        # inferred the rename rather than read it.
+        if user_message is not None and (
+            not source_text or source_text not in user_message
+        ):
+            continue
         out.append(
             AddressChangeSignal(
                 direction=direction,
@@ -791,9 +810,7 @@ def _parse_address_changes(raw: Any) -> list:
                 old_value=_coerce_adj_text(
                     entry.get("old_value") or entry.get("old"), limit=80,
                 ) or "",
-                source_text=_coerce_adj_text(
-                    entry.get("source_text"), limit=200,
-                ) or "",
+                source_text=source_text,
             ),
         )
     return out

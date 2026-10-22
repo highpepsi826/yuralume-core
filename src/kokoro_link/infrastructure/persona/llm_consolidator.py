@@ -70,7 +70,7 @@ _VALID_LAYERS: frozenset[int] = frozenset({1, 2, 3, 5})
 _LAYER_FIELD_KEYS: dict[int, frozenset[str]] = {
     1: frozenset({
         "name", "nickname", "age", "occupation",
-        "company_or_school", "residence", "family",
+        "company_or_school", "residence", "family", "gender",
     }),
     2: frozenset({
         "interests", "diet", "routine", "consumption_style",

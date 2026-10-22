@@ -52,6 +52,7 @@ const FIELD_LABEL_KEY: Record<string, string> = {
   // Layer 1
   name: 'operatorPersona.fields.name',
   nickname: 'operatorPersona.fields.nickname',
+  gender: 'operatorPersona.fields.gender',
   age: 'operatorPersona.fields.age',
   occupation: 'operatorPersona.fields.occupation',
   company_or_school: 'operatorPersona.fields.companyOrSchool',

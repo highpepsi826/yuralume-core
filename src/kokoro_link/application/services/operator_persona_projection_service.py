@@ -43,6 +43,7 @@ _MAX_NARRATIVE_CHARS = 800
 _LAYER1_SAFE_LABELS: dict[str, str] = {
     "name": "名字",
     "nickname": "稱呼",
+    "gender": "性別",
     "age": "年齡",
     "occupation": "工作",
     "company_or_school": "公司 / 學校",

@@ -71,7 +71,7 @@ _EXTRACTABLE_LAYERS: frozenset[int] = frozenset({1, 2, 3, 5})
 _LAYER_FIELD_KEYS: dict[int, tuple[str, ...]] = {
     1: (
         "name", "nickname", "age", "occupation",
-        "company_or_school", "residence", "family",
+        "company_or_school", "residence", "family", "gender",
     ),
     2: (
         "interests", "diet", "routine", "consumption_style",
@@ -98,6 +98,14 @@ _LAYER_FIELD_KEY_SET: frozenset[tuple[int, str]] = frozenset(
 # is the worst contamination. They require an explicit operator_self
 # attribution (see ``_parse_candidate``).
 _IDENTITY_FIELD_KEYS: frozenset[str] = frozenset({"name", "nickname"})
+
+# Layer-1 fields that state a fact about the operator themself (not a name
+# for them). They need the same explicit ``operator_self`` attribution as
+# the identity-naming fields, so 「我朋友是女的」 never sets the operator's
+# gender. Kept separate from ``_IDENTITY_FIELD_KEYS`` because that set means
+# "fields that NAME the operator" and is reused for address resolution
+# (relationship_coherence_service, address_resolver).
+_SELF_FACT_FIELD_KEYS: frozenset[str] = frozenset({"gender"})
 
 # Subject labels that are NOT a confident self-attribution. A candidate
 # explicitly carrying one of these is never banked as the operator's own
@@ -345,7 +353,13 @@ def _parse_candidate(
     #   - Other descriptive fields only reject an explicit third-party
     #     attribution, so a missing ``subject`` doesn't silently stop the
     #     extractor from learning ordinary facts (occupation, interests…).
-    if layer in {3, 5} or (layer == 1 and field_key in _IDENTITY_FIELD_KEYS):
+    if layer in {3, 5} or (
+        layer == 1
+        and (
+            field_key in _IDENTITY_FIELD_KEYS
+            or field_key in _SELF_FACT_FIELD_KEYS
+        )
+    ):
         if subject != "operator_self":
             return None
     elif subject in _NON_SELF_SUBJECTS:

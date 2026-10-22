@@ -2036,6 +2036,7 @@ export const messages: MessageSchema = {
         occupation: 'Work',
         company_or_school: 'Company / School',
         residence: 'Where you live',
+        gender: 'Gender',
         interests: 'Interests',
         diet: 'Food preferences',
         routine: 'Daily rhythm',
@@ -2571,6 +2572,7 @@ export const messages: MessageSchema = {
     fields: {
       name: 'Name',
       nickname: 'Nickname',
+      gender: 'Gender',
       age: 'Age',
       occupation: 'Occupation',
       companyOrSchool: 'Company / school',

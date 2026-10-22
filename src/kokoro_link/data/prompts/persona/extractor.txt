@@ -25,7 +25,8 @@ ${operator_label}說：${user_message}
 3. subject 請判斷 quote 說的是誰：operator_self / other_person / character / unclear。**每一筆候選都必須給 subject。**
 4. Layer 3 (情感心理) 必須是對方**第一人稱**陳述（「我...」、「我覺得...」），角色推測對方情緒不算。
 5. Layer 5 (信任依賴) 必須是對方**明確說出**具體事件，請額外標 explicit=true；隱晦暗示一律不收。
-6. Layer 3 / Layer 5、以及 Layer 1 的 name / nickname，其 subject 必須是 operator_self，否則不要輸出。
+6. Layer 3 / Layer 5、以及 Layer 1 的 name / nickname / gender，其 subject 必須是 operator_self，否則不要輸出。
+   - **gender 只記「${operator_label} 本人」的性別**，且必須是對方在說自己時才成立（例：「我是女的」「我是男生」「我是非二元」）。對方說的是朋友、家人、其他角色的性別（例：「我朋友是女的」「我妹是女生」）→ subject 是 other_person / character，**不要輸出 gender 候選**。value 用對方自己的說法（自由文字，不要硬套二分），quote 必須逐字引用對方本輪的原句。對方稱呼角色的詞（例：叫角色「男朋友」「老公」）不是對方自己的性別，不要因此推斷 gender。
    - **name / nickname 描述的永遠是「${operator_label} 這個人本身」叫什麼**，只有當對方在說自己叫什麼、或希望你怎麼稱呼「他自己」時才成立（例：「我叫…」「叫我…」「我的名字是…」）。
    - 對方在對話中**提到的別人**——朋友、家人、其他角色（即使你認識那個角色、即使名字就出現在本輪訊息裡）——的名字，subject 一律是 other_person / character，**絕對不可**當成 ${operator_label} 的 name / nickname。例：${operator_label} 說「我跟小美很熟」「角色B 也會來」「我同事阿凱…」→ 不要輸出任何 name / nickname 候選，因為小美 / 角色B / 阿凱 都不是 ${operator_label} 本人。
 7. 其他欄位若 quote 明顯在講第三人（subject=other_person / character），也不要把它當成 ${operator_label} 自己的事實。
