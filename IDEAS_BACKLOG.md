@@ -39,7 +39,7 @@ Rationale" below. This is a working suggestion, not an approval.
 
 | ID | Idea | Area | Status | Priority | Ref | Updated |
 |---|---|---|---|---|---|---|
-| I-09 | Improve character context memory in Telegram chats | Telegram / Memory | idea | 1 | - | 2026-10-21 |
+| I-09 | Improve character context memory in Telegram chats | Telegram / Memory | done (core) | 1 | `GENDER_AND_ADDRESS_SEPARATION_IMPLEMENTATION_REFERENCE.md`, `PLAYER_IDENTITY_AND_SETTINGS_PLACEMENT_REFERENCE.md` | 2026-10-24 |
 | I-07 | Primary/secondary API rotation: fail over to another API on error, optional per feature | Providers | idea | 2 | - | 2026-10-21 |
 | I-02 | TTS integration | Voice | idea | 3 | - | 2026-10-21 |
 | I-03 | Voice messages in Telegram and web chat | Voice / Telegram / Web | idea | 4 | - | 2026-10-21 |
@@ -48,13 +48,14 @@ Rationale" below. This is a working suggestion, not an approval.
 | I-13 | Strengthen character worldbuilding | Character / World | idea | 7 | - | 2026-10-21 |
 | I-05 | Character can proactively talk during co-presence (同場); player must receive a notification | Co-presence / Notifications | idea | 8 | - | 2026-10-21 |
 | I-06 | Co-presence chat usable on mobile | Co-presence / Mobile | idea | 8 | - | 2026-10-21 |
-| I-10 | Connect local models besides Strata (e.g. SD/ComfyUI, local LLM) | Providers / Local | idea | 9 | - | 2026-10-21 |
+| I-10 | Connect local models besides Strata (e.g. SD/ComfyUI, local LLM); assist setup for language/voice/video and analyse where local models fit | Providers / Local | idea | 9 | - | 2026-10-24 |
 | I-14 | Otome-game style interface game mode | Game UI | idea | 10 | - | 2026-10-21 |
 | I-15 | Session/scene boundaries inside one continuous chat thread (場次) | Memory / Telegram | discussing | 1 | - | 2026-10-21 |
 | I-01 | Real-time voice conversation | Voice | idea | 11 | - | 2026-10-21 |
 | I-04 | Play games / read books / browse web pages together with a character in real time (gaming/reading companion) | Companion | idea | 12 | - | 2026-10-21 |
 | I-11 | Real-time generated picture-book stories | Media / Story | idea | 13 | - | 2026-10-21 |
-
+| I-16 | Improve image-generation prompt rules (wrong body features, extra objects) | Media / Prompt | idea | - | - | 2026-10-23 |
+| I-18 | Investigate why chat lacks date/time awareness (weekday, upcoming holidays) | Chat / Prompt | idea | - | - | 2026-10-24 |
 ## Priority Rationale
 
 - **1 I-09 memory**: current pain, likely a logic/context-assembly bug rather
@@ -181,14 +182,63 @@ Group notes:
   - 兩次發佈均驗證：六個服務 healthy、health `status=ok`、schema 未變、
     Telegram 單一 lease 無錯誤、代表性媒體可讀、四個 role log 零錯誤。
 - **仍未處理**（下次繼續）：
-  1. **玩家稱呼／性別錯亂** — 完全未動。機制為 `OperatorPersona` 自動推斷，
-     信心值 < 0.7 的欄位不進 prompt；`player_persona_note` 需玩家手填。
-     需先看實際 prompt（diagnostic export 的 `include_prompt`，或本地假資料重現）
-     才能判斷是「機制寫錯」還是「資料不足」。
+  1. **玩家稱呼／性別錯亂** — 2026-10-23 已處理主因，見下方 2026-10-23 進度。
   2. **proactive 訊息辨識** — 時間錨已改善感知，但 `_render_recent_proactive_block`
      仍是反重複框架而非「你剛才問過」，且只取最近 3 條 SENT。
      可考慮加上與逐字稿一致的時間錨。
   3. **場次分界（I-15）** — 用戶決定先不做。
+
+#### 進度（2026-10-23）
+
+- **重大發現：Telegram 上玩家的人設被靜默關閉（8 月起至今）**
+  - `persona_safe_for_account`（`persona_disclosure_gate.py:29-40`）只在
+    `len(allowed_sender_refs) == 1` 時回 True。**空的 allowlist 對收訊是「接受任何人」，
+    但在這裡被當成不安全**，於是 Telegram 每一輪都以 `operator_persona_enabled=False`
+    送進 chat service（`messaging_dispatcher.py:244`）。
+  - 後果（全部無錯誤、無日誌）：`_load_player_persona_note` 回空字串、
+    `OperatorPersona` 整段不載入、地址解析不做。玩家的 279 字人設從未進過
+    Telegram prompt。
+  - 證據：10/19 三份 prompt 對 `157cm`、`杜桃桃`、`IT consultant`、`土生土長`、
+    `演出授權`、`對方資料`、`代名詞` 全部 0 命中；只剩 seed 的「稱呼：桃桃」。
+  - 人設功能本身 2026-08-23（`ce5bc09`）就上線，用戶已寫了約兩個月。
+  - **這是預設設定缺陷**：只補性別欄位（下方 b 項）不會有幫助，因為整份人設被壓掉。
+- **已定位並修復的另外三個成因**（用 diagnostic bundle `3fd36fce…`）：
+  1. persona layer 1 的欄位字典**根本沒有 gender**，所以講幾次都學不到。
+  2. `identity.py` 的「優先使用對方剛剛用的版本」讓模型把句尾的「男朋友」
+     讀成玩家自稱，原樣回敬。
+  3. 玩家的糾正「我是女的！是女朋友！」被 post-turn 解析成
+     `address_changes` 的改名，寫進 seed 與改名記錄（「稱呼：女朋友」）。
+- **已部署**（commit `e9339a7`，digest `sha256:7575f048…1769`，四個 app role）：
+  - `gender` 成為可學習的 layer-1 欄位，要求 `operator_self` 歸屬
+    （「我朋友是女的」不會誤記），同步鏡射到 consolidator 的第二份白名單，
+    並渲染進 prompt 與玩家畫像投影；面板與三份 locale 加標籤。
+  - 改名要求逐字引文：`source_text` 空白或不在玩家訊息中即丟棄。
+  - prompt 新增規則 (f)：陳述／糾正身分屬於身分事實，不算改名。
+  - **注意**：以上對 Telegram 的效果取決於 allowlist 修好沒有；allowlist 為空時
+    學到的 gender 一樣進不了 prompt。
+- **設計與已知限制**：`GENDER_AND_ADDRESS_SEPARATION_IMPLEMENTATION_REFERENCE.md`。
+  採 B-lite：逐字引文無法擋住「引用真話但誤判意圖」的情況，靠學到的性別
+  事實修正；若日後再發生，才考慮加窄範圍判斷器。
+- **待辦（新 session）**：
+  - **(0)** ✅ 已完成 2026-10-24：唯讀 SQL 確認 allowlist 為空；提出「讀取被擋、寫入
+    未擋」的不對稱才是 10/19 改名真正成因（既非 (A) allowlist 曾填過，也非
+    (B) 網頁那一輪）。使用者補上 `allowed_sender_refs=["7434175332"]`，
+    `persona_safe_for_account` 恢復 True。
+  - **(a)** ✅ 已完成（`32090f1`）：`PromptCustomizationSetting` 移到群組最後。
+  - **(b)** ✅ 已完成（`32090f1`）：代名詞輸入寫入 `OperatorProfile.pronouns`。
+  - **(c)** ⏸ 使用者決定延後：先看 (b) 上線後是否還需要全域
+    `player_persona_note`。目前仍為 `(character_id, operator_id)`。
+  - **(d2)** ✅ 已完成（`32090f1`）：`_apply_observed_address_changes` 接上
+    `persona_enabled`，讀寫採用同一條規則。
+  - **(d1)** ✅ 已完成（`32090f1` + `968a1bd`）：allowlist 單一 sender 提示與
+    警告，且折疊卡片上就看得見。
+
+#### I-09 結案（2026-10-24）
+
+- 使用者實測確認：Telegram 上角色未經提示即知道偏好（熱檸檬茶），證明人設
+  已進入 prompt，核心症狀解除。
+- 剩餘非阻擋項已移至下方「I-09 遺留」。
+
 - **觀察項**：`dialogue_checkpoints` 仍為 0 行，屬預期（未達觸發量）。
   若一兩週後仍為 0，需查鏈路是否真的接通。
 - **NPC 上限**：`_MAX_COMPANIONS = 12`，Jc 已有 12 位（含墨墨）已滿。
@@ -199,6 +249,11 @@ Group notes:
 - 用戶想法：研究哪些本地模型適合跑來支援 Yuralume（SD/ComfyUI、local LLM 等）。
 - 已有：Cloudflare domain routing、OVH 上自己的 domain。
 - 限制：本地電腦不一定長開 → 需要與 I-07 的 fallback 配合（本地離線時自動轉線上）。
+- 補充（2026-10-24，原 I-17 併入）：輔助設定和接駁本地模型（語言 / 聲音 / 影片），
+  並分析本地模型可以用在 Yuralume 的什麼地方。
+  - 待分析：哪些功能（聊天、記憶整理、出圖、TTS/語音、影片預覽等）適合改用本地模型；
+    本機硬件能跑什麼；接駁方式（OpenAI 相容 API、ComfyUI 等）。
+  - 相關：I-02/I-03（聲音）。
 
 ### I-11 即時繪本故事
 
@@ -278,6 +333,20 @@ Group notes:
   profile；或取消 `has_prompt_material` 的硬性跳過，改為列出名字 + 關係標籤。
 - **取消名冊 6 人上限**（或提高），配合 `_ROSTER_MAX_CHARS` 控制 token。
 
+### I-16 改善出圖 prompt 規則
+
+- 目標：改善現在出圖用的 prompt 規則。
+- 原因：目前生成的圖有時會畫錯角色身體特徵，或出現多餘的東西。
+- 待分析：現有出圖 prompt 的組成方式、角色外觀資料來源、negative prompt 的使用情況。
+
+### I-18 對話缺乏日期時間感
+
+- 目標：查清楚聊天中角色為什麼沒有日期時間感。
+- 原因：雖然已設定玩家時區，每日行程也會按當地假日/公眾假期/節日生成，但聊天中
+  角色好像連今天星期幾、明天是不是假期都不知道。
+- 待分析：聊天 prompt 是否注入當地日期/星期/時間；行程生成用的假期資料是否有傳入
+  聊天 context；相關：I-15 現象 1（逐字稿沒有時間錨）。
+
 ## Change Log
 
 - 2026-10-21 Created backlog with I-01 to I-14. (by Claude)
@@ -285,3 +354,38 @@ Group notes:
 - 2026-10-21 Ranked I-01 to I-14 by priority; added I-15 (session boundaries)
   and recorded I-09 progress, the DH3 enable, and three located symptoms.
   (by Claude)
+- 2026-10-23 I-09: main cause located from the 10/19 diagnostic bundle and
+  fixed/deployed (`e9339a7`): learned `gender` layer-1 field, verbatim-evidence
+  guard on address changes, prompt rule (f). Status set to in progress. Two
+  follow-ups recorded for a new session: Playground placement in 設定 and the
+  missing gender/pronoun input. (by Claude)
+- 2026-10-23 I-09 part 2: found the larger cause — an EMPTY Telegram sender
+  allowlist makes `persona_safe_for_account` false, so the whole player persona
+  block (declared note + learned facts + address resolution) has been silently
+  suppressed on Telegram since the feature shipped 2026-08-23. Fix order
+  recorded: resolve the allowlist gate first, then (a) Playground placement,
+  (b) gender/pronoun input, (c) persona-note scope. (by Claude)
+- 2026-10-23 Added I-16 (improve image-generation prompt rules: wrong body
+  features, extra objects). (by Claude)
+- 2026-10-24 Added I-17 (assist local model setup/connection for language,
+  voice, video; analyse where local models fit). (by Claude)
+- 2026-10-24 Merged I-17 into I-10; I-17 removed. (by Claude)
+- 2026-10-24 Added I-18 (investigate missing date/time and holiday
+  awareness in chat). I-17 is retired (merged into I-10). (by Claude)
+
+### I-09 遺留（非阻擋，未排程）
+
+1. **(c) 全域 `player_persona_note`** — 使用者決定延後。目前每個角色一份
+   （`(character_id, operator_id)`，上限 500 字），已有一個「玩家身分卡」可
+   快照複製，所以重打的成本比想像中低。若日後仍覺麻煩再開設計。
+2. **proactive 訊息辨識** — `_render_recent_proactive_block` 仍是反重複框架，
+   不是「你剛才問過」，且只取最近 3 條 SENT。時間錨已改善感知，但語意仍未
+   對齊逐字稿。這是本來的第 2 項，與人設修復無關。
+3. **`dialogue_checkpoints` 觀察** — 2026-10-23 唯讀查詢已見 1 行（先前為 0），
+   確認鏈路接通，觀察即可。
+4. **B-lite 殘留風險** — 逐字引文守衛擋不住「引用真話但誤判意圖」。目前靠
+   學到的性別事實修正；若再發生才考慮加窄範圍判斷器。
+5. **`PromptCustomizationSetting` 硬編碼中文字串** — 全檔零 `t()`，不跟隨語系。
+   與 I-09 無關但同次發現，需獨立設計檔。
+6. **`persona_safe_for_account` 不 trim 空白** — `["  "]` 會被當成一個 sender。
+   玩家 UI 產不出這種值（`splitLines` 會 trim），但其他呼叫端可能可以。
