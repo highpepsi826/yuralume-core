@@ -1903,3 +1903,32 @@ database rows.
   bottom of the preferences group.
 - Pending, not blocking: whether the 10/19 「女朋友」 seed should be corrected;
   that remains a separate approved data write.
+
+### Collapsed-card allowlist warning deployed — 2026-10-24 (by Claude)
+
+- Commit `968a1bd`; Actions `39995034252` succeeded; immutable application
+  digest `sha256:55c1cf231e9da9f4ac25f6341cd101fce9c83580747122a4a3f4298e018b01b6`
+  (tag `sha-968a1bd`).
+- Why: the previous release put the allowlist persona warning only inside
+  `account-detail`, which is gated by `v-if="expandedAccountId === account.id"`.
+  A collapsed card therefore showed only 「啟用」 plus 「最近一次成功連線：N 秒前」 —
+  the exact pair that made a 2026-08 migration which dropped the allowlist look
+  configured. The owner's persona was silently withheld for two months because
+  of it. Both warnings now also render between the summary row and the
+  connection status, in a compact variant; the full explanation stays in the
+  expanded block. Presentation only — no write path, gate, or account change.
+- Coolify: the four application roles were repointed by the user to the digest
+  above. `postgresql` (`pgvector@sha256:2358fcba`) and `storage`
+  (`storage-local@sha256:e92cd8b2`) images, volumes, secrets and environments
+  were preserved. No migration.
+- Verified: all six services Running (healthy) on the expected images;
+  `/health` returns `status=ok`; `/api/v1/system/version` reports commit
+  `968a1bd…` with `metadata_source=environment+image`; app/worker/connector logs
+  show no traceback in the deploy window.
+- Checks before release: `channelAllowlistSurface` + `allowlistWarning` 16
+  passed; `vue-tsc -b` clean; full frontend suite 2139 passed with the one
+  pre-existing load-sensitive `tests/uiImage.test.ts` timeout; `check:i18n`
+  unchanged on three pre-existing ja-JP leaves.
+- Production state after this: the Telegram allowlist is `["7434175332"]`, so
+  `persona_safe_for_account` now returns True and the persona, the persona note
+  and the resolved address should reach Telegram turns again.
