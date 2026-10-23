@@ -42,12 +42,20 @@ const displayNameLocked = ref(false)
 const displayNameAliases = ref<string[]>([])
 const displayNameSaving = ref(false)
 const displayNameFeedback = ref<string | null>(null)
+// 代名詞與顯示名稱共用同一份 operator profile：一個 GET 同時餵兩個欄位，
+// 才不會出現「名稱存好了、代名詞還停在舊值」的分歧。
+const pronounDraft = ref('')
+const pronounSaving = ref(false)
+const pronounFeedback = ref<string | null>(null)
 const profileLoading = ref(false)
 
 function applyOperatorProfile(profile: OperatorProfile) {
   operatorProfile.value = profile
   if (!displayNameSaving.value) {
     displayNameDraft.value = profile.has_real_name ? profile.display_name : ''
+  }
+  if (!pronounSaving.value) {
+    pronounDraft.value = profile.pronouns ?? ''
   }
   displayNameLocked.value = profile.display_name_locked
   displayNameAliases.value = profile.aliases ?? []
@@ -95,6 +103,31 @@ async function saveDisplayName() {
       : t('playerSidebar.displayName.saveFailed')
   } finally {
     displayNameSaving.value = false
+  }
+}
+
+async function savePronouns() {
+  if (!currentUser.value) return
+  pronounSaving.value = true
+  pronounFeedback.value = null
+  try {
+    // 清空送空字串：entity 的 __post_init__ 會把它 trim 成 None，
+    // 存回資料庫是 NULL，不是一個空字串。送 null 反而會被當成
+    // 「不要動這個欄位」，代名詞就刪不掉。
+    const profile = await updateOperatorProfile({
+      pronouns: pronounDraft.value.trim(),
+    })
+    applyOperatorProfile(profile)
+    window.dispatchEvent(new CustomEvent('kokoro:operator-profile-updated', {
+      detail: profile,
+    }))
+    pronounFeedback.value = t('playerSidebar.pronouns.saved')
+  } catch (err) {
+    pronounFeedback.value = err instanceof Error
+      ? t('common.errorWithDetail', { message: t('playerSidebar.pronouns.saveFailed'), detail: err.message })
+      : t('playerSidebar.pronouns.saveFailed')
+  } finally {
+    pronounSaving.value = false
   }
 }
 
@@ -209,6 +242,47 @@ defineExpose({ flashWebNotification, flashAdminEntry })
         {{ displayNameFeedback }}
       </p>
     </div>
+    <!-- 代名詞（b）：寫入既有的 OperatorProfile.pronouns，聊天提示裡的
+         「對方身份」區塊會直接引用，角色不用從名字猜他／她。刻意不做
+         跨角色設定——代名詞是全站通用的帳號層級事實。 -->
+    <div class="pronoun-field">
+      <label class="field-label" for="operator-pronouns">
+        {{ t('playerSidebar.pronouns.label') }}
+      </label>
+      <input
+        id="operator-pronouns"
+        v-model="pronounDraft"
+        type="text"
+        class="field-input"
+        maxlength="64"
+        :placeholder="t('playerSidebar.pronouns.placeholder')"
+        :disabled="pronounSaving || profileLoading"
+        @keyup.enter="savePronouns"
+      />
+      <div class="display-name-actions">
+        <UiButton
+          size="sm"
+          :loading="pronounSaving"
+          :disabled="profileLoading || pronounSaving"
+          @click="savePronouns"
+        >
+          {{ pronounSaving ? t('playerSidebar.pronouns.saving') : t('playerSidebar.pronouns.save') }}
+        </UiButton>
+      </div>
+      <p class="display-name-hint">{{ t('playerSidebar.pronouns.hint') }}</p>
+      <!-- 提示看的是「已存的」名稱（has_real_name），不是正在編輯的草稿：
+           決定提示區塊渲不渲染的是後端已存的值，草稿還沒存就不算數。
+           profile 還沒載回來時不下判斷，否則每次開啟設定都會先閃一次警告。 -->
+      <p
+        v-if="operatorProfile && !operatorProfile.has_real_name"
+        class="display-name-hint"
+      >
+        {{ t('playerSidebar.pronouns.needsDisplayNameHint') }}
+      </p>
+      <p v-if="pronounFeedback" class="display-name-feedback">
+        {{ pronounFeedback }}
+      </p>
+    </div>
     <!-- 我的所在地／時區／語言。cloud 走玩家版（城市搜尋＋受控修改），
          self-host 分支與 G2 之前逐字相同（唯讀時區＋手填座標）。 -->
     <PlayerPlaceLocaleSettings
@@ -244,9 +318,6 @@ defineExpose({ flashWebNotification, flashAdminEntry })
   <section class="settings-group">
     <h3 class="settings-group__title">{{ t('playerSidebar.settings.personalPreferencesTitle') }}</h3>
     <section class="voice-pregen-section">
-      <PromptCustomizationSetting />
-    </section>
-    <section class="voice-pregen-section">
       <ChatAssistSetting />
     </section>
     <!--
@@ -275,6 +346,13 @@ defineExpose({ flashWebNotification, flashAdminEntry })
          mode, and an empty wrapper would still draw its divider — the
          self-host preferences group must stay byte-identical (plan AP4). -->
     <QuotaOverageSettings class="overage-section" />
+    <!-- 提示詞工作室（PromptCustomizationSetting）是一個整頁式的編輯介面，
+         不是一格偏好開關。放在群組最前面會讓玩家一打開個人設定就先撞到
+         一份提示詞編輯器，所以挪到整個群組的最後：偏好先出現，工作室
+         仍然在同一個群組裡、一樣可以到達。 -->
+    <section class="voice-pregen-section">
+      <PromptCustomizationSetting />
+    </section>
   </section>
 
   <RouterLink
@@ -318,7 +396,8 @@ defineExpose({ flashWebNotification, flashAdminEntry })
 /* .identity-section__row / __hint live in PlayerPlaceLocaleSettings.vue
    alongside the markup that uses them. */
 
-.display-name-field {
+.display-name-field,
+.pronoun-field {
   display: flex;
   flex-direction: column;
   gap: 6px;

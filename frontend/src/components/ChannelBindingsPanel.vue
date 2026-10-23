@@ -29,6 +29,7 @@ import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useLocale } from '@/composables/useLocale'
 import { usePlayerCopy } from '@/composables/usePlayerCopy'
 import { formatRelativeTime } from '@/i18n/formatters'
+import { allowlistWarning } from '@/utils/allowlistWarning'
 import ChannelSetupGuide from './ChannelSetupGuide.vue'
 import ChannelAccountNextStep from './ChannelAccountNextStep.vue'
 import ChannelProactiveAttemptLog from './ChannelProactiveAttemptLog.vue'
@@ -431,6 +432,18 @@ function allowlistPlaceholder(account: MessagingAccount): string {
   return t('channelBindingsPanel.allowlist.linePlaceholder')
 }
 
+/**
+ * 人設揭露的守門條件是「剛好一個 sender」。後端
+ * `persona_safe_for_account` 只在清單長度為 1 時放行；空清單雖然對外代表
+ * 「誰都能講話」，但同一組帳號的人設會整段被抑制，而且沒有任何錯誤訊息。
+ * 判斷本身放在 `@/utils/allowlistWarning`（與後端同一條規則、可單獨測試），
+ * 這裡只做可見的警告：不改後端判斷、也不回頭改既有帳號——空清單仍然送得
+ * 出去，只是玩家不會再在不知情的情況下失去人設。
+ */
+function allowlistWarningFor(account: MessagingAccount) {
+  return allowlistWarning(account.allowed_sender_refs)
+}
+
 function bindingPlaceholder(account: MessagingAccount): string {
   if (account.platform === 'telegram') {
     return t('channelBindingsPanel.bindings.telegramPlaceholder')
@@ -790,6 +803,23 @@ function readError(err: unknown, fallback: string): string {
                 <p class="detail-hint">
                   {{ t('channelBindingsPanel.allowlist.hint') }}
                 </p>
+                <p class="detail-hint">
+                  {{ t('channelBindingsPanel.allowlist.singleSenderHint') }}
+                </p>
+                <!-- 後果明說：空清單不會擋你，但角色的人物設定（人設、
+                     玩家自述、解析後的稱呼）在這條通道上會整段不出現。 -->
+                <div
+                  v-if="allowlistWarningFor(account) === 'empty'"
+                  class="channels-warning"
+                >
+                  {{ t('channelBindingsPanel.allowlist.emptyWarning') }}
+                </div>
+                <div
+                  v-else-if="allowlistWarningFor(account) === 'multiple'"
+                  class="channels-warning"
+                >
+                  {{ t('channelBindingsPanel.allowlist.multipleWarning') }}
+                </div>
               </div>
 
               <div class="detail-section">
@@ -972,6 +1002,11 @@ function readError(err: unknown, fallback: string): string {
           rows="3"
           :placeholder="t('channelBindingsPanel.create.allowlistPlaceholder')"
         />
+        <!-- 新建時就把規則講清楚：這不只是「鎖不鎖門」，而是角色的人設
+             在這條通道上出不出的來。存檔後的可見警告在帳號卡片裡。 -->
+        <p class="detail-hint">
+          {{ t('channelBindingsPanel.allowlist.singleSenderHint') }}
+        </p>
 
         <div v-if="createError" class="channels-error">{{ createError }}</div>
 
@@ -1028,6 +1063,18 @@ function readError(err: unknown, fallback: string): string {
   padding: 6px 8px;
   border-radius: 4px;
   font-size: 12px;
+}
+
+/* 警告不是錯誤：這組設定存得下去，只是後果不如玩家預期。所以用琥珀色，
+   不要跟 `.channels-error` 的紅色混在一起。 */
+.channels-warning {
+  background: rgba(240, 168, 104, 0.12);
+  border: 1px solid rgba(240, 168, 104, 0.5);
+  color: var(--color-primary-light, #f0a868);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 /* 共用欄位樣式在 global style.css */

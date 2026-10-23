@@ -1255,6 +1255,16 @@ export const messages: MessageSchema = {
       aliasesLabel: 'Also known as:',
       aliasesEmpty: '(No aliases yet) When you rename, the old name becomes an alias so older memories still point to the same person.',
     },
+    pronouns: {
+      label: 'My pronouns',
+      placeholder: 'e.g. she/her, he/him, or they/them',
+      hint: 'Characters see these pronouns in the chat prompt instead of guessing from your name. Leave it blank to specify nothing and let the character infer from what you say.',
+      save: 'Save pronouns',
+      saving: 'Saving…',
+      saved: 'Pronouns updated',
+      saveFailed: 'Could not save pronouns',
+      needsDisplayNameHint: 'Pronouns are only included in the prompt together with a saved name. Save a name above first.',
+    },
     relationshipSeed: {
       title: 'Relationship settings',
       sectionHint: 'Everything you filled in at creation — relationship, address names, schedule involvement, and proactive-message permission — can be adjusted again here.',
@@ -4016,6 +4026,9 @@ export const messages: MessageSchema = {
       discordPlaceholder: 'e.g. 123456789012345678 (your Discord user id)',
       whatsappPlaceholder: 'e.g. 12025550123{\'@\'}s.whatsapp.net (your WhatsApp JID)',
       hint: 'Changes are saved automatically when the field loses focus. An empty list means no restriction. After testing, add your own id to block strangers who add the bot by mistake.',
+      singleSenderHint: 'Keep exactly one sender here. Your character’s persona, the self-description in your persona note, and the resolved address name only reach a channel when it maps to exactly one person.',
+      emptyWarning: 'Currently blank: this channel accepts anyone, but the character then cannot confirm you are the one talking, so the persona, your declared self-description and the resolved address name are left out of this channel entirely. Add your own sender_ref to restore them.',
+      multipleWarning: 'Several senders are listed: the channel is treated as a group or shared account, so the persona, your declared self-description and the resolved address name are left out of this channel entirely. Keep only your own sender_ref to restore them.',
     },
     bindings: {
       title: 'Chat bindings for this account',

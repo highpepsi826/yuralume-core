@@ -242,6 +242,39 @@ async def test_service_round_trips_update():
 
 
 @pytest.mark.asyncio
+async def test_pronoun_can_be_set_then_cleared_through_the_update_path():
+    """Test case 2 of the player-identity design, entity half.
+
+    The settings field sends ``pronouns=""`` when the player clears it and
+    ``None`` never means "clear" (``OperatorProfile.update`` reads ``None``
+    as "leave alone"). So the empty string has to land as ``None`` in the
+    entity, or clearing is a silent no-op that looks saved.
+    """
+    repo = InMemoryOperatorProfileRepository()
+    service = OperatorProfileService(repository=repo)
+    await service.update_for_user("op1", display_name="桃桃")
+
+    saved = await service.update_for_user("op1", pronouns="她")
+    assert saved.pronouns == "她"
+
+    cleared = await service.update_for_user("op1", pronouns="")
+    assert cleared.pronouns is None
+    assert cleared.display_name == "桃桃"
+
+    # And a later unrelated update does not resurrect it.
+    assert (await service.update_for_user("op1", display_name="桃桃")).pronouns is None
+
+
+@pytest.mark.asyncio
+async def test_pronoun_whitespace_only_is_stored_as_none():
+    repo = InMemoryOperatorProfileRepository()
+    service = OperatorProfileService(repository=repo)
+    await service.update_for_user("op1", display_name="桃桃")
+    saved = await service.update_for_user("op1", pronouns="   ")
+    assert saved.pronouns is None
+
+
+@pytest.mark.asyncio
 async def test_service_update_preserves_other_fields():
     repo = InMemoryOperatorProfileRepository()
     service = OperatorProfileService(repository=repo)

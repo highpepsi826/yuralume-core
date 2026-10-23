@@ -1254,6 +1254,16 @@ export const messages = {
       aliasesLabel: '別稱：',
       aliasesEmpty: '（尚無別稱）改名後舊名會自動成為別稱，讓舊回憶仍指向同一個人。',
     },
+    pronouns: {
+      label: '我的代名詞',
+      placeholder: '例：她／他／他們，或 she/her',
+      hint: '角色會在對話提示裡看到這組代名詞，不用從名字去猜；留空則不指定，角色改依對話內容自行判斷。',
+      save: '儲存代名詞',
+      saving: '儲存中…',
+      saved: '代名詞已更新',
+      saveFailed: '儲存代名詞失敗',
+      needsDisplayNameHint: '提示詞裡要同時有「稱呼名稱」才會帶上代名詞；請先在上面存一個名稱。',
+    },
     relationshipSeed: {
       title: '關係與相處設定',
       sectionHint: '建立角色時填的關係、稱呼、行程參與程度與主動訊息授權，都能在這裡重新調整。',
@@ -4015,6 +4025,9 @@ export const messages = {
       discordPlaceholder: '例：123456789012345678（你的 Discord user id）',
       whatsappPlaceholder: '例：12025550123{\'@\'}s.whatsapp.net（你的 WhatsApp JID）',
       hint: '修改後離開輸入框即自動儲存。空列表代表不限制；測通之後建議把你自己的 id 填進去，擋掉誤加 bot 的陌生人。',
+      singleSenderHint: '這裡請只留一個 sender。角色的人設、你在人設裡的自述，以及解析後的稱呼，只會在一條通道剛好對應一個人的時候出現。',
+      emptyWarning: '目前留空：這條通道接受任何人，但角色也因此無法確認對話的人就是你，人設、玩家自述與稱呼在這條通道上都不會出現。填上你自己的 sender_ref 就會恢復。',
+      multipleWarning: '目前填了多個 sender：群組或共用帳號會被視為無法確認身分，人設、玩家自述與稱呼在這條通道上都不會出現。只留你自己的 sender_ref 就會恢復。',
     },
     bindings: {
       title: '此帳號的 chat 綁定',

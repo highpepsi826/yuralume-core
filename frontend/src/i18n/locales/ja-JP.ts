@@ -1253,6 +1253,16 @@ export const messages: MessageSchema = {
       aliasesLabel: '別名：',
       aliasesEmpty: '（別名はまだありません）改名すると古い名前が別名になり、過去の記憶も同じ人物を指し続けます。',
     },
+    pronouns: {
+      label: 'あなたの代名詞',
+      placeholder: '例：彼女／彼、she/her',
+      hint: 'この代名詞はチャットのプロンプトでキャラクターに伝わり、名前から性別を推測させません。空欄なら指定なしとして、会話の内容から判断します。',
+      save: '代名詞を保存',
+      saving: '保存中…',
+      saved: '代名詞を更新しました',
+      saveFailed: '代名詞を保存できませんでした',
+      needsDisplayNameHint: 'プロンプトに代名詞が入るのは、保存済みの呼び名があるときだけです。先に上の名前を保存してください。',
+    },
     relationshipSeed: {
       title: '関係設定',
       sectionHint: 'キャラクター作成時に入力した関係・呼び名・生活への関わり方・能動メッセージの許可は、ここで改めて調整できます。',
@@ -4086,6 +4096,9 @@ export const messages: MessageSchema = {
       discordPlaceholder: '例：123456789012345678（あなたのDiscord user id）',
       whatsappPlaceholder: '例：12025550123{\'@\'}s.whatsapp.net（あなたのWhatsApp JID）',
       hint: 'このチャンネルで受け付ける外部ユーザーを制限します。',
+      singleSenderHint: 'ここには sender を 1 つだけ残してください。キャラクターのペルソナ、ペルソナメモの自己紹介、解決済みの呼び名は、チャンネルがちょうど 1 人に対応するときだけ届きます。',
+      emptyWarning: '現在は空欄です。誰でも話せますが、話しているのがあなた本人だと確認できないため、ペルソナ・自己紹介・解決済みの呼び名はこのチャンネルでは一切使われません。ご自身の sender_ref を入力すると元に戻ります。',
+      multipleWarning: 'sender が複数あります。グループ／共用アカウントとみなされ、ペルソナ・自己紹介・解決済みの呼び名はこのチャンネルでは一切使われません。ご自身の sender_ref だけを残すと元に戻ります。',
     },
     bindings: {
       title: 'このアカウントのchatバインド',

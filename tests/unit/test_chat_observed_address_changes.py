@@ -29,12 +29,14 @@ def _service(names) -> ChatService:
 
 
 def _run(svc, *, changes, operator=SimpleNamespace(id="op1"),
-         character=SimpleNamespace(id="c1", name="周景澄")):
+         character=SimpleNamespace(id="c1", name="周景澄"),
+         persona_enabled: bool = True):
     return asyncio.run(
         svc._apply_observed_address_changes(
             character=character,
             operator=operator,
             changes=changes,
+            persona_enabled=persona_enabled,
         )
     )
 
@@ -140,3 +142,41 @@ def test_character_direction_equal_to_character_name_still_applies() -> None:
         "source": "observed",
         "character_address_name": "周景澄",
     }]
+
+
+def test_persona_suppressed_turn_writes_no_address_change() -> None:
+    """The 2026-10-19 asymmetry: reads were gated, writes were not.
+
+    A turn that ran with ``persona_enabled=False`` had the operator persona,
+    the player persona note and the resolved address withheld from its
+    prompt. It must not then commit a durable rename — that is how a blind
+    Telegram turn wrote 「女朋友」 and never corrected it.
+    """
+    names = _FakeNamesService()
+    _run(
+        _service(names),
+        changes=[AddressChangeSignal(direction="player", new_value="女朋友")],
+        persona_enabled=False,
+    )
+    assert names.calls == []
+
+
+def test_persona_suppressed_gate_covers_both_directions() -> None:
+    # Gating only the player direction would still let a persona-less turn
+    # rename how the operator addresses the character.
+    names = _FakeNamesService()
+    _run(_service(names), changes=[
+        AddressChangeSignal(direction="player", new_value="森森"),
+        AddressChangeSignal(direction="character", new_value="小雪"),
+    ], persona_enabled=False)
+    assert names.calls == []
+
+
+def test_persona_enabled_default_keeps_the_existing_behaviour() -> None:
+    # The flag defaults to True so every pre-existing caller keeps writing;
+    # the gate only fires when a caller explicitly says the turn was blind.
+    names = _FakeNamesService()
+    _run(_service(names), changes=[
+        AddressChangeSignal(direction="player", new_value="森森"),
+    ])
+    assert [call["user_address_name"] for call in names.calls] == ["森森"]

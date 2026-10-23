@@ -7794,6 +7794,7 @@ class ChatService:
                 character=character,
                 operator=operator,
                 changes=result.address_changes,
+                persona_enabled=persona_enabled,
             )
 
         # KB8 — the character told the player about these, so they stop
@@ -7974,6 +7975,7 @@ class ChatService:
         character: Character,
         operator: OperatorProfile | None,
         changes: list,
+        persona_enabled: bool = True,
     ) -> None:
         """Route post-turn-observed address changes (「叫我森森」) through
         the address-change governance (seed update + per-direction rename
@@ -7985,8 +7987,21 @@ class ChatService:
         operator addresses the character (``character_address_name``). The
         rename log is stamped ``observed`` so it is distinguishable from a
         settings-UI edit. Fail-soft and no-op when the service or operator
-        is missing."""
-        if self._relationship_names_service is None or operator is None:
+        is missing.
+
+        Gated on ``persona_enabled`` — the same flag that suppresses the
+        operator persona, the player persona note and the resolved address
+        in this turn's *prompt*. An address rename is persona-derived
+        state, so a turn that deliberately ran without knowing who the
+        speaker is must not commit one: the 2026-10-19 mis-address wrote
+        「女朋友」 from a persona-less Telegram turn because the reads were
+        gated here and the writes were not. Reads and writes now take the
+        same answer."""
+        if (
+            not persona_enabled
+            or self._relationship_names_service is None
+            or operator is None
+        ):
             return
         character_name = getattr(character, "name", "") or ""
         character_name_key = character_name.strip().casefold()
