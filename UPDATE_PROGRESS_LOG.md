@@ -1815,3 +1815,91 @@ database rows.
 - NPC roster: `_MAX_COMPANIONS` is 12 and the character Jc already holds 12,
   so the 糰子 companion entry cannot be added until the user prunes the list.
   No production data was written.
+
+### Node 22.23.4 security base image — 2026-10-22 (by Claude)
+
+- Trigger: Node.js 2026-10-21 security release (incl. CVE-2026-111497).
+  PHP CVE-2026-109618/109619 not applicable (no PHP in the stack).
+- Commit `f966a6d`: `docker/app/Dockerfile` (frontend build stage only) and
+  `docker/whatsapp-sidecar/Dockerfile` pinned to
+  `node:22.23.4-bookworm-slim@sha256:de170b39…f38d`.
+- Actions `Publish container images` #58 succeeded; app image
+  `ghcr.io/highpepsi826/yuralume-core/app@sha256:410ac03f…2169`.
+- Coolify: app/coordinator/worker/connector set to that digest by the user
+  and applied with "Pull latest and restart"; postgresql/storage digests
+  unchanged. No migration.
+- Verified: all six services Running (healthy); `/health` returns `status=ok`.
+  Admin login and media read left to the user's manual check.
+
+### Player gender learned / address evidence guard deployed — 2026-10-23 (by Claude)
+
+- Commit `e9339a760d9fea47064cbf7965dea9c907e7dde3`; Actions
+  `Publish container images` run `39815526105` succeeded. Immutable application
+  digest `sha256:7575f0484d0b48ae4127f075b3dd5aa997312bc3faa26cbd32c33a3f3b451769`
+  (tag `sha-e9339a7`).
+- Root cause from bundle `3fd36fce…` (window 2026-10-19 23:00–23:30 HKT): the
+  chat prompt carried no operator-gender fact and persona layer 1 had no gender
+  key, so a character could only infer gender from context; the same turn's
+  correction was stored as a rename to 「女朋友」. Full analysis and the B-lite
+  decision are in `GENDER_AND_ADDRESS_SEPARATION_IMPLEMENTATION_REFERENCE.md`.
+- Source: `gender` added as a learned layer-1 field requiring `operator_self`
+  attribution (separate `_SELF_FACT_FIELD_KEYS`, `_IDENTITY_FIELD_KEYS`
+  untouched); mirrored into the consolidator's independent whitelist; rendered
+  in the prompt and the player-facing projection; label added to the persona
+  panel and three locale bundles. Address changes now drop entries whose
+  `source_text` is empty or not a verbatim substring of the player's message.
+  No migration; no data write.
+- Design/local review only; `/code-review` was not run, per the updated
+  `CLAUDE.md`. Targeted suites passed (134); the full unit run's single failure
+  (`test_fx1_hardening::test_the_tool_path_crashed_on_this_before_the_migration_too`)
+  was confirmed pre-existing on a clean HEAD worktree.
+- Coolify: the four application roles were set to the digest above and
+  redeployed by the user; postgresql/storage unchanged. Verified: `/health`
+  returns `status=ok`; `/api/v1/system/version` reports commit `e9339a7…` with
+  `metadata_source=environment+image`.
+- Still to confirm by the user: six services healthy, admin login, one Telegram
+  polling owner, and that the persona panel shows 「性別」.
+- Pending, not blocking: read-only check whether the 10/19 「女朋友」 rename is
+  still live; any repair is a separate approved data write.
+
+### Player pronoun setting / persona-write gate deployed — 2026-10-24 (by Claude)
+
+- Commit `32090f1`: pronoun field writing the existing `OperatorProfile.pronouns`,
+  Playground studio moved to the end of the 全域體驗偏好 group, post-turn address
+  renames gated on `persona_enabled`, and a visible warning for an empty or
+  multi-entry channel allowlist. Design and accepted scope:
+  `PLAYER_IDENTITY_AND_SETTINGS_PLACEMENT_REFERENCE.md`.
+- Root cause chain (bundle from 2026-10-19, plus read-only production SQL):
+  the Telegram allowlist was empty, so `persona_safe_for_account` returned False,
+  so every Telegram turn ran with `operator_persona_enabled=False`. The prompt
+  correctly withheld the persona, the persona note and the resolved address, but
+  the post-turn body loaded the operator unconditionally and committed a durable
+  rename to 「女朋友」 anyway. Reads were gated; writes were not. The 10/19 row is
+  still live in `operator_address_change_log`; no repair was performed.
+- Source: no backend field work was needed — `pronouns` already reached the chat
+  prompt through both `_render_operator_block` branches. The measurement that
+  mattered was that no frontend component had ever sent it. `persona_safe_for_account`
+  is unchanged; the allowlist gap is addressed in the UI, not by loosening the gate.
+- Publication: Actions `Publish container images` run `39979390277` succeeded.
+  Immutable application digest
+  `sha256:290a84fa3c93eeb9381930cc6fdd914d3b2f303bdc8261d262b378b7d937e228`
+  (tag `sha-32090f1`).
+- Coolify: the four application roles were repointed to that digest via the
+  service compose definition; the pre-change compose is backed up at
+  `C:\Entertainment\yuralume\backups\coolify-compose-pre-32090f1-20261023.yml`.
+  `postgresql` (`pgvector@sha256:2358fcba`) and `storage`
+  (`storage-local@sha256:e92cd8b2`) images, volumes, secrets and environments
+  were preserved. No migration.
+- Verified: all six services Running (healthy); `/health` returns `status=ok`;
+  `/api/v1/system/version` reports commit `32090f1…` with
+  `metadata_source=environment+image`; one Telegram polling owner holds the
+  lease; app/worker/connector logs show no traceback in the deploy window.
+- Checks before release: targeted backend 53 passed, new frontend suites 24
+  passed, `vue-tsc -b` clean. Full frontend suite has one pre-existing
+  load-sensitive timeout (`tests/uiImage.test.ts`, reproduced on clean HEAD) and
+  `check:i18n` reports three ja-JP leaves that all exist verbatim at HEAD.
+- Still to confirm by the user: admin login, representative media read, and that
+  the settings page shows the 代名詞 field at the top and the Playground at the
+  bottom of the preferences group.
+- Pending, not blocking: whether the 10/19 「女朋友」 seed should be corrected;
+  that remains a separate approved data write.
