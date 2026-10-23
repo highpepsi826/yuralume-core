@@ -4027,6 +4027,8 @@ export const messages: MessageSchema = {
       whatsappPlaceholder: 'e.g. 12025550123{\'@\'}s.whatsapp.net (your WhatsApp JID)',
       hint: 'Changes are saved automatically when the field loses focus. An empty list means no restriction. After testing, add your own id to block strangers who add the bot by mistake.',
       singleSenderHint: 'Keep exactly one sender here. Your character’s persona, the self-description in your persona note, and the resolved address name only reach a channel when it maps to exactly one person.',
+      emptyWarningShort: '⚠ No sender set: the character’s persona is left out of this channel.',
+      multipleWarningShort: '⚠ Several senders set: the character’s persona is left out of this channel.',
       emptyWarning: 'Currently blank: this channel accepts anyone, but the character then cannot confirm you are the one talking, so the persona, your declared self-description and the resolved address name are left out of this channel entirely. Add your own sender_ref to restore them.',
       multipleWarning: 'Several senders are listed: the channel is treated as a group or shared account, so the persona, your declared self-description and the resolved address name are left out of this channel entirely. Keep only your own sender_ref to restore them.',
     },

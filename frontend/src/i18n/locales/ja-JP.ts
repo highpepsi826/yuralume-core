@@ -4097,6 +4097,8 @@ export const messages: MessageSchema = {
       whatsappPlaceholder: '例：12025550123{\'@\'}s.whatsapp.net（あなたのWhatsApp JID）',
       hint: 'このチャンネルで受け付ける外部ユーザーを制限します。',
       singleSenderHint: 'ここには sender を 1 つだけ残してください。キャラクターのペルソナ、ペルソナメモの自己紹介、解決済みの呼び名は、チャンネルがちょうど 1 人に対応するときだけ届きます。',
+      emptyWarningShort: '⚠ sender が未設定：キャラクターのペルソナはこのチャンネルでは使われません。',
+      multipleWarningShort: '⚠ sender が複数：キャラクターのペルソナはこのチャンネルでは使われません。',
       emptyWarning: '現在は空欄です。誰でも話せますが、話しているのがあなた本人だと確認できないため、ペルソナ・自己紹介・解決済みの呼び名はこのチャンネルでは一切使われません。ご自身の sender_ref を入力すると元に戻ります。',
       multipleWarning: 'sender が複数あります。グループ／共用アカウントとみなされ、ペルソナ・自己紹介・解決済みの呼び名はこのチャンネルでは一切使われません。ご自身の sender_ref だけを残すと元に戻ります。',
     },

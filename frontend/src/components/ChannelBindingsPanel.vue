@@ -676,6 +676,25 @@ function readError(err: unknown, fallback: string): string {
               </div>
             </div>
 
+            <!-- 折疊時也要看得到：這張卡片收起來時只顯示「啟用」與「最近一次
+                 成功連線」，而那個組合正是 2026-08 搬遷時漏掉 allowlist 卻
+                 被誤認為設定完成的原因——連線正常、能聊天，人設卻整段被
+                 後端守門條件壓掉，沒有任何錯誤訊息。警告因此放在 summary
+                 與連線狀態之間，不藏在 account-detail 裡。詳細後果說明仍
+                 留在展開後的完整段落。 -->
+            <div
+              v-if="allowlistWarningFor(account) === 'empty'"
+              class="channels-warning channels-warning--compact"
+            >
+              {{ t('channelBindingsPanel.allowlist.emptyWarningShort') }}
+            </div>
+            <div
+              v-else-if="allowlistWarningFor(account) === 'multiple'"
+              class="channels-warning channels-warning--compact"
+            >
+              {{ t('channelBindingsPanel.allowlist.multipleWarningShort') }}
+            </div>
+
             <div
               v-if="account.polling_status.enabled
                 && (account.polling_status.last_error || account.polling_status.last_update_at)"
@@ -1075,6 +1094,15 @@ function readError(err: unknown, fallback: string): string {
   border-radius: 4px;
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* 折疊卡片上的版本：只是提示「展開看細節」，不是完整說明，所以更短、
+   更小，也不要撐高 summary 太多。 */
+.channels-warning--compact {
+  margin: 0 12px 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 /* 共用欄位樣式在 global style.css */

@@ -120,6 +120,13 @@ derived state.
    `updateOperatorProfile` client.
 3. **(d1)** Telegram allowlist UX: make the single-sender requirement
    explicit, and surface the consequence of an empty allowlist in the UI.
+   **Amendment 2026-10-24:** the warning must also be visible while the
+   account card is collapsed. The first implementation put it only inside
+   `account-detail` (`ChannelBindingsPanel.vue:697`, gated by
+   `v-if="expandedAccountId === account.id"`), so a collapsed card still
+   showed only 「啟用」 plus 「最近一次成功連線：N 秒前」 — the exact pair that
+   convinced the owner the channel was working during the migration that
+   lost the allowlist. The warning now also renders in the summary row.
 4. **(d2)** Stop the post-turn address-change write when the turn ran with
    the persona suppressed.
 
@@ -221,7 +228,8 @@ is reviewed.
 4. (b) Add the pronoun input with zh-TW/en-US/ja-JP keys and the
    display-name dependency hint.
 5. (d2) Thread `persona_enabled` into `_apply_observed_address_changes`.
-6. (d1) Allowlist validation/warning in `ChannelBindingsPanel`.
+6. (d1) Allowlist validation/warning in `ChannelBindingsPanel`, rendered in
+   BOTH the collapsed summary row and the expanded detail block.
 7. Run targeted suites: frontend component tests, i18n completeness, prompt
    section tests, post-turn gating tests, disclosure-gate test.
 8. Review the diff in the main session against this file.

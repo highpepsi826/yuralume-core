@@ -62,6 +62,42 @@ describe('allowlist 警告掛在既有的區塊裡', () => {
     expect(PANEL.slice(emptyBlockAt, blockEnd)).toContain('channels-warning')
   })
 
+  it('折疊的卡片也看得到警告，不是只有展開後才出現', () => {
+    // 2026-08 搬遷時漏掉 allowlist 卻被誤認為設定完成，原因就是收起來的
+    // 卡片只顯示「啟用」與「最近一次成功連線」——連線正常、能聊天，人設
+    // 卻整段被後端守門條件壓掉。警告必須在 `account-detail` 之外也出現，
+    // 否則同一個誤判會再發生一次。
+    const detailAt = PANEL.indexOf('<div v-if="expandedAccountId === account.id" class="account-detail">')
+    expect(detailAt).toBeGreaterThan(-1)
+
+    const shortEmptyAt = PANEL.indexOf("allowlistWarningFor(account) === 'empty'")
+    const shortEmptyShortAt = PANEL.indexOf('emptyWarningShort', shortEmptyAt)
+    expect(shortEmptyShortAt).toBeGreaterThan(-1)
+    // 這個「精簡版」警告必須在展開區塊之前，也就是折疊狀態就會渲染。
+    expect(shortEmptyShortAt).toBeLessThan(detailAt)
+
+    const shortMultipleAt = PANEL.indexOf("allowlistWarningFor(account) === 'multiple'")
+    const shortMultipleShortAt = PANEL.indexOf('multipleWarningShort', shortMultipleAt)
+    expect(shortMultipleShortAt).toBeGreaterThan(-1)
+    expect(shortMultipleShortAt).toBeLessThan(detailAt)
+  })
+
+  it('折疊版只放在 summary 底下，不擋住展開卡片的點擊', () => {
+    // 警告若塞進 `.account-summary` 內，會吃掉 toggleExpand 的點擊範圍。
+    // 用 chevron（summary 內最後一個節點）當錨點，避免依賴縮排空白。
+    const summaryAt = PANEL.indexOf('<div class="account-summary" @click="toggleExpand(account)">')
+    const chevronAt = PANEL.indexOf('<span class="chevron">', summaryAt)
+    expect(summaryAt).toBeGreaterThan(-1)
+    expect(chevronAt).toBeGreaterThan(summaryAt)
+
+    const compactAt = PANEL.indexOf('channels-warning--compact', chevronAt)
+    expect(compactAt).toBeGreaterThan(chevronAt)
+    // 精簡警告必須在連線狀態列之前（也就是仍在卡片摘要區，未展開）。
+    const statusLineAt = PANEL.indexOf("class=\"account-status-line\"", chevronAt)
+    const statusLineAltAt = PANEL.indexOf("'account-status-line'", chevronAt)
+    expect(Math.max(statusLineAt, statusLineAltAt)).toBeGreaterThan(compactAt)
+  })
+
   it('新建表單也講同一條規則（新建時就決定成不成立）', () => {
     const createAt = PANEL.indexOf("t('channelBindingsPanel.create.allowlist')")
     const hintAt = PANEL.indexOf(
@@ -92,12 +128,24 @@ describe('文案三語齊備', () => {
   it('singleSenderHint / emptyWarning / multipleWarning 都存在且非空', () => {
     for (const [locale, catalog] of Object.entries(CATALOGS)) {
       const allowlist = catalog.channelBindingsPanel.allowlist
-      for (const key of ['singleSenderHint', 'emptyWarning', 'multipleWarning'] as const) {
+      for (const key of [
+        'singleSenderHint',
+        'emptyWarning',
+        'multipleWarning',
+        'emptyWarningShort',
+        'multipleWarningShort',
+      ] as const) {
         const value = allowlist[key]
         expect(typeof value, `${locale}.${key}`).toBe('string')
         expect(value.trim().length, `${locale}.${key}`).toBeGreaterThan(0)
       }
     }
+  })
+
+  it('折疊版文案也點名「人設」，不是只說「不限制」', () => {
+    expect(zhTW.channelBindingsPanel.allowlist.emptyWarningShort).toContain('人設')
+    expect(enUS.channelBindingsPanel.allowlist.emptyWarningShort).toContain('persona')
+    expect(jaJP.channelBindingsPanel.allowlist.emptyWarningShort).toContain('ペルソナ')
   })
 
   it('警告說明的是「人設不會出現」，不只是「不限制」', () => {

@@ -4026,6 +4026,8 @@ export const messages = {
       whatsappPlaceholder: '例：12025550123{\'@\'}s.whatsapp.net（你的 WhatsApp JID）',
       hint: '修改後離開輸入框即自動儲存。空列表代表不限制；測通之後建議把你自己的 id 填進去，擋掉誤加 bot 的陌生人。',
       singleSenderHint: '這裡請只留一個 sender。角色的人設、你在人設裡的自述，以及解析後的稱呼，只會在一條通道剛好對應一個人的時候出現。',
+      emptyWarningShort: '⚠ 尚未設定 sender：角色的「人設」在這條通道上不會出現。',
+      multipleWarningShort: '⚠ 填了多個 sender：角色的「人設」在這條通道上不會出現。',
       emptyWarning: '目前留空：這條通道接受任何人，但角色也因此無法確認對話的人就是你，人設、玩家自述與稱呼在這條通道上都不會出現。填上你自己的 sender_ref 就會恢復。',
       multipleWarning: '目前填了多個 sender：群組或共用帳號會被視為無法確認身分，人設、玩家自述與稱呼在這條通道上都不會出現。只留你自己的 sender_ref 就會恢復。',
     },
