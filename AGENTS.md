@@ -156,6 +156,46 @@ and `OVHCLOUD_DEPLOYMENT_STATUS.md` before a production operation.
   Claude/Codex conventions. Mark new entries in `.codex-round.md` and
   `UPDATE_PROGRESS_LOG.md` with `(by Codex)` or `(by Claude)`.
 
+## Document Lifecycle
+
+Three tiers, and a file lives in exactly one of them:
+
+| Tier | Where | Rule |
+|---|---|---|
+| Live checkpoint | `.codex-round.md` | Only the current task, the last few completed steps, and `Next action`. Keep it under ~250 lines. |
+| Active reference | repository root `*_REFERENCE.md` | Design or implementation reference for behavior that is still being changed or still governs running code. |
+| Archive | `docs/archive/` | Completed, superseded, or one-off work. Read-only history. |
+
+- When a reference's work is finished and nothing points at it any more, move
+  it to `docs/archive/` with `git mv`. Do not delete it — future archaeology
+  needs it. Fix any relative links the move breaks.
+- Superseded references keep a one-line pointer at the top saying which file
+  replaced them, so a reader who lands there is not misled.
+- Move finished `.codex-round.md` sections to `.codex-round-archive.md` rather
+  than leaving them in the live file. Never re-read the archive as part of
+  task inventory; grep it only to trace a specific old decision.
+- A reference that is still approved-but-not-implemented, or implemented but
+  awaiting a release decision, stays in the root and keeps an accurate
+  `Status` line. Stale status headers are a defect: correct them as part of the
+  next edit.
+- `UPDATE_PROGRESS_LOG.md` holds entries from 2026-09-01 onward. Older entries
+  are in `docs/archive/PROGRESS_LOG_ARCHIVE_PRE_2026-09.md`. Keep appending new
+  entries to the live file only.
+
+## Feature Manual
+
+- `FEATURE_MANUAL.md` is the operator- and player-facing description of what
+  Yuralume actually does — features, surfaces, settings, behavior. It is not a
+  design reference, not a changelog, and not a deployment runbook.
+- When a user-visible feature is added, changed, or removed, update the manual
+  in the same change. A release that alters behavior and leaves the manual
+  describing the old behavior is incomplete.
+- The manual describes the current deployed behavior of this fork, including
+  local customizations that upstream does not have. Mark fork-only features so
+  it is clear what an upstream reader would not find.
+- Keep it in the language the rest of the operator documentation uses. Product
+  names, setting labels, and route paths stay as they appear in the UI.
+
 ## Ideas Backlog
 
 - `IDEAS_BACKLOG.md` tracks the user's brainstormed feature ideas (IDs

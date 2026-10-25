@@ -2,8 +2,15 @@
 
 ## Status
 
-Design drafted 2026-10-23. **Awaiting explicit user approval. No code,
-migration, data, or deployment operation has been performed.**
+**Released.** Design drafted 2026-10-23; implemented the same day; released
+2026-10-24 as commits `32090f1` (pronoun field, Playground placement,
+`persona_enabled` gate, allowlist warning in the expanded card) and `968a1bd`
+(the same warning on the collapsed card). Both are deployed to the four
+application roles and verified: six services healthy, `/health` ok, version
+reports the release commit, one Telegram polling owner.
+
+Scope item (c), the global `player_persona_note`, was deliberately deferred by
+the owner and remains open in `IDEAS_BACKLOG.md` § "I-09 遺留".
 
 Applies to backlog item I-09 (continuation) and item I-12 (player profile
 fields).

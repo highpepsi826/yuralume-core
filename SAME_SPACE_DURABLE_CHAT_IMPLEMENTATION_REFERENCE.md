@@ -113,7 +113,7 @@ Zeabur 已套用 `t8d6f1a10058`／`u9e7b2a11059`，production dedicated worker �
 
 ### 3.3 與舊暫存方案的關係
 
-[TEMP_SAME_SPACE_RELIABILITY_PLAN.md](TEMP_SAME_SPACE_RELIABILITY_PLAN.md) 保留 9 月上旬的問題、舊實作及驗證紀錄。本文件成為下一階段 durable chat 改造的正式設計入口；不把舊方案已完成的 lifecycle／前端修復列為待從頭實作。
+[TEMP_SAME_SPACE_RELIABILITY_PLAN.md](docs/archive/TEMP_SAME_SPACE_RELIABILITY_PLAN.md) 保留 9 月上旬的問題、舊實作及驗證紀錄。本文件成為下一階段 durable chat 改造的正式設計入口；不把舊方案已完成的 lifecycle／前端修復列為待從頭實作。
 
 後續若取得新版部署證據，補記核對時間、來源、SHA、revision、replica 與驗證範圍；保留歷史事實，不直接刪除過去的 pending 紀錄。
 
