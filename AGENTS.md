@@ -88,6 +88,34 @@ and `OVHCLOUD_DEPLOYMENT_STATUS.md` before a production operation.
   into `local/customizations`. Do not discard local commits to make updates
   appear clean.
 
+## Owner Environment — Windows 11 PowerShell
+
+The owner runs **Windows 11** and pastes commands into **PowerShell**
+(`PS C:\Entertainment\yuralume-src>`). This applies to every assistant working
+in this repository, Claude and Codex alike. Bash syntax silently breaks in
+PowerShell, and the failure is confusing rather than obvious, so never hand
+over bash-shaped commands.
+
+- **No `\` line continuations.** PowerShell does not read `\` at end of line as
+  a continuation. A multi-line `git add a.md b.md \` becomes
+  `fatal: \: '\' is outside repository`, followed by
+  `CommandNotFoundException` for every file on the following lines. Put the
+  whole command on one line, or continue with a backtick — and a backtick must
+  be the very last character on the line with nothing after it. One long line
+  is safer than a backtick the owner has to copy exactly.
+- **Do not chain commands.** `&&` works in PowerShell 7 but not in Windows
+  PowerShell 5.1. Give one command per line.
+- **No `$( )` command substitution, no `export VAR=value`** (use
+  `$env:VAR = "value"`), no `sed`/`awk`/`grep` pipelines, no `rm -rf`, no
+  `/dev/null`. Use `Test-Path`, `Get-ChildItem`, `Select-String`,
+  `Remove-Item`, `$null` instead.
+- **Quote paths with spaces** and use forward slashes or `-LiteralPath`.
+- Commands an assistant runs through its own shell tool are separate — these
+  rules are about what the *owner* is told to type.
+- When a command is genuinely awkward as a one-liner, offer a `.ps1` script the
+  owner can run, or run it with the assistant's own shell and report the
+  result.
+
 ## Deployment Boundaries
 
 - Runtime files live in `C:\Entertainment\yuralume`.
