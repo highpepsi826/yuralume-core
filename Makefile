@@ -7,7 +7,7 @@ COMPOSE_PROJECT_NAME ?= kokoro-link
 export COMPOSE_PROJECT_NAME
 
 .PHONY: dev dev-backend dev-frontend test evals build-frontend kill \
-        db-up db-down db-reset db-wait db-migrate atlas-check
+        db-up db-down db-reset db-wait db-migrate atlas-check fork-delta-check
 
 # One-click: backend + frontend in parallel, Ctrl+C kills both
 dev: kill db-wait db-migrate
@@ -32,6 +32,11 @@ test:
 # Verify docs/atlas frontmatter, source paths and symbol anchors.
 atlas-check:
 	uv run python scripts/atlas_check.py
+
+# Report the fork/upstream delta and verify FORK_DELTA.md path anchors.
+# Pass FETCH=1 to run `git fetch upstream` first.
+fork-delta-check:
+	uv run python scripts/fork_delta_check.py $(if $(FETCH),--fetch,)
 
 # LLM evals — opt-in regression net for "character feels like a human".
 # Requires KOKORO_EVALS_SYSTEM_ENDPOINT and KOKORO_EVALS_JUDGE_ENDPOINT
