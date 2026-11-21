@@ -3,6 +3,28 @@
 ## Claude-specific
 
 - All rules in `AGENTS.md` apply to Claude Code unchanged.
+
+### Start here — every task
+
+**Before touching `src/`, read `docs/atlas/INDEX.md`.** It is the map of what
+the code is now. Skipping it means re-deriving the same structure every session.
+
+Then, depending on what arrived:
+
+- **New bug** → `PENDING_FIXES.md` first. If it is already `PF-xx`, continue
+  from that entry instead of re-investigating. If it is new, add a `PF-xx` row.
+- **New idea** → `IDEAS_BACKLOG.md` first, then `FORK_DELTA.md` (the fork or
+  upstream may already have it).
+- **Upstream update** → `FORK_DELTA.md` and `make fork-delta-check`.
+- **Anything that must not break** → `docs/atlas/invariants.md`.
+
+**A change is not done until the map is updated in the same commit.** See
+"Mandatory update" in `AGENTS.md` for the table of which register to touch.
+Run `make atlas-check` and `make fork-delta-check` before committing.
+
+If the atlas and the code disagree, the atlas is wrong — fix the atlas in that
+commit rather than working around it.
+
 - Claude and Codex share `.codex-round.md` (execution checkpoint, updated after
   each verified small step) and `UPDATE_PROGRESS_LOG.md` (progress log, updated
   after verified completion). Mark new entries in both with `(by Claude)` or
@@ -49,19 +71,5 @@ commands.
 
 ## Model usage
 
-- Default to Sonnet (medium effort) for scoped work: i18n/UI tweaks, bug fixes
-  with clear reproduction, test/lint fixes, and implementing an approved design.
-- Use Opus (medium–high effort) for: writing design/implementation references,
-  cross-service issues (coordinator/worker/connector timing, Telegram polling
-  ownership), migration/data/production-deploy work, bugs with unknown cause,
-  or after two failed fix attempts.
-- After the user explicitly approves a design file, delegate implementation to
-  the `implementer` subagent (Sonnet), passing the design file path. If the
-  subagent is unavailable, stop and ask the user to run `/model sonnet`
-  instead of continuing on the current model.
-- Keep review and deployment in the main session: review the subagent's result
-  by reading the actual diff and running the targeted test suites for the
-  touched modules. Do not run `/code-review`; the owner does not want it. The
-  main session's own diff read plus targeted tests is the review.
-- Do not raise effort to high by default; reserve it for reasoning-heavy
-  investigation.
+The model/effort split lives in the global `~/.claude/CLAUDE.md` so it applies
+to every project. Project-specific exceptions go here, below this line.

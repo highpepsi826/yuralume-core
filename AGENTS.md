@@ -218,9 +218,46 @@ Four tiers, and a file lives in exactly one of them:
 map, domains, flows. It is the first thing to read before scanning source, and
 it is not a design document.
 
-- Entry point: `docs/atlas/INDEX.md`. Then `change-map.md` to find which layer
-  a change lands in, `invariants.md` for rules that must not break,
-  `layers.md` for allowed dependency direction, `glossary.md` for terms.
+### First stop — before any investigation
+
+Every new bug and every new idea starts here, not in `src/`. Follow this order
+and stop as soon as the question is answered:
+
+| Situation | Read, in this order |
+|---|---|
+| New bug report | `docs/atlas/INDEX.md` → `PENDING_FIXES.md` (is it already known?) → `docs/atlas/change-map.md` (which layer?) → source |
+| New idea or feature request | `docs/atlas/INDEX.md` → `IDEAS_BACKLOG.md` (already recorded?) → `FORK_DELTA.md` (does the fork or upstream already have it?) → `docs/atlas/layers.md` (which layer can own it?) |
+| "How does X work?" | `docs/atlas/INDEX.md` → the relevant `domains/` or `flows/` page → `change-map.md` → source |
+| Upstream update | `FORK_DELTA.md` → `make fork-delta-check` |
+| Anything that must not break | `docs/atlas/invariants.md` |
+
+Do not skip to `src/` because the atlas "might be out of date". If it is out of
+date, fixing it is part of the task — that is cheaper than re-deriving the map
+every session, and it is the only reason the atlas stays worth reading.
+
+The inverse also holds: when the atlas answers the question, say so and cite
+the page instead of re-explaining the structure from scratch.
+
+### Mandatory update
+
+A change is not finished until the registers that describe it are updated in the
+same commit:
+
+| If the change… | Then update |
+|---|---|
+| alters a domain's behavior, layering, or invariants | the affected `docs/atlas/` page, and refresh `verified_at_commit` / `verified_at` |
+| introduces, fixes, or invalidates a known defect | `PENDING_FIXES.md` — add, update, or remove the entry and its atlas cross-reference |
+| adds, changes, or removes a fork-only behavior | `FORK_DELTA.md` — add an `F-xx` row, or set its status to `MERGE` |
+| is a new design or plan | a root `*_REFERENCE.md` (existing rule, unchanged) |
+| changes user-visible behavior | `FEATURE_MANUAL.md` (existing rule, unchanged) |
+
+Run both checkers before committing:
+
+```powershell
+make atlas-check
+make fork-delta-check
+```
+
 - Every atlas page carries YAML frontmatter with `verified_at_commit`,
   `verified_at`, `sources` and `symbols`. `make atlas-check` verifies that
   every source path still exists and every symbol anchor still resolves.
