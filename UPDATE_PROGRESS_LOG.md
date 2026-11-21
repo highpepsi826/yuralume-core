@@ -1191,3 +1191,31 @@ database rows.
 - Production state after this: the Telegram allowlist is `["7434175332"]`, so
   `persona_safe_for_account` now returns True and the persona, the persona note
   and the resolved address should reach Telegram turns again.
+
+## 2026-11-21 — Architecture Atlas established (by Claude)
+
+- Added `docs/atlas/` as a fourth document tier: a stable map of the code as it
+  is now, distinct from root `*_REFERENCE.md` (one change's design) and from
+  `FEATURE_MANUAL.md` (user-visible behavior). Atlas pages are never archived;
+  they are updated in place.
+- Pages: `README.md`, `INDEX.md`, `layers.md`, `invariants.md`, `change-map.md`,
+  `glossary.md`, `domains/nsfw.md`, `flows/chat-turn.md`. The `change-map.md`
+  scope was chosen from the last 90 days of commit heat (140 commits); that
+  data selects the rows only and does not appear in the page bodies.
+- Added `scripts/atlas_check.py` and `make atlas-check`. Every page carries
+  YAML frontmatter with `verified_at_commit`, `verified_at`, `sources` and
+  `symbols`; the checker verifies that every source path exists, every
+  `path::Symbol` anchor resolves, the commit is reachable, and reports
+  freshness at the 30/100-commit tiers. Standard library only.
+- `AGENTS.md`: document lifecycle is now four tiers, a new "Architecture Atlas"
+  section states the update obligation, and the per-task inventory step reads
+  `docs/atlas/INDEX.md` before scanning `src/`.
+- Verified: `atlas_check` → 8 pages, 0 errors, 0 warnings, exit 0. Negative
+  test (missing source path + missing symbol) → 2 errors, exit 1.
+- Inventory findings recorded in the atlas, not fixed: the clock guard
+  currently fails with 61 unlisted violations and is absent from CI; the
+  "exactly one Telegram polling owner" rule exists only as a per-account
+  lease in code; no enforced dependency direction (`application ↔
+  infrastructure` is bidirectional).
+- Docs and tooling only. No application code, migration, data, image or
+  Coolify change.

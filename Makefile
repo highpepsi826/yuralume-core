@@ -7,7 +7,7 @@ COMPOSE_PROJECT_NAME ?= kokoro-link
 export COMPOSE_PROJECT_NAME
 
 .PHONY: dev dev-backend dev-frontend test evals build-frontend kill \
-        db-up db-down db-reset db-wait db-migrate
+        db-up db-down db-reset db-wait db-migrate atlas-check
 
 # One-click: backend + frontend in parallel, Ctrl+C kills both
 dev: kill db-wait db-migrate
@@ -28,6 +28,10 @@ dev-frontend:
 
 test:
 	uv run python -m pytest
+
+# Verify docs/atlas frontmatter, source paths and symbol anchors.
+atlas-check:
+	uv run python scripts/atlas_check.py
 
 # LLM evals — opt-in regression net for "character feels like a human".
 # Requires KOKORO_EVALS_SYSTEM_ENDPOINT and KOKORO_EVALS_JUDGE_ENDPOINT

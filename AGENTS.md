@@ -176,7 +176,8 @@ over bash-shaped commands.
   changing that behavior, and do not replace it with a large
   context-dependent patch.
 - For every task, read `.codex-round.md` (and `待修.md` when it applies)
-  after checking `git status` and the latest commit. Update
+  after checking `git status` and the latest commit. Then read
+  `docs/atlas/INDEX.md` before scanning `src/`. Update
   `.codex-round.md` after each verified small step with the exact next action,
   test result, changed files, and any blocker. Do not restart completed
   inventory after context compaction.
@@ -186,11 +187,12 @@ over bash-shaped commands.
 
 ## Document Lifecycle
 
-Three tiers, and a file lives in exactly one of them:
+Four tiers, and a file lives in exactly one of them:
 
 | Tier | Where | Rule |
 |---|---|---|
 | Live checkpoint | `.codex-round.md` | Only the current task, the last few completed steps, and `Next action`. Keep it under ~250 lines. |
+| Architecture atlas | `docs/atlas/` | Stable map of what the code **is now**: layers, invariants, change map, domains, flows. Never archived — updated in place. |
 | Active reference | repository root `*_REFERENCE.md` | Design or implementation reference for behavior that is still being changed or still governs running code. |
 | Archive | `docs/archive/` | Completed, superseded, or one-off work. Read-only history. |
 
@@ -209,6 +211,30 @@ Three tiers, and a file lives in exactly one of them:
 - `UPDATE_PROGRESS_LOG.md` holds entries from 2026-09-01 onward. Older entries
   are in `docs/archive/PROGRESS_LOG_ARCHIVE_PRE_2026-09.md`. Keep appending new
   entries to the live file only.
+
+## Architecture Atlas
+
+`docs/atlas/` describes what the code is **now** — layers, invariants, change
+map, domains, flows. It is the first thing to read before scanning source, and
+it is not a design document.
+
+- Entry point: `docs/atlas/INDEX.md`. Then `change-map.md` to find which layer
+  a change lands in, `invariants.md` for rules that must not break,
+  `layers.md` for allowed dependency direction, `glossary.md` for terms.
+- Every atlas page carries YAML frontmatter with `verified_at_commit`,
+  `verified_at`, `sources` and `symbols`. `make atlas-check` verifies that
+  every source path still exists and every symbol anchor still resolves.
+- When a change alters a domain's behavior, layering, or invariants, update the
+  affected atlas page in the same commit and refresh `verified_at_commit` /
+  `verified_at`. A release that changes structure and leaves the atlas
+  describing the old structure is incomplete.
+- Cosmetic changes that do not alter any claim in a page do not require an
+  atlas edit; they only make that page's freshness age.
+- Atlas pages are never moved to `docs/archive/`. They describe code that is
+  still running, so they are updated in place.
+- Where the atlas and the code disagree, the code wins and the atlas is a
+  defect.
+- Do not put secrets, message content, or database rows in atlas pages.
 
 ## Feature Manual
 
