@@ -67,6 +67,7 @@ Rationale" below. This is a working suggestion, not an approval.
 | I-28 | Full roleplay mode: long-form prose with scene description, expression/action beats and inner monologue, interactive | Chat / Prompt / Story | idea | - | - | 2026-11-07 |
 | I-29 | Character travels abroad (leisure or business): temporary timezone and an out-of-town self-awareness | Schedule / Travel | idea | - | - | 2026-11-07 |
 | I-30 | NSFW mode has no content-direction prompt: output stays restrained because the system prompt never learns the mode is on | NSFW / Prompt | done | - | `NSFW_INTIMACY_DIRECTION_REFERENCE.md` | 2026-11-21 |
+| I-31 | NSFW mode reroutes every feature to the target, including structural tasks that do not need the transcript; give those a carve-out back to normal routing | NSFW / Routing | designed | - | `NSFW_ROUTING_CARVE_OUT_REFERENCE.md` | 2026-11-21 |
 
 ## Priority Rationale
 
@@ -533,6 +534,11 @@ Group notes:
   stays restrained because the system prompt never learns the mode is on).
   Design written to `NSFW_INTIMACY_DIRECTION_REFERENCE.md`, awaiting owner
   approval. (by Claude)
+- 2026-11-21 Added I-31 (NSFW routing carve-out for structural features).
+  Design written to `NSFW_ROUTING_CARVE_OUT_REFERENCE.md`, awaiting owner
+  approval. Records that `content_tolerance_for_llm_provider` returns
+  community whenever content_mode is NSFW regardless of provider, so the
+  carve-out must fix tolerance derivation first. (by Claude)
 - 2026-11-21 I-30 → `in-progress`: implemented `intimacy_directive`, the
   NSFW `互動界線` variant and the post-turn intimacy fact, plus the NSFW /
   NORMAL golden twins. NORMAL prompt verified byte-identical. Not deployed;
