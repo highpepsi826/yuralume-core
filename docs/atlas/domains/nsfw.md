@@ -1,8 +1,8 @@
 ---
 doc: nsfw
 tier: atlas
-verified_at_commit: 055580b
-verified_at: 2026-11-21
+verified_at_commit: c0668c1
+verified_at: 2026-11-22
 sources:
   - src/kokoro_link/application/services/nsfw_mode.py
   - src/kokoro_link/domain/value_objects/content_flow.py
@@ -19,10 +19,17 @@ sources:
   - src/kokoro_link/infrastructure/prompt/sections/state.py
   - src/kokoro_link/infrastructure/post_turn/llm_processor.py
   - frontend/src/composables/useNsfwMode.ts
+  - frontend/src/components/NsfwStructuralFeaturesFields.vue
+  - frontend/src/utils/nsfwStructuralFeatures.ts
 symbols:
   - src/kokoro_link/application/services/nsfw_mode.py::NsfwModeService
   - src/kokoro_link/application/services/nsfw_mode.py::NsfwModeTarget
   - src/kokoro_link/domain/value_objects/content_flow.py::sanitize_messages_for_tolerance
+  - src/kokoro_link/domain/value_objects/content_flow.py::content_tolerance_for_route
+  - src/kokoro_link/application/services/active_llm_provider.py::_nsfw_target_for
+  - src/kokoro_link/application/services/chat_service.py::_routed_to_nsfw_target
+  - src/kokoro_link/application/services/chat_service.py::_content_tolerance_for_model
+  - src/kokoro_link/api/routes/nsfw_mode.py::set_admin_nsfw_mode_target
   - src/kokoro_link/domain/entities/conversation.py::MessageContentMode
   - src/kokoro_link/contracts/nsfw_safe_summary.py::NsfwSafeSummaryPort
   - src/kokoro_link/infrastructure/dialogue/llm_safe_summary.py::LLMNsfwSafeSummarizer
@@ -90,21 +97,40 @@ stateDiagram-v2
 
 ## 路由優先序
 
-`active_llm_provider.py` 在任何 feature 路由之前先問 NSFW：
+`active_llm_provider.py` 在任何 feature 路由之前先問 NSFW。判斷只走
+**單一 helper** `_nsfw_target_for(feature_key, character)`，四個分支點
+（`resolve_model_id`、`_read_preferred_provider`、`_maybe_bind_reasoning`、
+`_maybe_bind_vision`）都呼叫它，所以同一回合的 model、routing source 與
+reasoning 不會來自不同 provider。
 
 | 條件 | routing_source | 結果 |
 |---|---|---|
-| mode 開啟 | `nsfw_mode` | 用 target 的 provider/model |
+| mode 開啟，feature **不在** `structural_features` | `nsfw_mode` | 用 target 的 provider/model |
+| mode 開啟，feature **在** `structural_features` | 正常值（`active_model` 等） | 走正常路由 |
+| feature 未列入（含日後新增） | `nsfw_mode` | 留在 target（fail-closed） |
 | mode 關閉但訊息已標記 | `nsfw_content` | 改用**已配置但未啟用**的 target |
 | target provider 未註冊 | — | 拋錯，拒絕 fallback |
 | mode 開啟且 `image_profile_id is None` | `nsfw_mode` | 拒絕產圖 |
 | mode 開啟但 image profile 已失效 | `nsfw_mode` | 拒絕產圖 |
+
+`structural_features` 存在 target 的 `preferences` JSON 內（缺鍵＝空
+tuple，舊設定不需遷移）。API 未帶此欄位＝保留原值，`[]`＝清空——讓不認識
+此欄位的舊前端存檔時不會默默把分流關掉。預設 11 個 key：排程規劃／天氣
+偏移、劇情弧規劃／改編／季度判斷／重試判讀／完成記憶、動態貼文撰寫／
+留言回覆、記憶合併、目標審核。灰區（翻譯、場景寫作、改寫、判讀、圖片／
+影片）刻意不放行。設計：`NSFW_ROUTING_CARVE_OUT_REFERENCE.md`。
 
 `image_profile_id: null` 是運營者明確選擇「NSFW 模式下不產圖」，不是未設定。
 前端 `nsfwModeTarget.ts::NSFW_IMAGE_GENERATION_OFF` 只是 `<select>` 的哨兵字串，
 存檔時轉回 null，永不進 payload。
 
 `reasoning` 覆寫綁在 target 上；正常路由的 feature／group posture 不會帶過去。
+被分流的 feature 則相反：它拿到的是自己正常路由的 reasoning posture
+（同一 helper，所以與 model 一致）。
+
+Rule B 例外：呼叫端明確帶 `content_tolerance=community` 時，即使 feature 在
+`structural_features` 內，`nsfw_content` 分支仍會把呼叫改到**已配置但未啟用**
+的 target。這是上游既有行為，未改動；分流不覆蓋它。
 
 ## 外送前清洗
 
@@ -113,6 +139,18 @@ stateDiagram-v2
 - `community` — 全放行（自架／本地／未知 provider）
 - `frontier` — `anthropic` / `openai` / `gemini` / `xai` / `openrouter`，
   NSFW 內容不可見
+
+兩個判斷函式分工：
+
+| 函式 | 語意 | 用於 |
+|---|---|---|
+| `content_tolerance_for_llm_provider` | `content_mode == NSFW` 一律 community | 20+ 個既有外送點（未變） |
+| `content_tolerance_for_route` | 只有**真的**走了 NSFW target 才 community，否則由實際 provider 決定 | `chat_service._content_tolerance_for_model` |
+
+分流後這是必要的：被 cut-out 的任務在 NSFW 期間可能落到 frontier provider，
+若沿用舊判定會拿到 community，露骨原文就不會被清洗。主聊天回合
+（`_resolve_main_chat_model`）拿不到 target 時視為在 target 上，未知路由
+不會放寬 tolerance。
 
 `sanitize_messages_for_tolerance` 對 frontier 的處理：
 
@@ -188,8 +226,9 @@ NSFW mode 不只換模型，也換**寫作方向**。`content_mode` 從 `chat_se
 
 ## 相關 feature reference
 
-目前無專屬 reference。相關：`PROMPT_CUSTOMIZATION_IMPLEMENTATION_REFERENCE.md`
-（tolerance 與 prompt 組裝互動）。
+- `NSFW_ROUTING_CARVE_OUT_REFERENCE.md` — 結構性任務的分流與 tolerance 修正。
+- `PROMPT_CUSTOMIZATION_IMPLEMENTATION_REFERENCE.md` — tolerance 與 prompt
+  組裝互動。
 
 ## 已知缺口
 
@@ -203,3 +242,8 @@ NSFW mode 不只換模型，也換**寫作方向**。`content_mode` 從 `chat_se
   遷移，必須先改這個不變式，且需要 owner 明確批准。
 - **`safe_summary` 產生是非同步且靜默的**。沒有指標顯示失敗率，只有事後從
   `usage` 或 diagnostic export 反推。
+- **分流清單的灰區尚未以實測證據決策**。翻譯、場景寫作、改寫、判讀、圖片／
+  影片等 feature 仍全部走 target；要放行必須先用 diagnostic export 確認輸入
+  不含對話原文。
+- **分流只影響 LLM 路由**。圖片 profile 的選擇不受 `structural_features`
+  影響，NSFW 模式期間仍沿用 target 的 `image_profile_id`。

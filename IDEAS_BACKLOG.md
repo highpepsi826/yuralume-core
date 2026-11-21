@@ -67,7 +67,7 @@ Rationale" below. This is a working suggestion, not an approval.
 | I-28 | Full roleplay mode: long-form prose with scene description, expression/action beats and inner monologue, interactive | Chat / Prompt / Story | idea | - | - | 2026-11-07 |
 | I-29 | Character travels abroad (leisure or business): temporary timezone and an out-of-town self-awareness | Schedule / Travel | idea | - | - | 2026-11-07 |
 | I-30 | NSFW mode has no content-direction prompt: output stays restrained because the system prompt never learns the mode is on | NSFW / Prompt | done | - | `NSFW_INTIMACY_DIRECTION_REFERENCE.md` | 2026-11-21 |
-| I-31 | NSFW mode reroutes every feature to the target, including structural tasks that do not need the transcript; give those a carve-out back to normal routing | NSFW / Routing | designed | - | `NSFW_ROUTING_CARVE_OUT_REFERENCE.md` | 2026-11-21 |
+| I-31 | NSFW mode reroutes every feature to the target, including structural tasks that do not need the transcript; give those a carve-out back to normal routing | NSFW / Routing | in-progress | - | `NSFW_ROUTING_CARVE_OUT_REFERENCE.md` | 2026-11-22 |
 
 ## Priority Rationale
 
@@ -543,6 +543,13 @@ Group notes:
   NSFW `互動界線` variant and the post-turn intimacy fact, plus the NSFW /
   NORMAL golden twins. NORMAL prompt verified byte-identical. Not deployed;
   `done` is decided by the main session after release. (by Claude)
+- 2026-11-22 I-31 → `in-progress`: implemented the `structural_features`
+  carve-out (11 allowlisted keys), `content_tolerance_for_route`, the shared
+  `_nsfw_target_for` helper at all four NSFW branch points, the chat-turn
+  tolerance by reached provider, the admin checkbox group + "apply
+  recommended set", and the three locale bundles. Tests T1–T5, T7 green.
+  Not deployed; `done` is decided by the main session after release.
+  (by Claude)
 
 ### I-09 遺留（非阻擋，未排程）
 

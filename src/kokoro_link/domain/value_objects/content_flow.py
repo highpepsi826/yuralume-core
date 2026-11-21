@@ -53,6 +53,34 @@ def content_tolerance_for_llm_provider(
     return CONTENT_TOLERANCE_COMMUNITY
 
 
+def content_tolerance_for_route(
+    provider_id: str | None,
+    *,
+    routed_to_nsfw_target: bool,
+) -> str:
+    """Return the tolerance for a call scored by the route it took.
+
+    ``content_tolerance_for_llm_provider`` treats any NSFW content mode
+    as community regardless of provider. That is wrong once a caller can
+    stay on the normal route while the mode is on (structural features
+    carved out of the NSFW reroute,
+    ``NSFW_ROUTING_CARVE_OUT_REFERENCE.md`` §4.1): an NSFW-marked call
+    that reached a frontier provider must be scored frontier so it is
+    sanitised. Only a call that actually went to the NSFW target keeps
+    the community overlay.
+
+    Fail-closed direction: only providers explicitly in the frontier
+    list are frontier; unknown/local/self-host stay community.
+    """
+
+    if routed_to_nsfw_target:
+        return CONTENT_TOLERANCE_COMMUNITY
+    normalized = (provider_id or "").strip().lower()
+    if normalized in _FRONTIER_LLM_PROVIDER_IDS:
+        return CONTENT_TOLERANCE_FRONTIER
+    return CONTENT_TOLERANCE_COMMUNITY
+
+
 def message_allowed_for_tolerance(
     message: Message,
     *,

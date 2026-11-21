@@ -78,6 +78,7 @@ def test_nsfw_mode_preference_roundtrip(monkeypatch) -> None:
             "llm_model_id": "fake",
             "image_profile_id": "anime_nsfw",
             "reasoning": None,
+            "structural_features": [],
         },
     }
 
@@ -95,6 +96,7 @@ def test_nsfw_mode_preference_roundtrip(monkeypatch) -> None:
         "llm_model_id": "fake",
         "image_profile_id": "anime_nsfw",
         "reasoning": None,
+        "structural_features": [],
     }
 
     got = client.get("/api/v1/system/preferences/nsfw-mode")
@@ -113,6 +115,7 @@ def test_nsfw_mode_preference_roundtrip(monkeypatch) -> None:
         "llm_model_id": "fake",
         "image_profile_id": "anime_nsfw",
         "reasoning": None,
+        "structural_features": [],
     }
 
 
@@ -137,6 +140,7 @@ def test_admin_nsfw_mode_target_roundtrips_disabled_image(monkeypatch) -> None:
             "llm_model_id": "fake",
             "image_profile_id": None,
             "reasoning": None,
+            "structural_features": [],
         },
     }
 
@@ -157,6 +161,7 @@ def test_admin_nsfw_mode_target_roundtrips_disabled_image(monkeypatch) -> None:
         "llm_model_id": "fake",
         "image_profile_id": None,
         "reasoning": None,
+        "structural_features": [],
     }
 
     # Explicit off is null, not empty string — "" stays rejected so no
@@ -270,6 +275,73 @@ def test_admin_nsfw_mode_target_effort_rejected_before_save(
     assert calls == [("max", "fake")]
     got = client.get("/api/v1/admin/system/preferences/nsfw-mode-target")
     assert got.json()["configured"] is False
+
+
+def test_admin_nsfw_mode_target_structural_features_roundtrip(monkeypatch) -> None:
+    """The carve-out list persists, echoes on both admin GET and the
+    player status target, and is omitted (empty) when not sent."""
+    _configure_test_app_env(monkeypatch)
+    client = TestClient(create_app())
+
+    configured = client.put(
+        "/api/v1/admin/system/preferences/nsfw-mode-target",
+        json={
+            "llm_provider_id": "fake",
+            "llm_model_id": "fake",
+            "image_profile_id": None,
+            "structural_features": ["schedule_plan", "arc_plan"],
+        },
+    )
+    assert configured.status_code == 200
+    assert configured.json()["target"]["structural_features"] == [
+        "schedule_plan",
+        "arc_plan",
+    ]
+
+    got = client.get("/api/v1/admin/system/preferences/nsfw-mode-target")
+    assert got.json()["target"]["structural_features"] == [
+        "schedule_plan",
+        "arc_plan",
+    ]
+
+    status_response = client.put(
+        "/api/v1/system/preferences/nsfw-mode",
+        json={"active": True},
+    )
+    assert status_response.status_code == 200
+    assert status_response.json()["target"]["structural_features"] == [
+        "schedule_plan",
+        "arc_plan",
+    ]
+
+    # A client that does not know the field (e.g. a cached bundle)
+    # saving an unrelated change must not silently reset the carve-out.
+    preserved = client.put(
+        "/api/v1/admin/system/preferences/nsfw-mode-target",
+        json={
+            "llm_provider_id": "fake",
+            "llm_model_id": "fake",
+            "image_profile_id": None,
+        },
+    )
+    assert preserved.status_code == 200
+    assert preserved.json()["target"]["structural_features"] == [
+        "schedule_plan",
+        "arc_plan",
+    ]
+
+    # An explicit empty list clears it.
+    cleared = client.put(
+        "/api/v1/admin/system/preferences/nsfw-mode-target",
+        json={
+            "llm_provider_id": "fake",
+            "llm_model_id": "fake",
+            "image_profile_id": None,
+            "structural_features": [],
+        },
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["target"]["structural_features"] == []
 
 
 def test_admin_nsfw_mode_target_rejects_unknown_targets(monkeypatch) -> None:

@@ -113,6 +113,7 @@ from kokoro_link.application.services.nsfw_mode import (
     CONTENT_MODE_NORMAL,
     MEMORY_TAG_NSFW_MODE,
     NsfwModeService,
+    NsfwModeTarget,
 )
 from kokoro_link.application.services.operator_profile_service import (
     OperatorProfileService,
@@ -375,6 +376,7 @@ from kokoro_link.domain.value_objects.content_flow import (
     CONTENT_TOLERANCE_FRONTIER,
     contains_restricted_messages,
     content_tolerance_for_llm_provider,
+    content_tolerance_for_route,
     normalize_content_tolerance,
     sanitize_messages_for_tolerance,
 )
@@ -1548,14 +1550,20 @@ class ChatService:
         *,
         character: Character,
         payload: SendChatMessageRequest,
-    ) -> tuple[ChatModelPort, str | None]:
+    ) -> tuple[ChatModelPort, str | None, NsfwModeTarget | None]:
         """Resolve the model for the player-visible chat reply.
 
         Normal player requests do not carry provider/model anymore; they
         follow admin/global ``FEATURE_CHAT`` routing. Explicit request
         provider/model remains as a legacy/debug override path.
+
+        The third value is the NSFW target the call resolved through,
+        ``None`` when the NSFW reroute was not in effect. Callers use it
+        to score the turn's content tolerance by the provider it really
+        reached (``NSFW_ROUTING_CARVE_OUT_REFERENCE.md`` §4.1).
         """
-        nsfw_active = await self._is_nsfw_active_for_character(character)
+        nsfw_target = await self._read_nsfw_target(character)
+        nsfw_active = nsfw_target is not None
         if payload.provider_id and not nsfw_active:
             provider_id, model_id = _resolve_chat_provider_and_model(
                 character=character,
@@ -1563,7 +1571,7 @@ class ChatService:
             )
             event("routing.explicit", character_id=character.id, provider_id=provider_id,
                   model_id=model_id, routing_source="legacy_request_or_character")
-            return self._model_registry.resolve(provider_id), model_id
+            return self._model_registry.resolve(provider_id), model_id, None
 
         if self._active_llm_provider is not None:
             try:
@@ -1580,7 +1588,7 @@ class ChatService:
                 model_id = resolved_model_id if nsfw_active else (
                     payload.model_id or resolved_model_id
                 )
-                return model, model_id
+                return model, model_id, nsfw_target
             except Exception:
                 _LOGGER.exception(
                     "chat model active-provider resolution failed; "
@@ -1591,7 +1599,16 @@ class ChatService:
             character=character,
             payload=payload,
         )
-        return self._model_registry.resolve(provider_id), model_id
+        return self._model_registry.resolve(provider_id), model_id, nsfw_target
+
+    async def _read_nsfw_target(
+        self, character: Character,
+    ) -> NsfwModeTarget | None:
+        if self._nsfw_mode_service is None:
+            return None
+        return await self._nsfw_mode_service.active_target(
+            user_id=character.user_id,
+        )
 
     async def _build_image_recognition_context(
         self,
@@ -2366,7 +2383,7 @@ class ChatService:
         # ``persist_user_turn`` above; the whole-conversation replace is
         # skipped so it never becomes an external concurrency primitive.
 
-        model, model_id = await self._resolve_main_chat_model(
+        model, model_id, nsfw_target = await self._resolve_main_chat_model(
             character=character,
             payload=payload,
         )
@@ -2414,6 +2431,9 @@ class ChatService:
             content_tolerance=_content_tolerance_for_model(
                 model,
                 content_mode=content_mode,
+                routed_to_nsfw_target=_routed_to_nsfw_target(
+                    model, model_id, content_mode, nsfw_target,
+                ),
             ),
             routing_content_tolerance=_content_tolerance_for_content_mode(
                 content_mode,
@@ -2976,7 +2996,7 @@ class ChatService:
                     post_turn_refs={"source": "send_message_stream"},
                 ))
 
-        model, model_id = await self._resolve_main_chat_model(
+        model, model_id, nsfw_target = await self._resolve_main_chat_model(
             character=character,
             payload=payload,
         )
@@ -3043,6 +3063,9 @@ class ChatService:
                 content_tolerance=_content_tolerance_for_model(
                     model,
                     content_mode=content_mode,
+                    routed_to_nsfw_target=_routed_to_nsfw_target(
+                        model, model_id, content_mode, nsfw_target,
+                    ),
                 ),
                 routing_content_tolerance=_content_tolerance_for_content_mode(
                     content_mode,
@@ -6786,7 +6809,9 @@ class ChatService:
             except ValueError:
                 mode = MessageContentMode.NORMAL
         if mode is MessageContentMode.NSFW:
-            # Community by construction, whatever the provider is.
+            # A player turn is never carved out of the NSFW reroute
+            # (``chat`` is not a structural feature), so the turn is on
+            # the target: community by construction.
             return CONTENT_TOLERANCE_COMMUNITY
         provider_id = ""
         if self._active_llm_provider is not None:
@@ -9954,11 +9979,59 @@ def _with_nsfw_memory_tags(
     return tagged
 
 
+def _routed_to_nsfw_target(
+    model: ChatModelPort,
+    model_id: str | None,
+    content_mode: MessageContentMode,
+    nsfw_target: NsfwModeTarget | None,
+) -> bool:
+    """Whether this turn's resolved model came from the NSFW reroute.
+
+    The NSFW reroute always returns the target's own ``(provider,
+    model)`` pair and ``resolve_model_id`` returns the target's model id
+    for every feature. An NSFW turn whose resolved pair does not match
+    the target's was carved out to the normal route
+    (``NSFW_ROUTING_CARVE_OUT_REFERENCE.md``). A turn with no
+    resolvable target is assumed to be on the target, so an unknown
+    route never widens NSFW tolerance.
+    """
+    if content_mode is not MessageContentMode.NSFW:
+        return False
+    if nsfw_target is None:
+        return True
+    provider_id = str(getattr(model, "provider_id", "") or "").strip().lower()
+    target_provider = str(
+        getattr(nsfw_target, "llm_provider_id", "") or "",
+    ).strip().lower()
+    target_model = str(getattr(nsfw_target, "llm_model_id", "") or "")
+    return (
+        provider_id == target_provider
+        and model_id is not None
+        and str(model_id) == target_model
+    )
+
+
 def _content_tolerance_for_model(
     model: ChatModelPort,
     *,
     content_mode: MessageContentMode,
+    routed_to_nsfw_target: bool = False,
 ) -> str:
+    """Tolerance in force for a turn on this model.
+
+    An NSFW-marked turn routed to the NSFW target is community by
+    construction, so it is scored here directly. An NSFW-marked turn
+    that stayed on the normal route — only possible for a structural
+    feature carved out of the NSFW reroute
+    (``NSFW_ROUTING_CARVE_OUT_REFERENCE.md``) — is scored by the
+    provider it actually reached, so explicit text sent to a frontier
+    provider is sanitised rather than scored community.
+    """
+    if content_mode is MessageContentMode.NSFW:
+        return content_tolerance_for_route(
+            getattr(model, "provider_id", ""),
+            routed_to_nsfw_target=routed_to_nsfw_target,
+        )
     return content_tolerance_for_llm_provider(
         getattr(model, "provider_id", ""),
         current_content_mode=content_mode,

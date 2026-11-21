@@ -243,6 +243,10 @@ export interface NsfwModeTarget {
   /** Reasoning posture bound onto the NSFW target while the reroute is
    * in effect; ``null`` keeps the target connection's defaults. */
   reasoning?: FeatureReasoningOverride | null
+  /** Feature keys that stay on the normal route while the mode is
+   * active. Omitted/empty = every feature follows the target. Anything
+   * not listed — including features added later — stays on the target. */
+  structural_features?: string[]
 }
 
 export interface NsfwModePreference {

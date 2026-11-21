@@ -353,6 +353,40 @@ system prompt 與 NORMAL 逐位元組相同。本 fork 讓它同時切換**寫�
 - `chat_service.py` 與 `prompt_golden/snapshots/` 都在下方「衝突熱區」，
   merge 時預期衝突。
 
+### F-15 — NSFW 路由分流（結構性任務不跟隨 NSFW target）
+
+**類型：** feature
+**狀態：** WATCH（source 完成 2026-11-22，未 commit／未部署）
+
+上游的 NSFW mode 只要開啟，任何 `feature_key` 都無條件改走 NSFW target。
+本 fork 讓「不吃對話原文」的結構性任務留在正常路由：排程規劃、劇情弧
+規劃／改編／季度判斷／重試判讀／完成記憶、動態貼文撰寫／留言回覆、
+記憶合併、目標審核（共 11 個 key）。未列入的 feature（含日後新增）一律
+仍走 target，fail-closed。
+
+同時修正一個安全前提：原本只要 `content_mode` 是 NSFW，tolerance 就回
+`community` 而不論 provider。分流後被 cut-out 的任務可能落到 frontier
+provider，因此改用 `content_tolerance_for_route`——只有**真的**走了 NSFW
+target 才給 community，否則由實際 provider 決定，露骨原文仍會清洗。
+
+| 項目 | 位置 |
+|---|---|
+| `content_tolerance_for_route`（舊 helper 簽名與行為不變） | `src/kokoro_link/domain/value_objects/content_flow.py` |
+| `structural_features` 欄位與解析／寫入 | `src/kokoro_link/application/services/nsfw_mode.py`（`NsfwModeTarget`） |
+| `_nsfw_target_for` 單一判斷點（四個分支） | `src/kokoro_link/application/services/active_llm_provider.py` |
+| 回合 tolerance 由實際 provider 決定 | `src/kokoro_link/application/services/chat_service.py` |
+| API 欄位（未帶＝保留原值、`[]`＝清空） | `src/kokoro_link/api/routes/nsfw_mode.py` |
+| Admin 勾選清單 +「套用建議組合」 | `frontend/src/components/NsfwStructuralFeaturesFields.vue`、`frontend/src/utils/nsfwStructuralFeatures.ts` |
+
+**相關 reference：** `NSFW_ROUTING_CARVE_OUT_REFERENCE.md`
+
+**溶合判斷：**
+- 上游若自行加上 feature 分類或「安全 feature」清單，優先評估改用上游的
+  分類方式，本 fork 保留的差異應只剩 allowlist 內容。
+- 灰區 feature（翻譯、場景寫作、改寫、判讀類、圖片／影片生成）刻意不在
+  allowlist 內，需以 diagnostic export 實測輸入後再逐個加入。
+- `src/kokoro_link/application/services/active_llm_provider.py`、`src/kokoro_link/application/services/chat_service.py`、`src/kokoro_link/application/services/nsfw_mode.py` 都在衝突熱區。
+
 ---
 
 ## 衝突熱區

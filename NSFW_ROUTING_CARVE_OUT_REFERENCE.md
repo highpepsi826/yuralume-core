@@ -1,6 +1,6 @@
 # NSFW 路由分流（結構性任務不跟隨 NSFW target）— 設計與實作參考
 
-**Status:** 已撰寫，等待 owner 批准。**尚未實作任何 source 改動。**
+**Status:** 已實作（2026-11-22，by Claude），**未 commit／未部署**，等待 main session 審核。
 **建立：** 2026-11-21 (by Claude)
 **前置：** `NSFW_INTIMACY_DIRECTION_REFERENCE.md`（已發布 `055580b`）
 **Atlas 對應：** `docs/atlas/domains/nsfw.md`
@@ -165,8 +165,12 @@ async def _nsfw_target_for(
 | `memory_consolidate` | 對已 born-safe 的記憶做整合 |
 | `goal_review` | 不讀對話原文 |
 
-**建議第一批只放這 12 個。** 它們都通過同一個判準：不讀 `recent_messages`，
+**建議第一批只放這些。** 它們都通過同一個判準：不讀 `recent_messages`，
 或只讀已 born-safe 的記憶。
+
+> 更正（2026-11-22）：上一行原本寫「12 個」，實際列舉只有 **11 個**
+> （排程 2、劇情弧 5、feed 2、記憶／目標 2）。已實作的 allowlist 就是這 11 個
+> key，前端「套用建議組合」也勾這 11 項。
 
 ### C. 灰區 — 預設**不**放入 allowlist
 
@@ -187,7 +191,7 @@ async def _nsfw_target_for(
 
 `NsfwModeTarget` 設定頁新增一組 checkbox，標題「NSFW 模式期間仍使用一般路由的
 任務」。預設全部不勾（= 現行行為）。提供一個「套用建議組合」按鈕，勾選 §5 B 類
-的 12 項。
+的 11 項（原寫 12 項，見 §5 B 更正）。
 
 需要同步三個 locale bundle：`en-US.ts`、`ja-JP.ts`、`zh-TW.ts`。
 
@@ -253,6 +257,24 @@ T4 是本設計的關鍵測試，必須先寫、先紅。
 
 ## 11. 待 owner 決定
 
-1. allowlist 第一批是否就是 §5 B 類的 12 項。
-2. 前端是否要提供「套用建議組合」按鈕。
+1. allowlist 第一批是否就是 §5 B 類的 11 項（更正後數量）。
+2. 前端是否要提供「套用建議組合」按鈕。→ 已提供。
 3. 批准後才進入實作；第一步是 T4。
+
+---
+
+## 12. 實作紀錄（2026-11-22，by Claude）
+
+- T4 先寫先紅：在未改 `active_llm_provider.py` 時
+  `resolve_routing_source` 回 `nsfw_mode`；舊 `_content_tolerance_for_model`
+  對 `content_mode=NSFW` + `anthropic` 回 `community`（露骨訊息
+  `sanitize_messages_for_tolerance` 後 1/1 保留）。改後回 `frontier`（0/1 保留）。
+- 新增第 5 節之外的兩點，均為安全收斂：
+  1. `chat_service._content_tolerance_for_model` 在 NSFW 但**未**走 target 時
+     改由實際 provider 決定。
+  2. API `structural_features` 缺欄位＝保留原值、`[]`＝清空，避免舊前端存檔
+     默默關閉分流。
+- 測試：`tests/unit/test_nsfw_routing_carve_out.py`（23）、
+  `tests/unit/test_nsfw_mode_routes.py` 新增 round-trip、
+  `frontend/tests/nsfwStructuralFeatures.test.ts`（5）。
+- T6 依 §8 不建測試；前端以警告文字標明後果。

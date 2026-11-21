@@ -3460,6 +3460,29 @@ export const messages = {
     actions: {
       save: '儲存 NSFW 路由目標',
     },
+    structuralFeatures: {
+      title: 'NSFW 模式期間仍使用一般路由的任務',
+      hint: '勾選的任務在 NSFW 模式期間不跟隨上方的 NSFW 目標，改用正常路由（全域／分組／單一 feature 設定）。它們只讀行程、偏好與已 born-safe 的記憶，不讀對話原文。',
+      consequenceHint: '未勾選的任務（含日後新增的任務）一律留在 NSFW 目標上。不要勾選會讀對話原文的任務（聊天回覆、記憶蒸餾、摘要、主動訊息），否則露骨原文會被送去一般 provider。',
+      selectedCount: '已勾選 {count} 項',
+      features: {
+        schedule_plan: '每日行程規劃',
+        schedule_weather_drift: '行程：天氣偏移',
+        arc_plan: '劇情弧規劃',
+        arc_adapt: '劇情改編骨架',
+        arc_season_decide: '劇情弧：開下一季判斷',
+        arc_beat_recheck: '劇情弧：重複嘗試判讀',
+        arc_completion_memory: '劇情弧：完成里程碑記憶',
+        feed_compose: '動態貼文撰寫',
+        feed_comment_reply: '動態貼文留言回覆',
+        memory_consolidate: '記憶合併',
+        goal_review: '目標審核',
+      },
+      actions: {
+        applyRecommended: '套用建議組合',
+        clear: '全部取消',
+      },
+    },
     notifications: {
       saved: '已儲存 NSFW mode 路由目標',
     },
@@ -5028,12 +5051,12 @@ export const messages = {
         },
         video_size: {
           label: '影片尺寸／解析度',
-          placeholder: 'provider_default',
+          placeholder: '留空會送出原有固定尺寸',
           hint: '留空沿用原有自動尺寸。填 provider_default 可省略 size／resolution，採用供應商預設；或填模型文件支援的值（例如 openai_videos 的 1280x720、generations_polling 的 720p）。各模型支援值不同，請先查看供應商文件。',
         },
         video_duration_seconds: {
           label: '影片長度（秒）',
-          placeholder: 'provider_default 或 6',
+          placeholder: '留空沿用舊設定；或填秒數',
           hint: '留空沿用原有自動長度。填 provider_default 可省略 seconds／duration；或填模型支援的正整數秒數，例如 6。',
         },
         video_poll_interval_seconds: { label: '影片輪詢間隔（秒）', placeholder: '10' },
@@ -5166,6 +5189,8 @@ export const messages = {
         confirmBody: '這會實際透過 provider 生成一張小圖，端到端驗證生圖能力，可能產生少許費用。要繼續嗎？',
       },
       videoTest: {
+        useProviderDefault: '使用供應商預設',
+        parameterOmitted: '已選擇供應商預設：不傳送此參數。',
         button: '生成測試影片',
         prompt: '測試影片提示詞',
         hint: '使用目前的設定生成一段短片，完成後可播放及下載，不會發佈至動態。實際片長依模型而定。',

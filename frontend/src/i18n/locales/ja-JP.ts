@@ -3483,6 +3483,29 @@ export const messages: MessageSchema = {
     actions: {
       save: 'NSFW ルーティング先を保存',
     },
+    structuralFeatures: {
+      title: 'NSFW モード中も通常ルーティングを使うタスク',
+      hint: 'チェックしたタスクは、NSFW モード中も上の NSFW ターゲットに切り替わらず通常ルーティング（全体／グループ／個別設定）を使います。予定・好み・born-safe 済みの記憶だけを読み、会話の原文は読みません。',
+      consequenceHint: 'チェックしていないタスク（今後追加されるタスクを含む）は NSFW ターゲットに残ります。会話の原文を読むタスク（チャット返答・記憶の蒸留・要約・自発メッセージ）はチェックしないでください。露骨な原文が通常のプロバイダーへ送られます。',
+      selectedCount: '{count} 件選択中',
+      features: {
+        schedule_plan: '日課の予定づくり',
+        schedule_weather_drift: '予定：天気による変動',
+        arc_plan: 'ストーリーアークの計画',
+        arc_adapt: 'アーク骨子の改変',
+        arc_season_decide: 'アーク：次シーズンの判断',
+        arc_beat_recheck: 'アーク：再試行の判定',
+        arc_completion_memory: 'アーク：完了マイルストーンの記憶',
+        feed_compose: 'タイムライン投稿の作成',
+        feed_comment_reply: 'タイムラインのコメント返信',
+        memory_consolidate: '記憶の統合',
+        goal_review: '目標の見直し',
+      },
+      actions: {
+        applyRecommended: '推奨セットを適用',
+        clear: 'すべて解除',
+      },
+    },
     notifications: {
       saved: 'NSFW mode のルーティング対象を保存しました',
     },
@@ -5099,12 +5122,12 @@ export const messages: MessageSchema = {
         },
         video_size: {
           label: '動画サイズ／解像度',
-          placeholder: 'provider_default',
+          placeholder: '空欄では従来の固定サイズを送信',
           hint: '空欄では従来の自動サイズを使用します。provider_default を入力すると size／resolution を省略し、プロバイダーの既定値を使用します。またはモデルが対応する値を指定してください（例：openai_videos は 1280x720、generations_polling は 720p）。対応値はモデルにより異なるため、プロバイダーの資料を確認してください。',
         },
         video_duration_seconds: {
           label: '動画の長さ（秒）',
-          placeholder: 'provider_default または 6',
+          placeholder: '空欄は従来の長さ、または秒数を入力',
           hint: '空欄では従来の自動時間を使用します。provider_default を入力すると seconds／duration を省略します。またはモデルが対応する正の整数秒を指定してください（例：6）。',
         },
         video_poll_interval_seconds: { label: '動画ポーリング間隔（秒）', placeholder: '10' },
@@ -5237,6 +5260,8 @@ export const messages: MessageSchema = {
         confirmBody: 'プロバイダーを通じて小さな画像を実際に 1 枚生成し、画像生成をエンドツーエンドで検証します。わずかな費用が発生する場合があります。続行しますか？',
       },
       videoTest: {
+        useProviderDefault: 'プロバイダーの既定値を使用',
+        parameterOmitted: '既定値を選択済み：このパラメーターは送信しません。',
         button: 'テスト動画を生成',
         prompt: 'テスト動画のプロンプト',
         hint: '現在の設定で短い動画を生成し、再生・ダウンロードできます。フィードには投稿しません。長さはモデルに依存します。',

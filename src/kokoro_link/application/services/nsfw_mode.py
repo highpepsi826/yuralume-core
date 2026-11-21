@@ -56,6 +56,12 @@ class NsfwModeTarget:
     # keeps the target connection's own reasoning defaults — the normal
     # route's feature/group postures never ride onto the NSFW target.
     reasoning: ReasoningOverrides | None = None
+    # Feature keys that stay on the normal route while the mode is
+    # active (``NSFW_ROUTING_CARVE_OUT_REFERENCE.md``). Empty — including
+    # a stored target without the key — keeps the pre-feature behaviour:
+    # every feature follows the NSFW target. Anything not listed here
+    # (including features added later) stays on the target: fail-closed.
+    structural_features: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +75,7 @@ class NsfwModeStatus:
     llm_model_id: str | None = None
     image_profile_id: str | None = None
     reasoning: ReasoningOverrides | None = None
+    structural_features: tuple[str, ...] = ()
 
     @property
     def target(self) -> NsfwModeTarget | None:
@@ -87,6 +94,7 @@ class NsfwModeStatus:
             llm_model_id=self.llm_model_id,
             image_profile_id=self.image_profile_id,
             reasoning=self.reasoning,
+            structural_features=self.structural_features,
         )
 
 
@@ -163,12 +171,14 @@ class NsfwModeService:
         llm_model_id: str,
         image_profile_id: str | None,
         reasoning: ReasoningOverrides | None = None,
+        structural_features: tuple[str, ...] = (),
     ) -> NsfwModeTarget:
         target = _target_or_raise(
             llm_provider_id=llm_provider_id,
             llm_model_id=llm_model_id,
             image_profile_id=image_profile_id,
             reasoning=reasoning,
+            structural_features=structural_features,
         )
         await self._preferences.set(
             NSFW_MODE_TARGET_PREFERENCE_KEY,
@@ -365,6 +375,10 @@ class NsfwModeService:
                 reasoning=(
                     configured_target.reasoning if configured_target else None
                 ),
+                structural_features=(
+                    configured_target.structural_features
+                    if configured_target else ()
+                ),
             )
         last_activity_at = _parse_datetime(raw.get("last_activity_at"))
         expires_at = (
@@ -397,6 +411,10 @@ class NsfwModeService:
             reasoning=(
                 configured_target.reasoning if configured_target else None
             ),
+            structural_features=(
+                configured_target.structural_features
+                if configured_target else ()
+            ),
         )
 
 
@@ -406,6 +424,7 @@ def _target_or_raise(
     llm_model_id: str,
     image_profile_id: str | None,
     reasoning: ReasoningOverrides | None = None,
+    structural_features: tuple[str, ...] = (),
 ) -> NsfwModeTarget:
     normalized_image = (
         image_profile_id.strip() if isinstance(image_profile_id, str) else None
@@ -417,6 +436,7 @@ def _target_or_raise(
         # rather than surviving as a fake profile id.
         image_profile_id=normalized_image or None,
         reasoning=reasoning,
+        structural_features=_normalize_feature_keys(structural_features),
     )
     if not target.llm_provider_id or not target.llm_model_id:
         raise NsfwModeTargetError(
@@ -436,6 +456,7 @@ def _target_from_raw(raw: dict[str, Any]) -> NsfwModeTarget | None:
             llm_model_id=str(llm.get("model_id") or ""),
             image_profile_id=image_raw if isinstance(image_raw, str) else None,
             reasoning=parse_reasoning_override(raw),
+            structural_features=_structural_features_from_raw(raw),
         )
     except NsfwModeTargetError:
         return None
@@ -454,7 +475,31 @@ def _target_to_raw(target: NsfwModeTarget) -> dict[str, object]:
     reasoning = reasoning_pref_value(target.reasoning)
     if reasoning is not None:
         value["reasoning"] = reasoning
+    # Same rule for the carve-out list: an empty list is the default and
+    # is not written, so a pre-feature stored target round-trips
+    # byte-identically.
+    if target.structural_features:
+        value["structural_features"] = list(target.structural_features)
     return value
+
+
+def _normalize_feature_keys(values: object) -> tuple[str, ...]:
+    """Trim, drop blanks, de-duplicate, keep order."""
+    if not isinstance(values, (list, tuple)):
+        return ()
+    seen: dict[str, None] = {}
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        key = value.strip()
+        if key:
+            seen.setdefault(key, None)
+    return tuple(seen)
+
+
+def _structural_features_from_raw(raw: dict[str, Any]) -> tuple[str, ...]:
+    """A stored target without the key (pre-feature) yields ``()``."""
+    return _normalize_feature_keys(raw.get("structural_features"))
 
 
 def _parse_datetime(value: object) -> datetime | None:

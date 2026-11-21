@@ -3461,6 +3461,29 @@ export const messages: MessageSchema = {
     actions: {
       save: 'Save NSFW routing target',
     },
+    structuralFeatures: {
+      title: 'Tasks that keep normal routing while NSFW mode is on',
+      hint: 'Ticked tasks do not follow the NSFW target above while the mode is active; they use normal routing (global / group / per-feature settings). They only read the schedule, preferences and born-safe memories — never the raw conversation.',
+      consequenceHint: 'Unticked tasks — including tasks added later — stay on the NSFW target. Do not tick anything that reads the conversation (chat replies, memory distillation, summaries, proactive messages): explicit text would then reach a normal provider.',
+      selectedCount: '{count} selected',
+      features: {
+        schedule_plan: 'Daily schedule planning',
+        schedule_weather_drift: 'Schedule: weather drift',
+        arc_plan: 'Story arc planning',
+        arc_adapt: 'Arc skeleton adaptation',
+        arc_season_decide: 'Arc: next-season decision',
+        arc_beat_recheck: 'Arc: retry judgement',
+        arc_completion_memory: 'Arc: milestone completion memory',
+        feed_compose: 'Feed post composition',
+        feed_comment_reply: 'Feed comment replies',
+        memory_consolidate: 'Memory consolidation',
+        goal_review: 'Goal review',
+      },
+      actions: {
+        applyRecommended: 'Apply recommended set',
+        clear: 'Clear all',
+      },
+    },
     notifications: {
       saved: 'NSFW mode routing target saved',
     },
@@ -5029,12 +5052,12 @@ export const messages: MessageSchema = {
         },
         video_size: {
           label: 'Video size / resolution',
-          placeholder: 'provider_default',
+          placeholder: 'Blank sends the legacy fixed size',
           hint: 'Leave blank for legacy automatic sizing. Enter provider_default to omit size/resolution and use provider defaults, or a documented model value (e.g. 1280x720 for openai_videos; 720p for generations_polling). Accepted values vary by model; check your provider documentation.',
         },
         video_duration_seconds: {
           label: 'Video duration (seconds)',
-          placeholder: 'provider_default or 6',
+          placeholder: 'Blank keeps legacy duration; or enter seconds',
           hint: 'Leave blank for legacy automatic duration. Enter provider_default to omit seconds/duration, or a positive integer supported by your model, e.g. 6.',
         },
         video_poll_interval_seconds: { label: 'Video poll interval (seconds)', placeholder: '10' },
@@ -5167,6 +5190,8 @@ export const messages: MessageSchema = {
         confirmBody: 'This actually generates one small image through the provider to verify image generation end to end. It may incur a tiny cost. Continue?',
       },
       videoTest: {
+        useProviderDefault: 'Use provider defaults',
+        parameterOmitted: 'Provider defaults selected: this parameter will be omitted.',
         button: 'Generate test video',
         prompt: 'Test video prompt',
         hint: 'Generate a short clip with the current settings, then play or download it without publishing a feed post. Duration depends on the model.',

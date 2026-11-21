@@ -14,6 +14,7 @@ import {
 } from '@/utils/api/system'
 import { UiButton, UiCombobox } from '@/components/ui'
 import ReasoningOverrideFields from '@/components/ReasoningOverrideFields.vue'
+import NsfwStructuralFeaturesFields from '@/components/NsfwStructuralFeaturesFields.vue'
 import { providerConnectionLabel } from '@/utils/catalogLabels'
 import {
   NSFW_IMAGE_GENERATION_OFF,
@@ -40,6 +41,9 @@ const selectedImageProfileId = ref('')
 /** Reasoning posture bound onto the NSFW target while the reroute is
  * active — null keeps the target connection's defaults. */
 const selectedReasoning = ref<FeatureReasoningOverride | null>(null)
+/** Feature keys that stay on the normal route while the mode is
+ * active; empty (default) keeps every feature on the NSFW target. */
+const selectedStructuralFeatures = ref<string[]>([])
 const configured = ref(false)
 
 const hasSelectableTarget = computed(() => hasSelectableNsfwTarget({
@@ -59,6 +63,7 @@ function applyTarget(nextTarget: NsfwModeTarget | null): void {
   selectedImageProfileId.value
     = imageProfileSelectionFromTarget(nextTarget.image_profile_id)
   selectedReasoning.value = nextTarget.reasoning ?? null
+  selectedStructuralFeatures.value = [...(nextTarget.structural_features ?? [])]
 }
 
 async function loadModels(providerId: string, preferredModelId: string | null = null): Promise<void> {
@@ -138,6 +143,7 @@ async function saveTarget(): Promise<void> {
       reasoning: hasReasoningOverride(selectedReasoning.value)
         ? selectedReasoning.value
         : null,
+      structural_features: [...selectedStructuralFeatures.value],
     })
     configured.value = result.configured
     applyTarget(result.target)
@@ -235,6 +241,12 @@ watch(() => props.providersLoaded, (next) => {
     <ReasoningOverrideFields
       v-if="loaded && providersLoaded"
       v-model="selectedReasoning"
+    />
+
+    <NsfwStructuralFeaturesFields
+      v-if="loaded && providersLoaded"
+      v-model="selectedStructuralFeatures"
+      :disabled="saving"
     />
 
     <div class="target-actions">

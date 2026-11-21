@@ -49,6 +49,15 @@ class NsfwModeTargetPayload(BaseModel):
     # feature/group postures never ride onto the reroute. ``null`` /
     # all-default = keep the target connection's reasoning defaults.
     reasoning: FeatureReasoningOverride | None = None
+    # Feature keys that stay on the normal route while the mode is
+    # active (``NSFW_ROUTING_CARVE_OUT_REFERENCE.md``). ``None`` (absent)
+    # keeps whatever the stored target already has, so a client that does
+    # not know this field — e.g. a cached SPA bundle — cannot silently
+    # reset the carve-out when it saves an unrelated change. ``[]``
+    # clears it: every feature follows the target (pre-feature behaviour).
+    # Anything not listed — including features added later — stays on the
+    # target.
+    structural_features: list[str] | None = None
 
 
 class NsfwModePreferenceUpdate(BaseModel):
@@ -163,12 +172,20 @@ async def set_admin_nsfw_mode_target(
         model_id=payload.llm_model_id,
         container=container,
     )
+    structural_features: tuple[str, ...] | None = None
+    if payload.structural_features is not None:
+        structural_features = tuple(payload.structural_features)
+    else:
+        existing = await service.get_global_target()
+        if existing is not None:
+            structural_features = existing.structural_features
     try:
         target = await service.set_global_target(
             llm_provider_id=payload.llm_provider_id,
             llm_model_id=payload.llm_model_id,
             image_profile_id=payload.image_profile_id,
             reasoning=reasoning,
+            structural_features=structural_features or (),
         )
     except NsfwModeTargetError as exc:
         raise HTTPException(
@@ -254,6 +271,7 @@ def _target_to_payload(target: NsfwModeTarget) -> NsfwModeTargetPayload:
         llm_provider_id=target.llm_provider_id,
         llm_model_id=target.llm_model_id,
         image_profile_id=target.image_profile_id,
+        structural_features=list(target.structural_features),
         reasoning=(
             FeatureReasoningOverride(
                 disable_reasoning=reasoning.disable_reasoning,

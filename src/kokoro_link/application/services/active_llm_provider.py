@@ -44,7 +44,10 @@ from kokoro_link.contracts.llm import (
 from kokoro_link.contracts.repositories import PreferencesRepositoryPort
 from kokoro_link.domain.entities.character import Character, FeatureModelOverride
 from kokoro_link.application.services.feature_keys import FEATURE_TO_GROUP
-from kokoro_link.application.services.nsfw_mode import NsfwModeService
+from kokoro_link.application.services.nsfw_mode import (
+    NsfwModeService,
+    NsfwModeTarget,
+)
 from kokoro_link.application.services.output_language_policy import (
     OperatorOutputLanguageResolver,
 )
@@ -189,7 +192,9 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
             return value
 
         _ = operator_id
-        nsfw_target = await self._read_nsfw_target(character=character)
+        nsfw_target = await self._nsfw_target_for(
+            feature_key=feature_key, character=character,
+        )
         if nsfw_target is not None:
             self._require_registered_nsfw_provider(nsfw_target.llm_provider_id)
             return selected(nsfw_target.llm_model_id, "nsfw_mode")
@@ -356,7 +361,9 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
         binder = getattr(model, "with_reasoning_overrides", None)
         if binder is None:
             return model
-        nsfw_target = await self._read_nsfw_target(character=character)
+        nsfw_target = await self._nsfw_target_for(
+            feature_key=feature_key, character=character,
+        )
         if nsfw_target is not None:
             overrides = getattr(nsfw_target, "reasoning", None)
         elif _requires_community_tolerance(content_tolerance):
@@ -452,7 +459,9 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
         binder = getattr(model, "with_supports_vision", None)
         if binder is None:
             return model
-        if await self._read_nsfw_target(character=character) is not None:
+        if await self._nsfw_target_for(
+            feature_key=feature_key, character=character,
+        ) is not None:
             return model
         if _requires_community_tolerance(content_tolerance):
             return model
@@ -595,7 +604,9 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
         character: Character | None = None,
         content_tolerance: str | None = None,
     ) -> tuple[str | None, str | None]:
-        nsfw_target = await self._read_nsfw_target(character=character)
+        nsfw_target = await self._nsfw_target_for(
+            feature_key=feature_key, character=character,
+        )
         if nsfw_target is not None:
             self._require_registered_nsfw_provider(nsfw_target.llm_provider_id)
             return ROUTING_SOURCE_NSFW_MODE, nsfw_target.llm_provider_id
@@ -690,6 +701,31 @@ class PreferenceBackedActiveLLMProvider(ActiveLLMProviderPort):
                 key,
             )
             return None
+
+    async def _nsfw_target_for(
+        self,
+        *,
+        feature_key: str | None,
+        character: Character | None,
+    ) -> NsfwModeTarget | None:
+        """The NSFW target this call must use, or ``None`` for the
+        normal route.
+
+        A ``feature_key`` listed in the target's ``structural_features``
+        is carved out and returns ``None`` so it follows normal routing;
+        every other key — including unknown and future features — stays
+        on the target (fail-closed,
+        ``NSFW_ROUTING_CARVE_OUT_REFERENCE.md`` §4.3). All four NSFW
+        branch points go through this one helper so the model, the
+        routing source, and the reasoning posture of a call can never be
+        split across providers.
+        """
+        target = await self._read_nsfw_target(character=character)
+        if target is None:
+            return None
+        if feature_key and feature_key in target.structural_features:
+            return None
+        return target
 
     async def _read_nsfw_target(self, *, character: Character | None) -> Any | None:
         if self._nsfw_mode_service is None or character is None:
