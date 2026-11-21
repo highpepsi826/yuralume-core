@@ -4,6 +4,10 @@ overload, emotion events, reflections, memories and direction."""
 from collections import defaultdict
 from datetime import datetime, timezone, tzinfo
 
+from kokoro_link.application.services.nsfw_mode import (
+    CONTENT_MODE_NORMAL,
+    CONTENT_MODE_NSFW,
+)
 from kokoro_link.domain.entities.character_goal import CharacterGoal
 from kokoro_link.domain.entities.emotion_event import EmotionEvent
 from kokoro_link.domain.entities.memory_item import MemoryItem
@@ -48,6 +52,13 @@ _SECTION_TITLES: dict[str, str] = {
 
 
 _UNKNOWN_SECTION_TITLE = "其他記憶"
+
+_NSFW_BOUNDARY_LINE = (
+    "互動界線：若使用者侮辱你的人格、或在明確的停止訊號之後繼續，請真的停下來，"
+    "並且直接表達不滿。除此之外——強勢、命令式語氣、粗魯用詞——在親密場景裡是"
+    "氣氛的一部分，不是冒犯。不要因為對方強勢就冷淡退開；依你的性格決定要順著、"
+    "要反過來壓回去，還是嘴上不肯身體老實。"
+)
 
 
 def _render_emotion_events_block(
@@ -241,6 +252,7 @@ def _render_state_behavior_block(
     *,
     state: CharacterState,
     boundaries: list[str],
+    content_mode: str = CONTENT_MODE_NORMAL,
 ) -> list[str]:
     """Translate raw 0-100 state numbers into a tone / behaviour guide.
 
@@ -249,7 +261,24 @@ def _render_state_behavior_block(
     never actually suppress pandering. Pairing each axis with an explicit
     behaviour hint (and boundary-crossing guidance) lets the model make
     negative responses legitimate instead of defaulting to warmth.
+
+    In NSFW mode the 互動界線 line switches variant: 強勢 and 粗魯語氣 are
+    genre-register inside an intimate scene, not boundary crossings, and
+    the displayed state numbers would push the model toward sterility.
+    The 禁忌 line (the character's own ``boundaries``) is the same in
+    both modes — that is character configuration, not mode configuration.
     """
+    if content_mode == CONTENT_MODE_NSFW:
+        lines = [
+            "狀態對照（本輪是親密場景：數值只供內部參考，不要因此讓語氣變冷或收斂，"
+            "也不要把這些文字複述出來）：",
+            f"- 好感度 {state.affection}/100：{_affection_tone(state.affection)}",
+            f"- 信任度 {state.trust}/100：{_trust_tone(state.trust)}",
+            f"- 疲勞度 {state.fatigue}/100：{_fatigue_tone(state.fatigue)}",
+            f"- 精力 {state.energy}/100：{_energy_tone(state.energy)}",
+        ]
+        lines.append(_NSFW_BOUNDARY_LINE)
+        return lines
     lines: list[str] = [
         "狀態對照（請依此調整回覆語氣與互動界線，不要把這些文字複述出來）：",
         f"- 好感度 {state.affection}/100：{_affection_tone(state.affection)}",
@@ -484,6 +513,7 @@ def _state_behavior(ctx: PromptSectionContext) -> list[str]:
     return _render_state_behavior_block(
         state=ctx.state.pending_state,
         boundaries=ctx.identity.character.boundaries,
+        content_mode=ctx.rails.content_mode,
     )
 
 

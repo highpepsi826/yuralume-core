@@ -56,6 +56,18 @@ Rationale" below. This is a working suggestion, not an approval.
 | I-11 | Real-time generated picture-book stories | Media / Story | idea | 13 | - | 2026-10-21 |
 | I-16 | Improve image-generation prompt rules (wrong body features, extra objects) | Media / Prompt | idea | - | - | 2026-10-23 |
 | I-18 | Investigate why chat lacks date/time awareness (weekday, upcoming holidays) | Chat / Prompt | idea | - | - | 2026-10-24 |
+| I-19 | Scheduled promise messages still fire during an active co-presence chat, breaking immersion | Co-presence / Scheduling | idea | - | - | 2026-10-24 |
+| I-20 | Maximise existing messaging apps (Telegram/WhatsApp) with mode flags/prefixes before building an APP | Platform / Telegram | idea | - | - | 2026-10-25 |
+| I-21 | Schedule slot changes override an ongoing interaction: shared co-presence activity forgotten, or active conversation abruptly ended ("busy, talk later") | Co-presence / Chat / Schedule | idea | - | - | 2026-10-27 |
+| I-23 | Interaction still feels thinner/degrades even with daily Telegram chat | Relationship / Emotion | idea | - | - | 2026-11-01 |
+| I-24 | Hidden status bar (status values shown or hidden from the player) | Game UI | idea | - | - | 2026-11-01 |
+| I-25 | Menstrual cycle tracking for characters | Character / Health | idea | - | - | 2026-11-01 |
+| I-26 | Hypothetical topics drift into being treated as fact within two turns | Chat / Prompt / Memory | idea | - | - | 2026-11-01 |
+| I-27 | Opt-in "玩家共同生活": the character lives a daily life with the player even when the player is absent (at least 1 activity/day) | Co-presence / Schedule / Proactive | idea | - | - | 2026-11-07 |
+| I-28 | Full roleplay mode: long-form prose with scene description, expression/action beats and inner monologue, interactive | Chat / Prompt / Story | idea | - | - | 2026-11-07 |
+| I-29 | Character travels abroad (leisure or business): temporary timezone and an out-of-town self-awareness | Schedule / Travel | idea | - | - | 2026-11-07 |
+| I-30 | NSFW mode has no content-direction prompt: output stays restrained because the system prompt never learns the mode is on | NSFW / Prompt | in-progress | - | `NSFW_INTIMACY_DIRECTION_REFERENCE.md` | 2026-11-21 |
+
 ## Priority Rationale
 
 - **1 I-09 memory**: current pain, likely a logic/context-assembly bug rather
@@ -87,6 +99,9 @@ Group notes:
   Telegram, PWA). Must respect the single Telegram polling owner rule.
 - Providers (I-07/I-10): both touch provider configuration; consider
   designing together.
+- Platform strategy (I-20 → I-05/I-06/I-14): try to exhaust Telegram/WhatsApp
+  before committing to a separate APP; the mode-flag mechanism is also the
+  cheapest form of I-15's scene marker.
 
 ### I-01 即時語音對話
 
@@ -347,6 +362,129 @@ Group notes:
 - 待分析：聊天 prompt 是否注入當地日期/星期/時間；行程生成用的假期資料是否有傳入
   聊天 context；相關：I-15 現象 1（逐字稿沒有時間錨）。
 
+### I-19 同場聊天時排程訊息照發，打斷臨場感
+
+- 問題：與角色同場聊天時，如果有排程中的等待回覆，系統仍會照發。
+- 例子：角色說晚上 10 時找我，我在 21:55 已主動找角色開始聊天；到了 22:00，系統仍
+  照傳「我來找你了，你想聊什麼？」之類的句子，打破臨場感。
+- 待分析：排程/約定訊息發送前是否檢查當前是否正在對話中，或約定是否已被提前履行；
+  相關：COMMITMENT_RECONCILIATION_IMPLEMENTATION_REFERENCE.md（約定同步）、I-05。
+
+### I-20 開發 APP 前先「用盡」現有大眾通訊 app
+
+- 用戶想法：在考慮轉做 APP 之前，先試試用盡 Telegram（或 WhatsApp）這些現成 app 的
+  能力。例如現在要區分「同場」或「電話聊天」，就在訊息前面加 flag 來分辨。
+- 原因：做 APP 成本高，先驗證玩法；現成 app 已解決通知、語音、桌面/手機同步等問題。
+- 待分析：
+  - flag 的形式：文字前綴（例：`//同場`）、特殊符號、Telegram 指令（`/copresence`）、
+    回覆某條錨定訊息、或按鈕/keyboard。
+  - 模式狀態存哪裡：conversation 層的持久 mode，還是每條訊息即時判斷；如何自動離開。
+  - WhatsApp 的可行性：官方 Business API 限制多（模板訊息、24 小時窗口），可能要
+    第三方 bridge，成本與穩定性待評估。
+  - Telegram 的限制：Bot API 不能主動撥號、語音通話不可用；只能靠語音檔交換（見 I-03）。
+  - 與 I-05/I-06/I-14 的關係：若 flag 方案可行，可延後自建 APP 的決定；flag 亦是最
+    輕量的場次標記（I-15）。
+  - 待決定：新增（本項）還是併入 I-06 的「web-vs-app 決定」。
+
+### I-21 行程切換凌駕正在進行的互動
+
+- 共同根源：行程一切換，就蓋過了正在進行的互動。（原 I-22 已併入，I-22 不再使用）
+- 現象 A（同場）：我在他的吃飯行程中跟他一起吃飯，但一旦他的行程跳到下一個，
+  他就直接進行新活動，忘了正在跟我吃飯。
+- 現象 B（同場或 Telegram）：一旦進入他忙碌的行程，明明上一句他還在問我問題挑起
+  話題，下一句就回「我正在 xxx，等下再跟你聊這個話題」。
+- 待分析：
+  - 同場進行中的共同活動是否有被記錄成狀態；行程切換時 prompt 是否只看「當前行程」。
+  - 忙碌行程的「延遲回覆/忙碌」規則是否沒有考慮對話正在熱烈進行。
+  - 是否讓進行中的互動延長/暫緩行程，或加入過渡（先收尾話題、說明要去忙）。
+- 相關：I-19、I-05、I-18（時間感）。
+
+### I-23 每天聊但互動仍然變少／降級
+
+- 問題：明明每天在 Telegram 聊天，互動還是會少或降級。
+- 初步判讀：與上下文無關（歷史抽取見 I-09 遺留第 7 項），較可能是關係／情緒狀態
+  被衰減。`ExponentialDecayEmotionAggregator` 按半衰期把 `affection_delta` /
+  `trust` 等事件衰減回基線，聊天密集但單次情緒事件強度不高時，累積會持續被稀釋。
+- 待分析：衰減半衰期與基線的實際設定；每日聊天是否會產生任何情緒事件；是否應該
+  有「持續互動」的保底或不同曲線；降級是指回覆品質、語氣，還是狀態數值。
+- 相關：I-09（不同層：那是上下文，這是狀態）、I-08、I-12。
+
+### I-24 隱藏狀態列
+
+- 用戶想法：做隱藏狀態列。
+- 待分析：隱藏的是哪些數值（好感／信任／情緒／行程）；是玩家可切換，還是預設隱藏；
+  隱藏後是否仍影響回覆（應該仍然影響，只是不顯示）；與 I-14 乙遊介面的關係。
+- 相關：I-14。
+
+### I-25 記生理期
+
+- 用戶想法：讓角色記錄生理期。
+- 待分析：需要新的資料模型（週期起日、長度、症狀）；屬於敏感資料，需要明確的
+  存取與匯出邊界；是否只對部分角色啟用；與行程（不適/休息）、情緒、prompt 的聯動。
+- 現況：目前沒有任何週期資料模型；`health_care` prompt section 只是固定的關心語，
+  與生理週期無關。
+- 相關：I-12（玩家資料欄位）、I-13。
+
+### I-26 假設性話題兩回合內被當成事實
+
+- 問題：談論「假設」的話題很容易帶偏，聊到第二回合就已經偏成事實的走向，要使用者
+  每回合都提醒這是「假設性話題」。
+- 初步判讀：兩層都可能有關——對話層沒有標記「這是假設」，記憶抽取層
+  （`LLMMemoryConsolidator` 的「融合事實」）也會把假設句寫成事實。
+- 待分析：是否在對話中偵測假設語氣並加註；記憶寫入前是否要排除假設句；可參考
+  I-09 的逐字引文守衛做法。
+- 相關：I-09。
+
+### I-27 玩家共同生活（off-screen 日常模擬）
+
+- 用戶想法：可開啟「玩家共同生活」功能，就算玩家沒找角色，也用 AI 模擬角色跟玩家的日常
+  （最低限度一日一個活動）。
+- 與 I-05 的分別：I-05 是「同場時角色主動開口並通知玩家」，是單次事件；本項是一條持續的
+  off-screen 生活線，玩家不在場也照樣發生，並且會累積成隔天可聊的近況。
+- 現有基礎：
+  - `ScheduleActivity.participant_refs` 已能標記「與玩家一起」的活動
+    （`has_live_operator_commitment` / `has_expired_operator_commitment`）。
+  - `proactive_scheduler` 的 tick 已能定時觸發評估；`CharacterLifeContextBuilder`
+    已能提供「自己最近的生活」給角色引用。
+  - `character_encounter_service` 已有角色之間的碰面模擬，機制可參考。
+- 待分析：
+  - 開關的粒度：全域／每角色；關閉後既有累積的活動記錄如何處理。
+  - 每日最少一個活動是否寫回 schedule（會影響 I-21 的行程切換行為）。
+  - 模擬出的活動要不要通知玩家（每日摘要？還是只在對話中被引用）。
+  - 成本：每日一個 LLM 活動 × 角色數，與 I-10 本地模型/離線 fallback 的關係。
+- 相關：I-05、I-21、I-23、I-04。
+
+### I-28 正統 RP 模式
+
+- 用戶想法：正統的 AIRP mode——長篇、有場景、表情動作、內心戲、互動。
+- 現況：已有的相近能力是「起幕」story scene（`story_scene_service`，開場旁白＋
+  場景畫面＋角色第一句，落地在一般對話串）與 `fusion_story`；但這是**事件式**的
+  場景，不是一個常駐的敘事模式。
+- 待分析：
+  - 是「每一回合都用長篇敘事」，還是「進入場景後才用」（與現有 story scene 的差別）。
+  - 分段規則：場景描寫／角色台詞／內心戲各佔多少；避免每回合都變長篇獨白。
+  - 與 Telegram 的相容性：長篇文字在手機訊息介面是否可用（與 I-20 的 flag 構想相關）。
+  - 與 I-14 乙遊介面的關係；是否與 I-08 乙女感共用 prompt 規則。
+  - token 成本與 I-09 的窗口限制（8 則、3 則原文）是否足夠支撐長篇。
+- 相關：I-11、I-14、I-08、I-09。
+
+### I-29 角色旅行／出差的行程與時區
+
+- 用戶想法：角色到國外旅行或工幹的行程——暫時改時區，並讓角色意識到自己 out of town。
+- 現況（2026-11-07 調查）：
+  - `ScheduleService._resolve_operator_timezone` 只從**玩家**的
+    `operator_profile.timezone_id` 取時區（`schedule_service.py:997`），角色本身沒有
+    時區／地點欄位；`Character` 也沒有 location 欄位。
+  - 因此角色一旦「出國」，其行程、時間錨、問候時間都會維持玩家時區，說不通。
+- 待分析：
+  - 資料模型：是給角色加 `travel` 期間（目的地、時區、起迄日），還是給 schedule
+    加 per-day 時區覆寫。
+  - 誰決定旅行：玩家指定、行程 AI 自行產生，還是角色主動提及後由系統建立。
+  - 影響面：行程生成、時間錨（I-18）、主動訊息時間（避免半夜傳訊）、
+    問候語的「早晚」、航班/時差造成的疲倦。
+  - 回程後如何收尾（旅行記憶寫入）。
+- 相關：I-18（時間感）、I-13（世界觀）、I-27。
+
 ## Change Log
 
 - 2026-10-21 Created backlog with I-01 to I-14. (by Claude)
@@ -372,6 +510,33 @@ Group notes:
 - 2026-10-24 Merged I-17 into I-10; I-17 removed. (by Claude)
 - 2026-10-24 Added I-18 (investigate missing date/time and holiday
   awareness in chat). I-17 is retired (merged into I-10). (by Claude)
+- 2026-10-24 Added I-19 (scheduled promise messages fire during an active
+  co-presence chat). (by Claude)
+- 2026-10-25 Added I-20 (maximise Telegram/WhatsApp with mode flags before
+  building an APP). (by Claude)
+- 2026-10-27 Added I-21 (co-presence activity forgotten on schedule switch)
+  and I-22 (busy schedule slot abruptly ends an active conversation).
+  (by Claude)
+- 2026-10-27 Merged I-22 into I-21 (shared root cause: schedule switch
+  overrides ongoing interaction). I-22 is retired and will not be reused.
+  (by Claude)
+- 2026-11-01 Added I-23 (interaction degrades despite daily chat), I-24
+  (hidden status bar), I-25 (menstrual cycle tracking), I-26 (hypothetical
+  topics drift into fact). Recorded the Telegram context-loading findings as
+  I-09 legacy item 7 (DB-sourced unified window; 8-message window; 3 raw
+  tail messages). (by Claude)
+- 2026-11-07 Added I-27 (opt-in player co-living simulation), I-28 (full
+  roleplay mode), I-29 (character travel with temporary timezone). Recorded
+  that schedule timezone currently resolves from the player profile only.
+  (by Claude)
+- 2026-11-21 Added I-30 (NSFW mode has no content-direction prompt; output
+  stays restrained because the system prompt never learns the mode is on).
+  Design written to `NSFW_INTIMACY_DIRECTION_REFERENCE.md`, awaiting owner
+  approval. (by Claude)
+- 2026-11-21 I-30 → `in-progress`: implemented `intimacy_directive`, the
+  NSFW `互動界線` variant and the post-turn intimacy fact, plus the NSFW /
+  NORMAL golden twins. NORMAL prompt verified byte-identical. Not deployed;
+  `done` is decided by the main session after release. (by Claude)
 
 ### I-09 遺留（非阻擋，未排程）
 
@@ -389,3 +554,15 @@ Group notes:
    與 I-09 無關但同次發現，需獨立設計檔。
 6. **`persona_safe_for_account` 不 trim 空白** — `["  "]` 會被當成一個 sender。
    玩家 UI 產不出這種值（`splitLines` 會 trim），但其他呼叫端可能可以。
+7. **Telegram 上下文抽取現況與改善空間**（2026-11-01 調查）——先確認現況：
+   - 同場與 Telegram 走同一個 `ChatService`，歷史都由
+     `dialogue_window_loader.load_unified_recent_window` 從 DB（conversation
+     repository）抽取，跨來源合併成一條時間線並先合併 fan-out 重複行；
+     `messaging_dispatcher` 只負責綁定 conversation 與建立 `presence_frame`。
+     所以不是由前端傳上下文，也沒有「手機一份、同場另一份」的分叉。
+   - `_RECENT_MESSAGE_LIMIT = 8`（`chat_service.py:421`）：預設窗口只有 8 則；
+     只有 DH3 checkpoint 啟用時才改用較寬的 `dialogue_checkpoint.window_limit`。
+   - `PROMPT_RAW_TAIL_MESSAGES = 3`（`dialogue_checkpoint/window.py:36`）：prompt
+     只保留最後 3 則原文，更早的會被壓成摘要。
+   - 待分析：8 則對「每天聊」是否太窄；3 則原文是否讓話題在兩三回合內失去細節；
+     window_limit 的實測值與 token 成本；是否要按對話密度自適應。

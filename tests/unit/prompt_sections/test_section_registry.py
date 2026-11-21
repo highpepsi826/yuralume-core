@@ -29,6 +29,7 @@ from kokoro_link.infrastructure.prompt.sections import (
     health_care,
     honesty,
     identity,
+    intimacy,
     schedule,
     state,
     story,
@@ -53,6 +54,7 @@ from kokoro_link.infrastructure.prompt.sections.registry import (
 SECTION_MODULES = (
     identity,
     state,
+    intimacy,
     schedule,
     story,
     tools,

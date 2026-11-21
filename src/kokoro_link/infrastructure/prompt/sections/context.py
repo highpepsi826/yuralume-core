@@ -182,6 +182,13 @@ class RailsContext:
     Resolved once per turn so two sections toggled by the same
     experiment can never read different variants mid-build. What each
     flag *suppresses* is decided by the resolvers, not here.
+
+    ``content_mode`` is the NSFW-mode **write-time fact** (``normal`` /
+    ``nsfw``), not content detection: it says how this turn was routed,
+    and it gates writing direction (``intimacy_directive``, the
+    ``state_behavior`` boundary variant). It is deliberately separate
+    from ``content_tolerance``, which asks whether history may leave the
+    host at all.
     """
 
     experiment_overlay: Mapping[str, str]
@@ -189,6 +196,7 @@ class RailsContext:
     body_state_enabled: bool
     subjective_time_enabled: bool
     address_preference_enabled: bool
+    content_mode: str = "normal"
 
     @property
     def include_catchup_hint(self) -> bool:

@@ -169,6 +169,7 @@ def _all_sections() -> tuple[PromptSection, ...]:
         health_care,
         honesty,
         identity,
+        intimacy,
         schedule,
         state,
         story,
@@ -179,6 +180,7 @@ def _all_sections() -> tuple[PromptSection, ...]:
     return (
         *identity.SECTIONS,
         *state.SECTIONS,
+        *intimacy.SECTIONS,
         *schedule.SECTIONS,
         *story.SECTIONS,
         *tools.SECTIONS,

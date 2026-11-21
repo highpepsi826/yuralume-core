@@ -103,6 +103,14 @@ SECTION_ORDER: Final[tuple[str, ...]] = (
     #    RegisterProfile (numeric axes + note) on every single turn.
     "presence_frame",
     "turn_register",
+    #    ``intimacy_directive`` is NSFW mode's writing direction. It sits
+    #    right after ``turn_register`` on purpose: both are the per-turn
+    #    frame layer of the prompt, and both live *below* the cacheable
+    #    prefix, so a content_mode-dependent block here re-derives every
+    #    turn where such a block belongs rather than invalidating the
+    #    stable prefix above it. In NORMAL mode it renders ``[]``, so
+    #    NORMAL output stays byte-identical (pinned by the goldens).
+    "intimacy_directive",
     # -- current inner state ----------------------------------------
     "character_state",
     "state_behavior",

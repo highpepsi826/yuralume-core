@@ -12,6 +12,12 @@ sources:
   - src/kokoro_link/api/routes/nsfw_mode.py
   - src/kokoro_link/application/services/active_llm_provider.py
   - src/kokoro_link/application/services/active_image_provider.py
+  - src/kokoro_link/infrastructure/prompt/default.py
+  - src/kokoro_link/infrastructure/prompt/sections/context.py
+  - src/kokoro_link/infrastructure/prompt/sections/intimacy.py
+  - src/kokoro_link/infrastructure/prompt/sections/order.py
+  - src/kokoro_link/infrastructure/prompt/sections/state.py
+  - src/kokoro_link/infrastructure/post_turn/llm_processor.py
   - frontend/src/composables/useNsfwMode.ts
 symbols:
   - src/kokoro_link/application/services/nsfw_mode.py::NsfwModeService
@@ -21,6 +27,11 @@ symbols:
   - src/kokoro_link/contracts/nsfw_safe_summary.py::NsfwSafeSummaryPort
   - src/kokoro_link/infrastructure/dialogue/llm_safe_summary.py::LLMNsfwSafeSummarizer
   - src/kokoro_link/api/routes/nsfw_mode.py::get_nsfw_mode_preference
+  - src/kokoro_link/infrastructure/prompt/default.py::DefaultPromptContextBuilder
+  - src/kokoro_link/infrastructure/prompt/sections/context.py::RailsContext
+  - src/kokoro_link/infrastructure/prompt/sections/intimacy.py::_intimacy_directive
+  - src/kokoro_link/infrastructure/prompt/sections/state.py::_render_state_behavior_block
+  - src/kokoro_link/infrastructure/post_turn/llm_processor.py::_render_content_mode_context
 ---
 
 # NSFW／內容流
@@ -125,6 +136,35 @@ dispatcher、pending follow-up、story arc、場景收尾、支線、角色生�
 - 失敗回傳空字串 → 該訊息對 frontier 永久隱形
 - 產生時機：回合結束後非同步（`_schedule_nsfw_safe_summary_generation`），
   使用者訊息與角色回覆並行摘要，只覆寫有變動的欄位
+
+## 內容取向
+
+NSFW mode 不只換模型，也換**寫作方向**。`content_mode` 從 `chat_service` 的
+既有 prelude（寫入時事實）一路傳到 `DefaultPromptContextBuilder.build()` →
+`RailsContext.content_mode`（預設 `"normal"`），只影響兩個 prompt 區塊：
+
+| 區塊 | 位置 | NORMAL | NSFW |
+|---|---|---|---|
+| `intimacy_directive` | `SECTION_ORDER` 中 `turn_register` 之後、`character_state` 之前 | `[]`（整段不渲染） | 尺度／視角／引領／用詞／節奏／情感／主動性七條 |
+| `state_behavior` 的「互動界線」 | `sections/state.py::_render_state_behavior_block` | 既有文字，逐字不變 | 強勢／粗魯語氣不再視為越界；只保留侮辱人格與明確停止訊號 |
+
+要點：
+
+- **NORMAL 逐位元組不變**。`intimacy_directive` 在 NORMAL 回 `[]`，且它在
+  可快取前綴之下，golden 快照（含 `normal_boundary_variant` ↔
+  `nsfw_intimacy_directive` 這對孿生案例）證明 NORMAL 輸出沒有位移。
+- **不是內容偵測**：gating 讀的是 `content_mode` 這個寫入事實，不掃描文字，
+  本層「不做內容偵測」的立場不變。`content_tolerance`（能不能外送）與
+  `content_mode`（這一輪怎麼寫）語意不同，不可互換。
+- **角色卡的 `禁忌`／`boundaries` 照舊渲染**，那是角色設定，不是模式設定。
+- `chat_service` 的五個 `build()` 呼叫點都會帶 `content_mode`：
+  `_send_message_turn`（工具循環與串流 closure）與 `_generate_reply_with_tools`
+  （新增參數，預設 `CONTENT_MODE_NORMAL`）。其餘 20+ 個呼叫端不傳即 NORMAL。
+- 事後記憶（`post_turn` 的 `_render_content_mode_context`）仍是 born-safe，
+  但新增一條「必須保留雙方已發生過的親密程度（不含細節）」的事實，讓下一輪
+  的起點不會被蒸發回「還不熟」。
+
+設計與驗收：`NSFW_INTIMACY_DIRECTION_REFERENCE.md`。
 
 ## 其他面
 

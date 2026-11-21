@@ -64,6 +64,7 @@ BRANCH_PAIRS: tuple[tuple[str, str], ...] = (
     ("body_state.rendered", "body_state.suppressed"),
     ("subjective_time.on", "subjective_time.off"),
     ("content_tolerance.frontier", "content_tolerance.community"),
+    ("content_mode.normal", "content_mode.nsfw"),
     ("stage_nudge.on", "stage_nudge.off"),
     ("latest_user_message.rendered", "latest_user_message.omitted"),
     ("texting_style.on", "texting_style.off"),
@@ -112,6 +113,9 @@ MARKER_NO_BROWSING = "這個環境沒有給你上網的能力："
 MARKER_SUBJECTIVE_TIME = (
     "主觀時間（話題層事實，與情緒層 idle drift 分離；話題選擇參考用，請勿照字面覆述）："
 )
+MARKER_INTIMACY = "親密場景取向（本輪適用，請內化，不要複述本段）："
+MARKER_NSFW_BOUNDARY = "在親密場景裡是氣氛的一部分，不是冒犯"
+MARKER_NORMAL_BOUNDARY = "不要因為對方強勢就退讓"
 
 _LONG_IDLE_MINUTES = 4320.0
 """Three days — comfortably past the subjective-time catch-up threshold."""
@@ -221,6 +225,7 @@ GOLDEN_CASES: tuple[GoldenCase, ...] = (
             "persona_curiosity.absent",
             "schedule.absent",
             "tool_capabilities.undeclared",
+            "content_mode.normal",
         ),
         markers=("角色設定：", MARKER_LATEST_USER, "近期對話：", MARKER_HONESTY),
         absent_markers=(
@@ -355,6 +360,41 @@ GOLDEN_CASES: tuple[GoldenCase, ...] = (
         markers=("僅在 community 容忍度下才會進 prompt",),
         build_kwargs=lambda: {
             **_required(F.rich_character(), latest="還在嗎？"),
+            "recent_messages": F.nsfw_mixed_messages(),
+            "now": F.NOW,
+            "today_local": F.TODAY,
+            "content_tolerance": F.COMMUNITY,
+        },
+    ),
+    GoldenCase(
+        name="nsfw_intimacy_directive",
+        summary=(
+            "content_mode=nsfw renders the intimacy directive and the NSFW "
+            "boundary variant (the realistic pairing: community tolerance)."
+        ),
+        branches=("content_mode.nsfw", "content_tolerance.community"),
+        markers=(MARKER_INTIMACY, "不要自我審查", MARKER_NSFW_BOUNDARY),
+        absent_markers=(MARKER_NORMAL_BOUNDARY,),
+        build_kwargs=lambda: {
+            **_required(F.rich_character(), latest="過來。"),
+            "recent_messages": F.nsfw_mixed_messages(),
+            "now": F.NOW,
+            "today_local": F.TODAY,
+            "content_mode": "nsfw",
+            "content_tolerance": F.COMMUNITY,
+        },
+    ),
+    GoldenCase(
+        name="normal_boundary_variant",
+        summary=(
+            "Same turn at content_mode=normal — no directive, the pre-feature "
+            "boundary line. The diff against the case above is the mode alone."
+        ),
+        branches=("content_mode.normal", "content_tolerance.community"),
+        markers=(MARKER_NORMAL_BOUNDARY,),
+        absent_markers=(MARKER_INTIMACY, MARKER_NSFW_BOUNDARY),
+        build_kwargs=lambda: {
+            **_required(F.rich_character(), latest="過來。"),
             "recent_messages": F.nsfw_mixed_messages(),
             "now": F.NOW,
             "today_local": F.TODAY,

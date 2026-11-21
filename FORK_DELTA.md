@@ -328,6 +328,33 @@ Telegram 綁定帳號的 allowlist 狀態在收合卡片上也顯示警告。
 
 ---
 
+### F-14 — NSFW 模式的寫作方向（`intimacy_directive`、界線變體、記憶親密度）
+
+**類型：** feature
+**狀態：** KEEP（已實作，等待發布）
+
+上游的 NSFW mode 只換路由與資料流（模型、圖片 profile、tolerance），
+system prompt 與 NORMAL 逐位元組相同。本 fork 讓它同時切換**寫作方向**：
+
+| 項目 | 位置 |
+|---|---|
+| `intimacy_directive` 區塊（只在 `content_mode == "nsfw"` 渲染，`turn_register` 之後） | `src/kokoro_link/infrastructure/prompt/sections/intimacy.py`、`src/kokoro_link/infrastructure/prompt/sections/order.py` |
+| `content_mode` 傳入 prompt context（`RailsContext`） | `src/kokoro_link/infrastructure/prompt/default.py`、`src/kokoro_link/infrastructure/prompt/sections/context.py`、`src/kokoro_link/application/services/chat_service.py` |
+| 「互動界線」NSFW 變體 | `src/kokoro_link/infrastructure/prompt/sections/state.py` |
+| 事後記憶：保留已發生的親密程度（仍 born-safe） | `src/kokoro_link/infrastructure/post_turn/llm_processor.py` |
+
+**相關 reference：** `NSFW_INTIMACY_DIRECTION_REFERENCE.md`
+
+**溶合判斷：**
+- 上游若開始在 prompt 裡處理 NSFW（例如 prompt 層的尺度開關），優先評估
+  改用上游的接法，本 fork 保留的差異應只剩文字取向。
+- NORMAL 輸出逐位元組不變，由 prompt golden 的孿生案例
+  （`nsfw_intimacy_directive` ↔ `normal_boundary_variant`）把關。
+- `chat_service.py` 與 `prompt_golden/snapshots/` 都在下方「衝突熱區」，
+  merge 時預期衝突。
+
+---
+
 ## 衝突熱區
 
 以下檔案同時是「fork 改過」與「最可能被上游改」。merge 時優先看這些。

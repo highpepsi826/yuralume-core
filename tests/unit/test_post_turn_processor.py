@@ -252,6 +252,48 @@ async def test_nsfw_content_mode_injects_born_safe_memory_instruction() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nsfw_content_mode_keeps_the_relationship_milestone_fact() -> None:
+    """The born-safe rule must not evaporate *how far* the relationship got.
+
+    Without this, the next turn reads only 「共度了一段親密時光」 and the
+    model re-probes from "not yet intimate" every round."""
+    model = _ScriptedModel('{"memories": []}')
+    processor = LLMPostTurnProcessor(model=model)
+
+    await processor.process(
+        character=_character(),
+        conversation_id="conv-1",
+        user_message="今晚留下來。",
+        assistant_message="我靠近你，輕聲答應。",
+        content_mode="nsfw",
+    )
+
+    prompt = model.prompts[0]
+    assert "另外必須保留一個不含露骨細節的事實" in prompt
+    assert "已經有過性關係" in prompt
+    assert "它決定下一次互動的起點" in prompt
+    # Still a born-safe instruction — the new rule is additive.
+    assert "不要記錄露骨" in prompt
+
+
+@pytest.mark.asyncio
+async def test_normal_content_mode_has_no_nsfw_memory_rules() -> None:
+    model = _ScriptedModel('{"memories": []}')
+    processor = LLMPostTurnProcessor(model=model)
+
+    await processor.process(
+        character=_character(),
+        conversation_id="conv-1",
+        user_message="今天天氣如何？",
+        assistant_message="還不錯，有風。",
+    )
+
+    prompt = model.prompts[0]
+    assert "內容流向模式：NSFW mode" not in prompt
+    assert "另外必須保留一個不含露骨細節的事實" not in prompt
+
+
+@pytest.mark.asyncio
 async def test_memories_only_no_state() -> None:
     response = (
         '{"memories": [{"kind": "semantic", "content": "likes cats", "salience": 0.5, "tags": []}]}'

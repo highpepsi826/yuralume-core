@@ -21,6 +21,7 @@ from dataclasses import fields, is_dataclass
 from datetime import date as date_type, datetime, timezone, tzinfo
 from typing import Mapping
 
+from kokoro_link.application.services.nsfw_mode import CONTENT_MODE_NORMAL
 from kokoro_link.contracts.prompt import (
     PromptContextBuilderPort,
     PromptToolDescriptor,
@@ -189,6 +190,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
         address_preference=None,  # noqa: ANN001 - optional, type checked at use
         experiment_overlay: "dict[str, str] | None" = None,
         content_tolerance: str = CONTENT_TOLERANCE_FRONTIER,
+        content_mode: str = CONTENT_MODE_NORMAL,
         material_digest: PromptMaterialDigest | None = None,
         turn_register_profile: RegisterProfile | None = None,
         reply_diversity_evidence: ReplyDiversityEvidence | None = None,
@@ -253,6 +255,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
                 address_preference=address_preference,
                 experiment_overlay=experiment_overlay,
                 content_tolerance=content_tolerance,
+                content_mode=content_mode,
                 material_digest=material_digest,
                 turn_register_profile=turn_register_profile,
                 reply_diversity_evidence=reply_diversity_evidence,
@@ -321,6 +324,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
         address_preference,  # noqa: ANN001 - optional, type checked at use
         experiment_overlay: "dict[str, str] | None",
         content_tolerance: str,
+        content_mode: str,
         material_digest: PromptMaterialDigest | None,
         turn_register_profile: RegisterProfile | None,
         reply_diversity_evidence: ReplyDiversityEvidence | None,
@@ -434,6 +438,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
             rails=RailsContext(
                 experiment_overlay=experiment_overlay or {},
                 content_tolerance=content_tolerance,
+                content_mode=content_mode,
                 body_state_enabled=self._humanization_enabled(
                     "body_state_enabled",
                 ),
