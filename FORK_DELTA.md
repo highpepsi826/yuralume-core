@@ -331,7 +331,7 @@ Telegram 綁定帳號的 allowlist 狀態在收合卡片上也顯示警告。
 ### F-14 — NSFW 模式的寫作方向（`intimacy_directive`、界線變體、記憶親密度）
 
 **類型：** feature
-**狀態：** KEEP（已實作，等待發布）
+**狀態：** KEEP（已發布 2026-11-21，`055580b`）
 
 上游的 NSFW mode 只換路由與資料流（模型、圖片 profile、tolerance），
 system prompt 與 NORMAL 逐位元組相同。本 fork 讓它同時切換**寫作方向**：

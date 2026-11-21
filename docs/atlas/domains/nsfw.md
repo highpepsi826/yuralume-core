@@ -1,7 +1,7 @@
 ---
 doc: nsfw
 tier: atlas
-verified_at_commit: 3fc5836
+verified_at_commit: 055580b
 verified_at: 2026-11-21
 sources:
   - src/kokoro_link/application/services/nsfw_mode.py

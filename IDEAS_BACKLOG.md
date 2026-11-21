@@ -66,7 +66,7 @@ Rationale" below. This is a working suggestion, not an approval.
 | I-27 | Opt-in "玩家共同生活": the character lives a daily life with the player even when the player is absent (at least 1 activity/day) | Co-presence / Schedule / Proactive | idea | - | - | 2026-11-07 |
 | I-28 | Full roleplay mode: long-form prose with scene description, expression/action beats and inner monologue, interactive | Chat / Prompt / Story | idea | - | - | 2026-11-07 |
 | I-29 | Character travels abroad (leisure or business): temporary timezone and an out-of-town self-awareness | Schedule / Travel | idea | - | - | 2026-11-07 |
-| I-30 | NSFW mode has no content-direction prompt: output stays restrained because the system prompt never learns the mode is on | NSFW / Prompt | in-progress | - | `NSFW_INTIMACY_DIRECTION_REFERENCE.md` | 2026-11-21 |
+| I-30 | NSFW mode has no content-direction prompt: output stays restrained because the system prompt never learns the mode is on | NSFW / Prompt | done | - | `NSFW_INTIMACY_DIRECTION_REFERENCE.md` | 2026-11-21 |
 
 ## Priority Rationale
 

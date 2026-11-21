@@ -1219,3 +1219,36 @@ database rows.
   infrastructure` is bidirectional).
 - Docs and tooling only. No application code, migration, data, image or
   Coolify change.
+
+### NSFW 寫作方向（`intimacy_directive`）已發布 — 2026-11-21 (by Claude)
+
+- Commit `055580b`；設計與驗收：`NSFW_INTIMACY_DIRECTION_REFERENCE.md`（I-30、F-14）。
+- 問題：NSFW mode 只換路由與資料流，system prompt 與 NORMAL 逐位元組相同
+  （`infrastructure/prompt/` 全目錄 `nsfw` 出現 0 次），所以輸出仍受同一份
+  克制、循序漸進、有界線的角色扮演指令約束。唯一知道 NSFW 的 prompt 是事後
+  記憶蒸餾，且方向是更保守（born-safe）。
+- Source：新增 `sections/intimacy.py`（只在 `content_mode == "nsfw"` 渲染，
+  位於 `turn_register` 之後、可快取前綴之下）；`content_mode` 由 `chat_service`
+  既有的 prelude 傳入 `DefaultPromptContextBuilder` → `RailsContext`；
+  `state_behavior` 的「互動界線」加 NSFW 變體（強勢／粗魯語氣不再算越界，
+  保留侮辱人格與明確停止訊號；角色卡 `禁忌` 不變）；post-turn 記憶仍
+  born-safe，但新增必須保留雙方已發生親密程度的事實。無 migration、無資料寫入。
+- 驗收：targeted 250 passed；prompt golden 對既有 19 個快照零 diff，新增
+  `nsfw_intimacy_directive` ↔ `normal_boundary_variant` 孿生案例；全套 unit
+  唯一失敗 `test_fx1_hardening::test_the_tool_path_crashed_…` 為 Python 3.14
+  既有問題，與本次無關。`atlas_check` 0 error／0 warning；`fork_delta_check` OK。
+- 發布：Actions `Publish container images` run `44918660890` 成功；不可變 digest
+  `sha256:9fca4c9b43a4d0d341d1e87912d68c1aafa7f176ab42bb444628c5cadd3078cd`
+  （tag `sha-055580b`）。
+- Coolify：`app`、`coordinator`、`worker`、`connector` 四角色改指上述 digest；
+  改動前 compose 備份於
+  `C:\Entertainment\yuralume\backups\coolify-compose-pre-055580b-20261121-raw.yml`
+  （及的 `-generated.yml`）。`postgresql`、`storage` 映像、volumes、secrets
+  均未變更。無 migration。
+- 部署觀察：全堆疊重建後約 20 分鐘 `starting:unknown` 且 `/health` 503，
+  期間 app／coordinator／worker 日誌停在「Waiting for application startup」；
+  postgres 18.6 完成啟動後各角色依序轉為 healthy，最終六個服務全部
+  `running:healthy`、`/health` 回 `status=ok`、`/api/v1/system/version`
+  回報 commit `055580b…`。
+- 未由本次驗證（需要帳密或主機存取）：admin 登入、代表性媒體讀取、
+  Telegram polling 擁有者。SSH 22 在此執行環境被阻擋，未能做主機端檢查。
