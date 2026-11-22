@@ -1321,3 +1321,28 @@ database rows.
   四個應用角色重啟後日誌無錯誤。
 - 未由本次驗證：admin 登入、代表性媒體讀取、Telegram polling 擁有者；新 prompt
   在真實模型下的表現，待 owner 試玩。Part A 與行程表標記尚在實作。
+
+## 2026-11-22 — I-21 第二期 Part A 與行程表標記 (by Claude)
+
+- 設計：`ONGOING_INTERACTION_WRITEBACK_REFERENCE.md` §4.1、§4.2b（owner 批准；
+  owner 於部署前另行明確同意此發布，因為它會讓系統更常寫入今日行程）。
+  互動跨越行程邊界時，post-turn 處理器收到明確的事實與提問，經既有的
+  `schedule_adjustments` 路徑寫回行程；行程表對玩家已答應的共同活動顯示
+  「和你一起」。無 migration、無 persistence 變更。
+- Source commit `53ab447`（實作）＋ `cc96f6b`（僅 checkpoint 文件）。`53ab447` 的
+  映像發布被後一次 push 取消，實際部署的是 `cc96f6b`，程式碼相同。
+- 主 session 審查：讀完整 source diff；後端相關測試 509 passed；`vue-tsc` 乾淨；
+  新前端測試 6 passed；`atlas_check` 0／0；`fork_delta_check` OK。
+  `check:i18n` 的 catalog 檢查回報三個 ja-JP 鍵與 zh-TW 相同，非本次改動
+  （自 `2aa978a` 起語系檔只多三行 `withYou`；未在舊版本上實跑驗證）。
+  `tests/uiImage.test.ts` 在全套平行執行時超時，單獨執行 47／47 通過兩次。
+- 發布：Actions run `45002762051` 成功；不可變 digest
+  `sha256:c02d425b2951220a8b29d4e44a618edb3161a4ca2850bff52c4062f5fbd9f79c`
+  （tag `sha-cc96f6b`）。改動前 compose 備份於
+  `C:\Entertainment\yuralume\backups\coolify-compose-pre-cc96f6b-20261122-163415.yml`。
+  `postgresql`、`storage` 映像、volumes、secrets 未變更。
+- Coolify：四角色改指上述 digest 並部署；六個服務全部 `running:healthy`、
+  `/health` 回 `status=ok`、`/api/v1/system/version` 回報 commit `cc96f6b`；
+  四個應用角色重啟後日誌無錯誤。
+- 未由本次驗證：admin 登入、代表性媒體讀取、Telegram polling 擁有者；真實模型
+  是否照指示改寫行程；行程表新標記在瀏覽器中的實際顯示。待 owner 試玩。

@@ -1,6 +1,6 @@
 # 互動保持・第二期：讓行程跟上對話 — 設計參考
 
-**Status:** owner 已批准（2026-11-22，§9 三點全採用建議）。Part B 已發布（`a37af30`）；Part A 與 Part C 已在 source 實作並通過測試（未 commit、未部署）。
+**Status:** owner 已批准並**全部發布**（2026-11-22）：Part B `a37af30`；Part A 與行程表標記 `53ab447`（部署映像 `cc96f6b`）。真實模型下的表現待 owner 試玩確認。
 **建立：** 2026-11-22 (by Claude)
 **Backlog：** `IDEAS_BACKLOG.md` I-21
 **前置：** `ONGOING_INTERACTION_HOLD_REFERENCE.md`（第一期，已發布 `2aa978a`）
