@@ -195,8 +195,8 @@ Provider 解析的順序完全相同（`_read_preferred_provider` :591）。
 **聊天回合也會寫行程：** 除了 planner，聊天回合的 post-turn 會透過
 `apply_adjustments` 改寫行程。改行程行為前先讀
 [flows/chat-turn.md](flows/chat-turn.md)「行程如何影響一個回合」，那裡記錄了
-行程在回合中的三個作用點與 post-turn 改寫的觸發條件。（查證於 `d066b3e`，
-2026-11-22）
+行程在回合中的作用點、post-turn 改寫的觸發條件、記憶化不看對話、重疊規則，
+以及聊天 prompt 看不到玩家參與狀態。（查證於 `d54864b`，2026-11-22）
 
 **必跑測試：** `tests/unit/test_schedule_service.py`（16）、`_calendar`(8)、
 `_cross_instance`(7)、`_future_commitment`(5)、`_weather_refresh`(7)、

@@ -18,6 +18,8 @@ sources:
   - src/kokoro_link/domain/value_objects/ongoing_interaction.py
   - src/kokoro_link/data/prompts/busy/decider.txt
   - src/kokoro_link/data/prompts/post_turn/processor.txt
+  - src/kokoro_link/application/services/schedule_memorializer.py
+  - src/kokoro_link/domain/services/shared_activity_evidence.py
 symbols:
   - src/kokoro_link/application/services/chat_service.py::send_message
   - src/kokoro_link/application/services/chat_service.py::send_message_stream
@@ -29,6 +31,10 @@ symbols:
   - src/kokoro_link/application/services/busy_defer_policy.py::BUSY_REPLY_DECIDER_INVOKE_FLOOR
   - src/kokoro_link/application/services/schedule_service.py::apply_adjustments
   - src/kokoro_link/application/services/schedule_service.py::resolve_current
+  - src/kokoro_link/application/services/schedule_service.py::_resolve_overlaps
+  - src/kokoro_link/application/services/schedule_memorializer.py::memorialize
+  - src/kokoro_link/domain/services/shared_activity_evidence.py::derive_shared_activity_evidence
+  - src/kokoro_link/application/services/chat_service.py::_do_post_turn
   - src/kokoro_link/infrastructure/busy/llm_decider.py::_build_prompt
   - src/kokoro_link/infrastructure/prompt/sections/schedule.py::_render_schedule_block
   - src/kokoro_link/infrastructure/prompt/sections/dialogue.py::_STAGE_PRESENCE_GUIDANCE
@@ -261,8 +267,44 @@ flowchart LR
   日子（該日無行程時建立 `is_planned=False` 的種子）。
 - post-turn 在背景執行，改寫可能晚於下一個回合才生效。
 
+### 4. 行程記憶化不看對話（查證於 `d54864b`，2026-11-22）
+
+- `_load_current_schedule` 每個回合都會以背景工作觸發
+  `ScheduleMemorializer.memorialize`。它掃今天與昨天的行程，**只要活動的
+  `end_at` 早於現在且尚未記憶化，就寫成一則「做過了」的記憶**並設
+  `memorialized`。它不讀對話，不知道角色在對話裡其實沒去做那件事。
+- 「是否與玩家一起」由 `derive_shared_activity_evidence` 從結構化資料判斷：
+  活動要帶玩家的 `participant_refs`（已答應的角色），且
+  `CharacterState.last_active_at` 落在活動時段內，才算已驗證的共同活動。
+  只比對**最後一次**活躍時間：玩家在活動中聊過、活動結束後又傳訊息，會被判成
+  「只在之後出現」。
+- 記憶化之後活動成為不可變的錨點：`_apply_modify` 與 remove 都會跳過它，
+  `_resolve_overlaps` 遇到它也只會改動別的活動。
+
+### 5. Post-turn 的執行位置與重疊規則（查證於 `d54864b`，2026-11-22）
+
+- `_do_post_turn` 有兩個入口：回合內的背景工作，以及託管環境 worker 的
+  `run_post_turn_for_record`。後者由回合紀錄重建，輸入只有角色、conversation、
+  本輪兩句文字與先前訊息；**回合當下算出的任何狀態都帶不過去**，要用就得在
+  `_do_post_turn` 內從訊息與行程重新推導。
+- 每回合最多 4 筆 `schedule_adjustments`（`_MAX_ADJUSTMENTS`）。
+- `_resolve_overlaps` 依開始時間排序後逐一處理：與前一個活動重疊時，把
+  **後開始的那個**的開始時間推到前一個的結束時間；若因此整段被吃掉就直接
+  丟棄。所以「新增一段共同活動」會自動把原定活動往後擠短，甚至擠掉。
+
+### 6. 聊天 prompt 看不到「這個活動是和玩家一起的」（查證於 `d54864b`，2026-11-22）
+
+- `_render_schedule_block` 的同伴顯示（`_companions`）只列角色型的
+  `participant_refs` 與 `companion_names`，**不列玩家**。即使當前活動是玩家
+  已答應的共同活動（`operator_confirmed_shared`），聊天 prompt 也只寫
+  「正在「…」」，沒有任何一句說明這是和對方一起的。
+- 玩家參與狀態目前只被 post-turn、行程規劃、記憶化、主動訊息判斷與動態牆讀取。
+
 ### 已知缺口
 
+- 第 4、6 點合起來，就是「約會中離開一陣子再回來，角色當玩家不在」與
+  「對話裡沒去洗澡，事後卻記得洗過」的成因。設計見
+  `ONGOING_INTERACTION_WRITEBACK_REFERENCE.md`（I-21 第二期，未實作）。
 - I-21 第一期已解決「互動中被忙碌延後」與「prompt 把新活動寫成正在做」。
   **仍未解決（第二期）**：行程本身不會因互動而改寫，其他讀行程的功能（主動訊息、
   feed、記憶化）仍把該時段當成已發生；超過 15 分鐘後回來的約會延續不處理。

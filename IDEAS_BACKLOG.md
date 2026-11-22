@@ -58,7 +58,7 @@ Rationale" below. This is a working suggestion, not an approval.
 | I-18 | Investigate why chat lacks date/time awareness (weekday, upcoming holidays) | Chat / Prompt | idea | - | - | 2026-10-24 |
 | I-19 | Scheduled promise messages still fire during an active co-presence chat, breaking immersion | Co-presence / Scheduling | idea | - | - | 2026-10-24 |
 | I-20 | Maximise existing messaging apps (Telegram/WhatsApp) with mode flags/prefixes before building an APP | Platform / Telegram | idea | - | - | 2026-10-25 |
-| I-21 | Schedule slot changes override an ongoing interaction: shared co-presence activity forgotten, or active conversation abruptly ended ("busy, talk later") | Co-presence / Chat / Schedule | in-progress | - | `ONGOING_INTERACTION_HOLD_REFERENCE.md` | 2026-11-22 |
+| I-21 | Schedule slot changes override an ongoing interaction: shared co-presence activity forgotten, or active conversation abruptly ended ("busy, talk later") | Co-presence / Chat / Schedule | in-progress | - | `ONGOING_INTERACTION_HOLD_REFERENCE.md`, `ONGOING_INTERACTION_WRITEBACK_REFERENCE.md` | 2026-11-22 |
 | I-23 | Interaction still feels thinner/degrades even with daily Telegram chat | Relationship / Emotion | idea | - | - | 2026-11-01 |
 | I-24 | Hidden status bar (status values shown or hidden from the player) | Game UI | idea | - | - | 2026-11-01 |
 | I-25 | Menstrual cycle tracking for characters | Character / Health | idea | - | - | 2026-11-01 |
@@ -583,6 +583,12 @@ Group notes:
   receives conversation-state lines; schedule prompt yields to the
   conversation). Not committed, not deployed. Phase 2 (schedule write-back)
   not started. (by Claude)
+- 2026-11-22 I-21 phase 1 released (`2aa978a`); awaiting owner playtest.
+  Phase 2 design written to `ONGOING_INTERACTION_WRITEBACK_REFERENCE.md`,
+  awaiting owner approval. New findings recorded in
+  `docs/atlas/flows/chat-turn.md` §4–§6 (memorializer ignores the
+  conversation; post-turn is rebuilt from the turn record; the chat prompt
+  never shows that an activity is shared with the player). (by Claude)
 
 ### I-09 遺留（非阻擋，未排程）
 
