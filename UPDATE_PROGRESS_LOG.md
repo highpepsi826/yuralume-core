@@ -1281,3 +1281,25 @@ database rows.
   `/health` 回 `status=ok`、`/api/v1/system/version` 回報 commit `6da0c57…`。
 - 未由本次驗證（需帳密或主機存取）：admin 登入、代表性媒體讀取、
   Telegram polling 擁有者。SSH 22 在此執行環境被阻擋。
+
+## 2026-11-22 — I-21 第一期：互動中不被行程切換打斷 (by Claude)
+
+- 設計：`ONGOING_INTERACTION_HOLD_REFERENCE.md`（owner 批准，含 §4.1 修訂）。
+  由訊息時間戳推導 15 分鐘自動過期的「互動中」狀態；同場回合不進忙碌延後；
+  忙碌判斷器收到「對話狀態」；行程 prompt 段在互動期間以對話為準。
+  無 migration、無資料寫入、無前端改動。
+- Source commit `2aa978a`。主 session 讀 diff 並重跑相關測試 346 passed；既有
+  golden prompt 無變動；`atlas_check` 0／0；`fork_delta_check` OK。
+- 發布：Actions run `44997248724` 成功；不可變 digest
+  `sha256:59d968fb4bb93eba7c77ba6c2d2542a2eaf0c253eb05087c45849d1ec60de8fd`
+  （tag `sha-2aa978a`）。改動前 compose 備份於
+  `C:\Entertainment\yuralumeackups\coolify-compose-pre-2aa978a-20261122-152058.yml`。
+  `postgresql`、`storage` 映像、volumes、secrets 未變更。
+- Coolify：四角色改指上述 digest 並部署；約 4 分鐘後六個服務全部
+  `running:healthy`、`/health` 回 `status=ok`、`/api/v1/system/version` 回報
+  commit `2aa978a`。部署前 `connector` 曾短暫回報 unhealthy 並自行恢復
+  （日誌中健康檢查持續 200、無錯誤）。
+- 未由本次驗證：admin 登入、代表性媒體讀取、Telegram polling 擁有者（需帳密
+  或主機存取）；新 prompt 在真實模型下的實際表現，待 owner 試玩。
+- 同日另有文件變更：atlas `flows/chat-turn.md` 新增「行程如何影響一個回合」；
+  `AGENTS.md` 新增「Investigation findings」規則。

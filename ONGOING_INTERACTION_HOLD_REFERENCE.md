@@ -1,6 +1,6 @@
 # 互動保持（行程切換不凌駕進行中的互動）— 第一期設計參考
 
-**Status:** owner 已批准（2026-11-22，含 §4.1 修訂）。**第一期已實作**（source，測試通過）。未 commit／未部署。
+**Status:** owner 已批准（2026-11-22，含 §4.1 修訂）。**第一期已發布**：commit `2aa978a`，2026-11-22 部署到 Coolify。實際模型表現待 owner 試玩確認；第二期未設計。
 **建立：** 2026-11-22 (by Claude)
 **Backlog：** `IDEAS_BACKLOG.md` I-21
 **Atlas 對應：** `docs/atlas/flows/chat-turn.md`、`docs/atlas/change-map.md` #2、#6
