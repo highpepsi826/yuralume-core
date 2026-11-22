@@ -1,6 +1,6 @@
 # 互動保持・第二期：讓行程跟上對話 — 設計參考
 
-**Status:** 設計完成，**等待 owner 批准**。尚未動任何 source。
+**Status:** owner 已批准（2026-11-22，§9 三點全採用建議）。Part B 實作中；Part A 待 Part B 發布後進行。
 **建立：** 2026-11-22 (by Claude)
 **Backlog：** `IDEAS_BACKLOG.md` I-21
 **前置：** `ONGOING_INTERACTION_HOLD_REFERENCE.md`（第一期，已發布 `2aa978a`）
@@ -160,7 +160,9 @@ payload。
    `FEATURE_MANUAL.md`、`IDEAS_BACKLOG.md`、本文件 Status。
 6. 發布：app-only，無 migration。
 
-## 9. 待 owner 決定
+## 9. owner 決定（2026-11-22 全部採用建議）
+
+三點皆已批准：同意更常寫入今日行程；Part B 先單獨發布；預設 30 分鐘。
 
 1. **同意第二期讓系統更常寫入今日行程（§6）**。這是本期的核心，不同意就只能
    做 Part B。

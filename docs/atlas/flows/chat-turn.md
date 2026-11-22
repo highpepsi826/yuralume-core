@@ -298,6 +298,8 @@ flowchart LR
   `participant_refs` 與 `companion_names`，**不列玩家**。即使當前活動是玩家
   已答應的共同活動（`operator_confirmed_shared`），聊天 prompt 也只寫
   「正在「…」」，沒有任何一句說明這是和對方一起的。
+- 前端行程表也一樣：`SchedulePanel.vue` 與 `PlayerScheduleCard.vue` 的參與者
+  顯示只取 `actor_kind === 'character'` 與 `companion_names`，玩家參與不會顯示。
 - 玩家參與狀態目前只被 post-turn、行程規劃、記憶化、主動訊息判斷與動態牆讀取。
 
 ### 已知缺口
