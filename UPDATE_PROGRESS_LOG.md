@@ -1252,3 +1252,32 @@ database rows.
   回報 commit `055580b…`。
 - 未由本次驗證（需要帳密或主機存取）：admin 登入、代表性媒體讀取、
   Telegram polling 擁有者。SSH 22 在此執行環境被阻擋，未能做主機端檢查。
+
+### NSFW 路由分流（結構性任務不跟隨 NSFW target）已發布 — 2026-11-22 (by Claude)
+
+- Commit `6da0c57`；設計與驗收：`NSFW_ROUTING_CARVE_OUT_REFERENCE.md`（I-31、F-15）。
+- 問題：NSFW 分支原本無條件生效，模式期間連排程規劃、story arc、feed 生成
+  這些不讀對話原文、但需要穩定結構化輸出的任務也全部改用本地模型。
+- Source：`NsfwModeTarget.structural_features` allowlist（空值 = 與舊行為完全
+  相同）；`_nsfw_target_for` 單一判斷點套用在四個 NSFW 分支；前端新增勾選群組
+  與「套用建議組合」，三語系同步。
+- 安全修正（本次最關鍵）：`content_tolerance_for_llm_provider` 只要
+  `content_mode` 是 NSFW 就回 community，不論 provider。分流後若某 feature
+  解析到 frontier 模型，會拿到未清洗的露骨原文。新增
+  `content_tolerance_for_route`，改由「這一呼叫實際路由到誰」決定；舊函式與其
+  20+ 呼叫端未變更。
+- 首批 allowlist 為 11 項（排程 2、劇情弧 5、feed 2、記憶／目標 2）。翻譯類、
+  場景寫作、判斷類、圖片生成列為灰區，預設不放行，待實測其真實輸入後再評估。
+- 驗收：後端 targeted 261 passed（含 T1–T5、T7）、前端
+  `nsfwStructuralFeatures` 5 passed；`atlas_check` 0 error／0 warning；
+  `fork_delta_check` OK。全套 unit 的既有失敗在 clean HEAD 上同樣重現，與本次無關。
+- 發布：Actions `Publish container images` run `44925254306` 成功；不可變 digest
+  `sha256:1bcaac27feafed773267f61bc9f9206f668d74c360628f8c61c9c9841e332be6`
+  （tag `sha-6da0c57`）。改動前 compose 備份於
+  `C:\Entertainment\yuralume\backups\coolify-compose-pre-6da0c57-20261122-raw.yml`
+  及 `-generated.yml`。`postgresql`、`storage` 映像、volumes、secrets 未變更。
+- Coolify：四角色改指上述 digest 並部署；全堆疊重建期間 `/health` 短暫 503
+  （postgres 一併重建，屬預期），最終六個服務全部 `running:healthy`、
+  `/health` 回 `status=ok`、`/api/v1/system/version` 回報 commit `6da0c57…`。
+- 未由本次驗證（需帳密或主機存取）：admin 登入、代表性媒體讀取、
+  Telegram polling 擁有者。SSH 22 在此執行環境被阻擋。

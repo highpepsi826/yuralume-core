@@ -67,7 +67,7 @@ Rationale" below. This is a working suggestion, not an approval.
 | I-28 | Full roleplay mode: long-form prose with scene description, expression/action beats and inner monologue, interactive | Chat / Prompt / Story | idea | - | - | 2026-11-07 |
 | I-29 | Character travels abroad (leisure or business): temporary timezone and an out-of-town self-awareness | Schedule / Travel | idea | - | - | 2026-11-07 |
 | I-30 | NSFW mode has no content-direction prompt: output stays restrained because the system prompt never learns the mode is on | NSFW / Prompt | done | - | `NSFW_INTIMACY_DIRECTION_REFERENCE.md` | 2026-11-21 |
-| I-31 | NSFW mode reroutes every feature to the target, including structural tasks that do not need the transcript; give those a carve-out back to normal routing | NSFW / Routing | in-progress | - | `NSFW_ROUTING_CARVE_OUT_REFERENCE.md` | 2026-11-22 |
+| I-31 | NSFW mode reroutes every feature to the target, including structural tasks that do not need the transcript; give those a carve-out back to normal routing | NSFW / Routing | done | - | `NSFW_ROUTING_CARVE_OUT_REFERENCE.md` | 2026-11-22 |
 
 ## Priority Rationale
 
