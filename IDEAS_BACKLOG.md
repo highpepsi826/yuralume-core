@@ -58,7 +58,7 @@ Rationale" below. This is a working suggestion, not an approval.
 | I-18 | Investigate why chat lacks date/time awareness (weekday, upcoming holidays) | Chat / Prompt | idea | - | - | 2026-10-24 |
 | I-19 | Scheduled promise messages still fire during an active co-presence chat, breaking immersion | Co-presence / Scheduling | idea | - | - | 2026-10-24 |
 | I-20 | Maximise existing messaging apps (Telegram/WhatsApp) with mode flags/prefixes before building an APP | Platform / Telegram | idea | - | - | 2026-10-25 |
-| I-21 | Schedule slot changes override an ongoing interaction: shared co-presence activity forgotten, or active conversation abruptly ended ("busy, talk later") | Co-presence / Chat / Schedule | idea | - | - | 2026-10-27 |
+| I-21 | Schedule slot changes override an ongoing interaction: shared co-presence activity forgotten, or active conversation abruptly ended ("busy, talk later") | Co-presence / Chat / Schedule | designing | - | `ONGOING_INTERACTION_HOLD_REFERENCE.md` | 2026-11-22 |
 | I-23 | Interaction still feels thinner/degrades even with daily Telegram chat | Relationship / Emotion | idea | - | - | 2026-11-01 |
 | I-24 | Hidden status bar (status values shown or hidden from the player) | Game UI | idea | - | - | 2026-11-01 |
 | I-25 | Menstrual cycle tracking for characters | Character / Health | idea | - | - | 2026-11-01 |
@@ -399,6 +399,24 @@ Group notes:
   - 忙碌行程的「延遲回覆/忙碌」規則是否沒有考慮對話正在熱烈進行。
   - 是否讓進行中的互動延長/暫緩行程，或加入過渡（先收尾話題、說明要去忙）。
 - 相關：I-19、I-05、I-18（時間感）。
+- 2026-11-22 補充（owner 重述，by Claude）：
+  - 要保留的優點：玩家隨時出現或消失，角色都能接住，不追問「你去哪了」。
+  - 現象 C（約會）：約會中玩家有事離開，角色照自己的行程走；玩家想回來繼續時，
+    行程裡沒有玩家，角色當他「不在」。
+  - 方向（owner 已同意）：不加玩家手動模式，改由「最近一次來回對話的時間」推導
+    一個會自動過期的「互動中」狀態。互動中時行程不硬切；玩家沉默超過保持時間
+    就失效，角色回到自己的行程。保持時間同場與 Telegram 共用一個值（預設 15 分鐘）。
+  - 調查結果：
+    - `_maybe_defer_reply`（`chat_service.py:3845`）沒有收到 `presence_frame`，
+      同場回合也會進忙碌延後。只要 `busy_score` ≥ 0.7 就問判斷器。
+    - 忙碌判斷器 prompt（`data/prompts/busy/decider.txt`）只收到較舊的對話摘要，
+      不知道「上一則還在聊」，也不知道介面是同場。
+    - 行程 prompt 段（`sections/schedule.py::_render_schedule_block`）把當前行程
+      宣告為「唯一真實來源，衝突一律以本段為準」，行程一切換，上一個共同活動只剩
+      一行「剛結束」（且只在當前為空檔時才顯示）。
+  - 分期：第一期只改判斷與 prompt，不寫行程、無 migration；第二期才讓共同活動
+    寫回行程（與 I-27、I-19 一起考慮）。設計見
+    `ONGOING_INTERACTION_HOLD_REFERENCE.md`。
 
 ### I-23 每天聊但互動仍然變少／降級
 
@@ -549,6 +567,12 @@ Group notes:
   tolerance by reached provider, the admin checkbox group + "apply
   recommended set", and the three locale bundles. Tests T1–T5, T7 green.
   Not deployed; `done` is decided by the main session after release.
+  (by Claude)
+- 2026-11-22 I-21 → `designing`: owner restated the problem (added the
+  date-continuation case) and agreed on a derived, self-expiring "ongoing
+  interaction" state instead of a player-facing mode. Investigation findings
+  recorded in the I-21 note. Phase 1 design written to
+  `ONGOING_INTERACTION_HOLD_REFERENCE.md`, awaiting owner approval.
   (by Claude)
 
 ### I-09 遺留（非阻擋，未排程）
