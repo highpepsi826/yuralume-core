@@ -1303,3 +1303,21 @@ database rows.
   或主機存取）；新 prompt 在真實模型下的實際表現，待 owner 試玩。
 - 同日另有文件變更：atlas `flows/chat-turn.md` 新增「行程如何影響一個回合」；
   `AGENTS.md` 新增「Investigation findings」規則。
+
+## 2026-11-22 — I-21 第二期 Part B：聊天 prompt 顯示共同活動 (by Claude)
+
+- 設計：`ONGOING_INTERACTION_WRITEBACK_REFERENCE.md` §4.2（owner 批准，含互動中
+  措辭的修訂）。當前活動是玩家已答應的共同活動時，行程 prompt 段多一行說明。
+  無 migration、無資料寫入、無前端改動。
+- Source commit `a37af30`。主 session 讀 diff 並重跑相關測試通過；既有 golden
+  prompt 無變動；`atlas_check` 0／0；`fork_delta_check` OK。
+- 發布：Actions run `45000527216` 成功；不可變 digest
+  `sha256:b81343f177e417dd52f3fbf4d831ad8a5657dbc15a42ee185008595761e97908`
+  （tag `sha-a37af30`）。改動前 compose 備份於
+  `C:\Entertainment\yuralumeackups\coolify-compose-pre-a37af30-20261122-160450.yml`。
+  `postgresql`、`storage` 映像、volumes、secrets 未變更。
+- Coolify：四角色改指上述 digest 並部署；六個服務全部 `running:healthy`、
+  `/health` 回 `status=ok`、`/api/v1/system/version` 回報 commit `a37af30`；
+  四個應用角色重啟後日誌無錯誤。
+- 未由本次驗證：admin 登入、代表性媒體讀取、Telegram polling 擁有者；新 prompt
+  在真實模型下的表現，待 owner 試玩。Part A 與行程表標記尚在實作。
