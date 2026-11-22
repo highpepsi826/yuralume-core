@@ -589,6 +589,10 @@ Group notes:
   `docs/atlas/flows/chat-turn.md` §4–§6 (memorializer ignores the
   conversation; post-turn is rebuilt from the turn record; the chat prompt
   never shows that an activity is shared with the player). (by Claude)
+- 2026-11-22 I-21 phase 2 Part B implemented in source (chat prompt shows
+  one line when the current activity carries `operator_confirmed_shared`,
+  two wordings by ongoing state). Not committed, not deployed; Part A not
+  started. (by Claude)
 
 ### I-09 遺留（非阻擋，未排程）
 

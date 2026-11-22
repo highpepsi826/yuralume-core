@@ -429,8 +429,11 @@ target 才給 community，否則由實際 provider 決定，露骨原文仍會�
 | 判斷器 port／adapter／template | `src/kokoro_link/contracts/busy_reply_decider.py`、`src/kokoro_link/infrastructure/busy/llm_decider.py`、`src/kokoro_link/data/prompts/busy/decider.txt` |
 | 行程段情況一／二與同場指引 | `src/kokoro_link/infrastructure/prompt/sections/schedule.py`、`src/kokoro_link/infrastructure/prompt/sections/dialogue.py`、`src/kokoro_link/infrastructure/prompt/sections/context.py` |
 | 唯讀時刻查詢 | `src/kokoro_link/application/services/schedule_service.py`（`resolve_activity_at`） |
+| 第二期 Part B：共同活動一行（`_is_confirmed_shared_with_operator`） | `src/kokoro_link/infrastructure/prompt/sections/schedule.py` |
 
-**相關 reference：** `ONGOING_INTERACTION_HOLD_REFERENCE.md`
+**第二期 Part B（實作中，未部署）：** 當前活動帶 `operator_confirmed_shared` 時，行程段在「忙碌程度」之後加一行（互動中／不在互動中兩種措辭）；只看結構化角色，不寫任何資料。Part A（post-turn 寫回）尚未實作。
+
+**相關 reference：** `ONGOING_INTERACTION_HOLD_REFERENCE.md`、`ONGOING_INTERACTION_WRITEBACK_REFERENCE.md`
 
 **溶合判斷：** 上游若自行處理互動中的行程切換，優先採用上游；`chat_service.py`
 與 prompt sections 在衝突熱區，merge 時預期衝突。

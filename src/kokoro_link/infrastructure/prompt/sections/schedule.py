@@ -10,6 +10,7 @@ from datetime import (
 
 from kokoro_link.domain.entities.operator_profile import OperatorProfile
 from kokoro_link.domain.entities.schedule import (
+    OPERATOR_CONFIRMED_SHARED_ROLE,
     DailySchedule,
     ScheduleActivity,
     has_expired_operator_commitment,
@@ -308,6 +309,19 @@ def _render_world_event_recall_block(lines: tuple[str, ...]) -> list[str]:
     ]
 
 
+def _is_confirmed_shared_with_operator(activity: ScheduleActivity) -> bool:
+    """Structural check only: an operator ref in the confirmed-shared role.
+
+    Pending invites, wishes and expired roles answer ``False`` on purpose --
+    they must not be presented as something the two are doing together.
+    """
+    return any(
+        ref.actor_kind == "operator"
+        and ref.role == OPERATOR_CONFIRMED_SHARED_ROLE
+        for ref in activity.participant_refs
+    )
+
+
 def _render_schedule_block(
     *,
     current: ScheduleActivity | None,
@@ -424,6 +438,17 @@ def _render_schedule_block(
                 current.busy_score, engaged=ongoing_interaction is not None,
             )
         )
+        if _is_confirmed_shared_with_operator(current):
+            if ongoing_interaction is not None:
+                lines.append(
+                    "這個時段是你和對方一起的活動，你們正一起進行中。"
+                )
+            else:
+                lines.append(
+                    "這個時段是你和對方約好一起的活動。對方中途可能離開過，現在出現了——"
+                    "自然地接續你們正在做的事，不必追問他剛才去了哪裡，"
+                    "也不要當作他是臨時跑來的。"
+                )
         if ongoing_interaction is not None:
             lines.append(
                 f"互動狀態：你和對方約 {ongoing_interaction.minutes_since} 分鐘前"

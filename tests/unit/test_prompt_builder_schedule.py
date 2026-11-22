@@ -374,3 +374,80 @@ def test_shared_activity_with_player_renders_as_case_one() -> None:
     prompt, _, _ = _prompt(cur, _ongoing(started_during=True))
     assert "正在「一起看電影」" in prompt
     assert "行程上原定" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# I-21 phase 2 Part B: confirmed shared participation in the chat prompt
+# ---------------------------------------------------------------------------
+
+_SHARED_NOW = "這個時段是你和對方一起的活動，你們正一起進行中。"
+_SHARED_RETURNING = "這個時段是你和對方約好一起的活動。對方中途可能離開過，現在出現了——"
+
+
+def _operator_activity(role: str | None) -> ScheduleActivity:
+    refs = ()
+    if role is not None:
+        refs = (
+            ParticipantRef(
+                actor_kind="operator", actor_id="op", display_name="玩家",
+                role=role,
+            ),
+        )
+    return ScheduleActivity.create(
+        start_at=datetime(2026, 4, 18, 9, 0, tzinfo=timezone.utc),
+        end_at=datetime(2026, 4, 18, 11, 0, tzinfo=timezone.utc),
+        description="約會", category="social", participant_refs=refs,
+    )
+
+
+def test_confirmed_shared_mid_conversation_wording() -> None:
+    from kokoro_link.domain.entities.schedule import OPERATOR_CONFIRMED_SHARED_ROLE
+    prompt, _, _ = _prompt(
+        _operator_activity(OPERATOR_CONFIRMED_SHARED_ROLE),
+        _ongoing(started_during=False),
+    )
+    assert _SHARED_NOW in prompt
+    assert _SHARED_RETURNING not in prompt
+    assert prompt.index("目前活動：") < prompt.index(_SHARED_NOW)
+    assert prompt.index("忙碌程度：") < prompt.index(_SHARED_NOW)
+    assert prompt.index(_SHARED_NOW) < prompt.index("互動狀態：你和對方約")
+
+
+def test_confirmed_shared_returning_wording() -> None:
+    from kokoro_link.domain.entities.schedule import OPERATOR_CONFIRMED_SHARED_ROLE
+    prompt, _, _ = _prompt(
+        _operator_activity(OPERATOR_CONFIRMED_SHARED_ROLE), None,
+    )
+    assert _SHARED_RETURNING in prompt
+    assert "不必追問他剛才去了哪裡" in prompt
+    assert _SHARED_NOW not in prompt
+
+
+def test_confirmed_shared_when_case_two_yields_does_not_apply() -> None:
+    """Confirmed-shared never yields (live commitment), so it renders as case one."""
+    from kokoro_link.domain.entities.schedule import OPERATOR_CONFIRMED_SHARED_ROLE
+    prompt, _, _ = _prompt(
+        _operator_activity(OPERATOR_CONFIRMED_SHARED_ROLE),
+        _ongoing(started_during=True),
+    )
+    assert _SHARED_NOW in prompt
+    assert "行程上原定" not in prompt
+
+
+def test_non_confirmed_roles_render_without_shared_line() -> None:
+    from kokoro_link.domain.entities.schedule import (
+        OPERATOR_CONFIRMED_LAPSED_ROLE,
+        OPERATOR_INVITE_EXPIRED_ROLE,
+        OPERATOR_WISH_ROLE,
+    )
+    for role in (
+        OPERATOR_INVITE_PENDING_ROLE,
+        OPERATOR_WISH_ROLE,
+        OPERATOR_INVITE_EXPIRED_ROLE,
+        OPERATOR_CONFIRMED_LAPSED_ROLE,
+        None,
+    ):
+        for ongoing in (None, _ongoing(started_during=False)):
+            prompt, _, _ = _prompt(_operator_activity(role), ongoing)
+            assert "一起的活動" not in prompt
+            assert "約好一起的活動" not in prompt

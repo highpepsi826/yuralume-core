@@ -294,6 +294,7 @@ flowchart LR
 
 ### 6. 聊天 prompt 看不到「這個活動是和玩家一起的」（查證於 `d54864b`，2026-11-22）
 
+- **（I-21 第二期 Part B，查證於 Part B 的 source commit，2026-11-22）** 聊天 prompt 現在會顯示共同參與：當前活動帶 operator 的 `operator_confirmed_shared`（只看 `participant_refs` 結構化角色，`_is_confirmed_shared_with_operator`）時，`_render_schedule_block` 在一般分支（非情況二）於「忙碌程度」之後、「互動狀態」之前加一行；`ongoing_interaction` 非 `None` 與為 `None` 各一種措辭。`operator_invite_pending`、`operator_wish`、已過期角色、無玩家參與的活動輸出不變。前端行程表仍不顯示玩家參與。以下兩點是 Part B 之前的描述，聊天 prompt 部分已過時。
 - `_render_schedule_block` 的同伴顯示（`_companions`）只列角色型的
   `participant_refs` 與 `companion_names`，**不列玩家**。即使當前活動是玩家
   已答應的共同活動（`operator_confirmed_shared`），聊天 prompt 也只寫
