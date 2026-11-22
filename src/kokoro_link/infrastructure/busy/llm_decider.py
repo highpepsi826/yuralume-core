@@ -105,6 +105,7 @@ class LLMBusyReplyDecider(BusyReplyDeciderPort):
         recent_proactive_attempts: tuple[ProactiveAttempt, ...] = (),
         relationship_context_lines: tuple[str, ...] = (),
         interaction_context_lines: tuple[str, ...] = (),
+        ongoing_interaction_lines: tuple[str, ...] = (),
         now: datetime,
         local_tz: tzinfo | None = None,
         operator_primary_language: str = "zh-TW",
@@ -123,6 +124,7 @@ class LLMBusyReplyDecider(BusyReplyDeciderPort):
             recent_proactive_attempts=recent_proactive_attempts,
             relationship_context_lines=relationship_context_lines,
             interaction_context_lines=interaction_context_lines,
+            ongoing_interaction_lines=ongoing_interaction_lines,
             now=now,
             local_tz=effective_tz,
             operator_primary_language=operator_primary_language,
@@ -160,6 +162,7 @@ def _build_prompt(
     now: datetime,
     local_tz: tzinfo | None,
     operator_primary_language: str = "zh-TW",
+    ongoing_interaction_lines: tuple[str, ...] = (),
 ) -> str:
     persona = "\n".join(
         _persona_block(
@@ -186,8 +189,19 @@ def _build_prompt(
         activity_block=activity,
         summary_block=summary_block,
         proactive_outreach_block=outreach_block,
+        ongoing_interaction_block=_ongoing_interaction_block(
+            ongoing_interaction_lines,
+        ),
         user_message=user_message[:400],
     )
+
+
+def _ongoing_interaction_block(lines: tuple[str, ...]) -> str:
+    """Render the application-built fact lines under a header; empty -> nothing."""
+    cleaned = [line.strip() for line in lines if line and line.strip()]
+    if not cleaned:
+        return ""
+    return "\n\n對話狀態：\n" + "\n".join(cleaned)
 
 
 def _proactive_outreach_block(

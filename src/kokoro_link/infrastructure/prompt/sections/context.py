@@ -41,6 +41,9 @@ from kokoro_link.domain.entities.story_arc import StoryArc, StoryArcBeat
 from kokoro_link.domain.entities.story_event import StoryEvent
 from kokoro_link.domain.entities.story_scene_session import StorySceneSession
 from kokoro_link.domain.value_objects.character_state import CharacterState
+from kokoro_link.domain.value_objects.ongoing_interaction import (
+    OngoingInteraction,
+)
 from kokoro_link.domain.value_objects.presence_frame import PresenceFrame
 
 
@@ -101,6 +104,9 @@ class ScheduleContext:
     weather_context: str
     world_event_context: tuple[str, ...]
     world_event_recall: tuple[str, ...]
+    ongoing_interaction: OngoingInteraction | None = None
+    """I-21: the derived "we were just talking" state, ``None`` when the
+    player was not mid-conversation. ``None`` renders exactly as before."""
 
 
 @dataclass(frozen=True, slots=True)

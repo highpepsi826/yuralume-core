@@ -15,6 +15,10 @@ from kokoro_link.domain.entities.schedule import (
     has_expired_operator_commitment,
     without_expired_operator_commitments,
 )
+from kokoro_link.domain.value_objects.ongoing_interaction import (
+    OngoingInteraction,
+    schedule_yields_to_conversation,
+)
 from kokoro_link.domain.value_objects.timezone import (
     timezone_for_id,
     to_timezone,
@@ -311,8 +315,17 @@ def _render_schedule_block(
     just_finished: ScheduleActivity | None = None,
     suppress_location: bool = False,
     local_tz: tzinfo,
+    ongoing_interaction: OngoingInteraction | None = None,
 ) -> list[str]:
     """Render the schedule guidance block.
+
+    ``ongoing_interaction`` (I-21) says the player was mid-conversation with
+    the character. ``None`` renders exactly as it always did. Case one: the
+    current activity was already running when the interaction began, so the
+    block is unchanged apart from one continuity line and a neutral busy
+    wording. Case two (:func:`schedule_yields_to_conversation`): the activity
+    only came due during the interaction, so it is shown as a plan rather
+    than as what the character is doing -- the conversation decides.
 
     ``suppress_location`` is set by the caller when the character is
     inside a world (the world-context block is the authoritative source
@@ -323,7 +336,12 @@ def _render_schedule_block(
     """
     if current is None and not upcoming and just_finished is None:
         return []
-    if suppress_location:
+    yields = schedule_yields_to_conversation(ongoing_interaction, current)
+    if yields:
+        header = (
+            "角色今日行程（以下是你今天的計畫；你此刻的實際處境見下方『互動狀態』）："
+        )
+    elif suppress_location:
         header = (
             "角色今日行程（此為你**正在做什麼**的唯一真實來源；"
             "你**所在的地點**請參考上方『世界框架 / 此刻所在』段落，"
@@ -371,13 +389,46 @@ def _render_schedule_block(
                 f"{_loc(just_finished)}{_companions(just_finished)}"
                 "；現在是轉場空檔，回覆時可以自然地帶到剛做完的事或接下來的安排"
             )
+    elif yields and ongoing_interaction is not None:
+        time_range = _format_range(current, local_tz=local_tz)
+        started = to_timezone(
+            ongoing_interaction.streak_started_at, local_tz,
+        ).strftime("%H:%M")
+        before = ongoing_interaction.activity_at_streak_start
+        then = f"，當時你正在「{before.description}」" if before is not None else ""
+        lines.append(
+            f"互動狀態：你和對方從 {started} 起一直在互動{then}。"
+        )
+        lines.append(
+            f"行程上原定 {time_range} 要「{current.description}」"
+            f"{_loc(current)}，但這只是計畫——你有沒有動身去做，"
+            "以你們的對話內容為準；對話裡沒有發生過的事，就還沒發生。"
+        )
+        lines.append(
+            "你此刻身在何處、正在做什麼，延續對話裡最後的場景，"
+            "不要自行跳到新的地點或活動。"
+        )
+        lines.append(
+            "要不要去、何時去，依你的性格和當下氣氛決定：可以再待一下、邀對方一起、"
+            "或把話收尾後動身；動身要在對話裡演出來，不能略過。"
+        )
     else:
         time_range = _format_range(current, local_tz=local_tz)
         lines.append(
             f"目前活動：{time_range} 正在「{current.description}」"
             f"{_loc(current)}，類型：{current.category}{_companions(current)}"
         )
-        lines.append(f"忙碌程度：{_busy_hint(current.busy_score)}")
+        lines.append(
+            "忙碌程度："
+            + _busy_hint(
+                current.busy_score, engaged=ongoing_interaction is not None,
+            )
+        )
+        if ongoing_interaction is not None:
+            lines.append(
+                f"互動狀態：你和對方約 {ongoing_interaction.minutes_since} 分鐘前"
+                "還在對話，這是同一段互動的延續，不是對方重新出現。"
+            )
         if _has_visible_companions(current):
             lines.append(
                 "提示：這個時段不是獨自進行 —— 回覆時可以自然地把同伴帶進來"
@@ -461,13 +512,15 @@ def _render_pending_invites_block(
     ]
 
 
-def _busy_hint(score: float) -> str:
+def _busy_hint(score: float, *, engaged: bool = False) -> str:
     """Translate a 0–1 busy score into a reply-tone instruction.
 
     Thresholds are intentionally coarse — the model treats these as
     soft nudges. The phrases avoid numeric values so the model is less
     tempted to echo them literally in the reply.
     """
+    if engaged and score >= 0.6:
+        return "手邊有事要做，但你們正聊到一半，依你的性格決定怎麼兼顧"
     if score >= 0.85:
         return "非常高，手邊的事需要專注，回覆可以簡短、語氣帶點忙碌或抱歉，之後再詳聊"
     if score >= 0.6:
@@ -532,6 +585,7 @@ def _schedule(ctx: PromptSectionContext) -> list[str]:
         upcoming=list(ctx.schedule.upcoming_activities),
         just_finished=ctx.schedule.just_finished_activity,
         local_tz=ctx.time.local_tz,
+        ongoing_interaction=ctx.schedule.ongoing_interaction,
     )
 
 

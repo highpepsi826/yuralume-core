@@ -278,3 +278,99 @@ def test_expired_invite_never_reaches_the_prompt() -> None:
     # to distrust, so match on the block's own body instead of the heading.
     assert "只是一個想問對方的念頭" not in prompt
     assert "陪使用者一起出門吃刨冰" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# I-21: ongoing interaction in the schedule block
+# ---------------------------------------------------------------------------
+
+from datetime import timedelta  # noqa: E402
+
+from kokoro_link.domain.value_objects.ongoing_interaction import (  # noqa: E402
+    OngoingInteraction,
+)
+
+
+def _ongoing(*, started_during: bool, before=None) -> OngoingInteraction:
+    t = datetime(2026, 4, 18, 9, 50, tzinfo=timezone.utc)
+    return OngoingInteraction(
+        last_exchange_at=t,
+        minutes_since=4,
+        streak_started_at=t - timedelta(minutes=20),
+        activity_started_during_streak=started_during,
+        activity_at_streak_start=before,
+    )
+
+
+def _prompt(current, ongoing, **extra) -> str:
+    character = _char()
+    conv = Conversation.start(character_id=character.id)
+    return DefaultPromptContextBuilder().build(
+        character=character,
+        conversation=conv,
+        recent_messages=[],
+        memories=[],
+        pending_state=character.state,
+        latest_user_message="嗯",
+        current_activity=current,
+        upcoming_activities=[],
+        ongoing_interaction=ongoing,
+        **extra,
+    ), character, conv
+
+
+def test_none_ongoing_interaction_is_byte_identical() -> None:
+    character = _char()
+    conv = Conversation.start(character_id=character.id)
+    kw = dict(
+        character=character, conversation=conv, recent_messages=[],
+        memories=[], pending_state=character.state, latest_user_message="嗯",
+        current_activity=_activity(10, "洗澡"), upcoming_activities=[],
+    )
+    a = DefaultPromptContextBuilder().build(**kw)
+    b = DefaultPromptContextBuilder().build(**kw, ongoing_interaction=None)
+    assert a == b
+
+
+def test_case_one_adds_one_line_and_softens_busy_hint() -> None:
+    act = ScheduleActivity.create(
+        start_at=datetime(2026, 4, 18, 9, 0, tzinfo=timezone.utc),
+        end_at=datetime(2026, 4, 18, 11, 0, tzinfo=timezone.utc),
+        description="寫稿", category="work", busy_score=0.7,
+    )
+    prompt, _, _ = _prompt(act, _ongoing(started_during=False))
+    assert "目前活動：" in prompt and "正在「寫稿」" in prompt
+    assert "互動狀態：你和對方約 4 分鐘前還在對話" in prompt
+    assert "依你的性格決定怎麼兼顧" in prompt
+    assert "回覆保持簡潔" not in prompt
+
+
+def test_case_two_presents_the_activity_as_a_plan() -> None:
+    before = _activity(8, "一起吃飯", "social")
+    cur = _activity(10, "洗澡", "hygiene")
+    prompt, _, _ = _prompt(cur, _ongoing(started_during=True, before=before))
+    assert "正在「洗澡」" not in prompt
+    assert "忙碌程度" not in prompt
+    assert "互動狀態：你和對方從" in prompt and "當時你正在「一起吃飯」" in prompt
+    assert "行程上原定" in prompt and "「洗澡」" in prompt
+    assert "唯一真實來源" not in prompt
+    assert "延續對話裡最後的場景" in prompt
+
+
+def test_shared_activity_with_player_renders_as_case_one() -> None:
+    cur = ScheduleActivity.create(
+        start_at=datetime(2026, 4, 18, 10, 0, tzinfo=timezone.utc),
+        end_at=datetime(2026, 4, 18, 11, 0, tzinfo=timezone.utc),
+        description="一起看電影", category="social",
+        participant_refs=(
+            ParticipantRef(
+                actor_kind="operator", actor_id="op", display_name="玩家",
+                role=OPERATOR_INVITE_PENDING_ROLE,
+            ),
+        ),
+    )
+    from kokoro_link.domain.entities.schedule import has_live_operator_commitment
+    assert has_live_operator_commitment(cur)
+    prompt, _, _ = _prompt(cur, _ongoing(started_during=True))
+    assert "正在「一起看電影」" in prompt
+    assert "行程上原定" not in prompt

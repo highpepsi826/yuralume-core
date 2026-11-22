@@ -1339,6 +1339,28 @@ class ScheduleService:
             return None
         return DailyScheduleResponse.from_domain(schedule)
 
+    async def resolve_activity_at(
+        self,
+        character: Character,
+        moment: datetime,
+        *,
+        local_tz: tzinfo | None = None,
+    ) -> ScheduleActivity | None:
+        """Read-only: the stored activity covering ``moment``, if any.
+
+        Looks at the plan already stored for the local civil date of
+        ``moment`` and never plans, writes or regenerates anything -- a date
+        without a stored plan answers ``None``.
+        """
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        tz = local_tz or await self._resolve_operator_timezone(character)
+        target = self._local_date_of(moment, tz)
+        schedule = await self._repository.get(character.id, target)
+        if schedule is None:
+            return None
+        return schedule.activity_at(moment)
+
     def resolve_current(
         self,
         schedule: DailySchedule,

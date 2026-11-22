@@ -1,6 +1,6 @@
 # 互動保持（行程切換不凌駕進行中的互動）— 第一期設計參考
 
-**Status:** owner 已批准（2026-11-22，含 §4.1 修訂）。**實作中**。未 commit／未部署。
+**Status:** owner 已批准（2026-11-22，含 §4.1 修訂）。**第一期已實作**（source，測試通過）。未 commit／未部署。
 **建立：** 2026-11-22 (by Claude)
 **Backlog：** `IDEAS_BACKLOG.md` I-21
 **Atlas 對應：** `docs/atlas/flows/chat-turn.md`、`docs/atlas/change-map.md` #2、#6
@@ -342,3 +342,29 @@ post-turn 是背景執行的，可能晚於下一回合才生效；情況二在�
   超過保持時間後回來的約會延續（現象 C）。
 
 第二期會寫行程資料，需要獨立的設計文件與 owner 批准。
+
+## 13. 實作紀錄（2026-11-22，by Claude）
+
+- 新增 `application/services/ongoing_interaction.py`（`resolve_ongoing_interaction`）
+  與 `domain/value_objects/ongoing_interaction.py`（`OngoingInteraction`、
+  `schedule_yields_to_conversation`）。值物件放在 domain 是因為 prompt 層
+  （infrastructure）不能 import application 層。
+- `OngoingInteraction` 比 §4.1 多四個欄位：`streak_reaches_window_start`
+  （窗口內全程連續，需要再讀更早訊息）、`activity_at_streak_start`、
+  `last_reply_excerpt`（僅 NORMAL 內容、截 80 字）。
+- 串流起點：`ChatService._resolve_ongoing_interaction` 先用已載入窗口；若起點
+  仍在窗口最舊處，再以 `load_unified_recent_messages(limit=200)` 讀一次（只看
+  時間戳與 kind），回溯上限 6 小時。沒有新 repository 方法。
+- 唯讀時刻查詢：`ScheduleService.resolve_activity_at(character, moment, local_tz=)`，
+  只讀已存的當日行程，沒有行程就回 `None`，不規劃、不寫入。
+- `_maybe_defer_reply` 新增 `presence_frame`、`ongoing_interaction`；同場短路在
+  取消既有延後列之後。兩個入口都傳。
+- Prompt：`build()` 新增 `ongoing_interaction`（預設 `None`，輸出逐字不變，
+  既有 golden 全過）；情況一、情況二、共同活動例外、同場私密時段一點的略過
+  都照 §4.3。
+- brief ack 照算（§4.1 修訂），沒有加標記、查詢或文字比對。
+- 測試：`test_ongoing_interaction.py`（T1、T2）、`test_chat_service_busy_defer.py`
+  （T2b、T3、T4、T5、T9）、`test_llm_busy_decider.py`（T6）、
+  `test_prompt_builder_schedule.py`（T7、T7c）、
+  `test_prompt_builder_presence_frame.py`（T7b）。
+- 未驗證：真實 LLM 對新「對話狀態」與情況二指示的實際行為（只驗證 prompt 內容）。

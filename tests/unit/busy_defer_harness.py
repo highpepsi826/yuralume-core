@@ -106,6 +106,7 @@ class ScriptedDecider:
         recent_proactive_attempts=(),
         relationship_context_lines=(),
         interaction_context_lines=(),
+        ongoing_interaction_lines=(),
         now,
         local_tz=None,
         operator_primary_language="zh-TW",
@@ -117,6 +118,7 @@ class ScriptedDecider:
             "recent_proactive_attempts": recent_proactive_attempts,
             "relationship_context_lines": relationship_context_lines,
             "interaction_context_lines": interaction_context_lines,
+            "ongoing_interaction_lines": ongoing_interaction_lines,
             "operator_primary_language": operator_primary_language,
         })
         if not self.decisions:

@@ -339,3 +339,62 @@ class TestSleepGuidance:
         # Sleep must no longer be listed among the extreme can't-reply
         # examples — those stay reserved for exam/driving/on-stage cases.
         assert "睡著、考試" not in prompt
+
+
+def _prompt_with(lines: tuple[str, ...]) -> str:
+    from kokoro_link.infrastructure.busy.llm_decider import _build_prompt
+
+    return _build_prompt(
+        character=_character(),
+        user_message="在嗎",
+        current_activity=_activity(),
+        recent_dialogue_summary=None,
+        recent_proactive_attempts=(),
+        relationship_context_lines=(),
+        interaction_context_lines=(),
+        now=datetime(2026, 5, 16, 14, 30, tzinfo=timezone.utc),
+        local_tz=None,
+        ongoing_interaction_lines=lines,
+    )
+
+
+def test_prompt_has_conversation_state_block_only_when_lines_given() -> None:
+    header = "對話狀態：" + chr(10)
+    plain = _prompt_with(())
+    assert header not in plain
+    with_block = _prompt_with(("- 你們正在一來一往地對話，你上一則回覆在約 3 分鐘前。",))
+    assert header + "- 你們正在一來一往地對話" in with_block
+
+
+def test_prompt_without_lines_matches_pre_change_shape() -> None:
+    # The block is purely additive: removing it yields the old tail exactly.
+    plain = _prompt_with(())
+    assert "使用者剛剛傳來：「在嗎」" in plain
+    assert "${" not in plain
+
+
+def test_nsfw_reply_gets_no_excerpt_line() -> None:
+    from kokoro_link.application.services.chat_service import (
+        _render_ongoing_interaction_lines,
+    )
+    from kokoro_link.application.services.ongoing_interaction import (
+        resolve_ongoing_interaction,
+    )
+    from kokoro_link.domain.entities.conversation import (
+        Message, MessageContentMode, MessageRole,
+    )
+
+    now = datetime(2026, 5, 16, 14, 30, tzinfo=timezone.utc)
+    msgs = [
+        Message(role=MessageRole.USER, content="x", created_at=now - timedelta(minutes=5)),
+        Message(
+            role=MessageRole.ASSISTANT, content="SECRET-TEXT",
+            content_mode=MessageContentMode.NSFW,
+            created_at=now - timedelta(minutes=3),
+        ),
+    ]
+    ongoing = resolve_ongoing_interaction(
+        recent_messages=msgs, current_activity=None, now=now,
+    )
+    rendered = chr(10).join(_render_ongoing_interaction_lines(ongoing))
+    assert "SECRET-TEXT" not in rendered and "3 分鐘前" in rendered

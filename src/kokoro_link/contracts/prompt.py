@@ -16,6 +16,9 @@ from kokoro_link.domain.entities.story_event import StoryEvent
 from kokoro_link.domain.entities.story_scene_session import StorySceneSession
 from kokoro_link.domain.value_objects.character_state import CharacterState
 from kokoro_link.domain.value_objects.content_flow import CONTENT_TOLERANCE_FRONTIER
+from kokoro_link.domain.value_objects.ongoing_interaction import (
+    OngoingInteraction,
+)
 from kokoro_link.domain.value_objects.presence_frame import PresenceFrame
 
 
@@ -95,6 +98,7 @@ class PromptContextBuilderPort(Protocol):
         upcoming_day_schedules: list[DailySchedule] | None = None,
         content_tolerance: str = CONTENT_TOLERANCE_FRONTIER,
         stage_nudge: bool = False,
+        ongoing_interaction: "OngoingInteraction | None" = None,
     ) -> str:
         """Build prompt context for model generation.
 
@@ -103,6 +107,9 @@ class PromptContextBuilderPort(Protocol):
         declaring something about the scene. The builder renders one extra
         conditional block; ``False`` (every other turn, every caller that
         knows nothing about the flag) leaves the prompt byte-identical.
+
+        ``ongoing_interaction`` (I-21) is the derived "we were just talking"
+        state; ``None`` leaves the prompt byte-identical.
 
         ``now`` is the wall clock at the moment this reply is being
         generated; the builder renders it as local time so the model

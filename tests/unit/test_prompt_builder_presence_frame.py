@@ -198,3 +198,41 @@ def test_stage_frame_without_note_renders_no_note_line() -> None:
     prompt = _build_prompt(PresenceFrame.web_stage())
 
     assert "可抵達性補充" not in prompt
+
+
+def test_schedule_yielding_to_interaction_drops_private_slot_only() -> None:
+    from datetime import timedelta, timezone
+
+    from kokoro_link.domain.entities.schedule import ScheduleActivity
+    from kokoro_link.domain.value_objects.ongoing_interaction import (
+        OngoingInteraction,
+    )
+
+    character = _make_character()
+    conversation = Conversation.start(character_id=character.id)
+    t = datetime(2026, 4, 18, 9, 50, tzinfo=timezone.utc)
+    cur = ScheduleActivity.create(
+        start_at=t - timedelta(minutes=5), end_at=t + timedelta(minutes=55),
+        description="洗澡", category="hygiene", busy_score=0.9,
+    )
+    ongoing = OngoingInteraction(
+        last_exchange_at=t, minutes_since=2,
+        streak_started_at=t - timedelta(minutes=20),
+        activity_started_during_streak=True,
+    )
+
+    def build(**kw):
+        return DefaultPromptContextBuilder().build(
+            character=character, conversation=conversation,
+            recent_messages=[], memories=[], pending_state=character.state,
+            latest_user_message="嗨", presence_frame=PresenceFrame.web_stage(),
+            current_activity=cur, now=t, **kw,
+        )
+
+    plain = build()
+    yielded = build(ongoing_interaction=ongoing)
+    assert "隔著門說話" in plain
+    assert "隔著門說話" not in yielded
+    assert "玩家宣告此刻與你同場" in yielded
+    assert "依你目前的行程與處境自然回應" in yielded
+    assert "不要虛構玩家的行動與位置細節" in yielded

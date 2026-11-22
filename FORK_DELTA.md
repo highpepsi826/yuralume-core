@@ -410,3 +410,27 @@ target 才給 community，否則由實際 provider 決定，露骨原文仍會�
 - 每次上游 merge 後 → 更新本檔頂部的「基線」與 commit 數。
 - 本檔的路徑錨點由 `make fork-delta-check` 驗證；失效路徑會報錯。
 - 不要在本檔寫 secrets、聊天內容或資料庫資料列。
+
+### F-16 — 互動中不被行程打斷（ongoing-interaction hold，I-21 第一期）
+
+**類型：** feature
+**狀態：** WATCH（source 完成 2026-11-22，未 commit／未部署）
+
+由最近一次來回對話的時間戳推導一個會自動過期（15 分鐘）的「互動中」狀態，
+不落庫、不讀訊息文字。三個效果：同場回合不再進忙碌延後；文字介面把「對話
+狀態」事實句交給忙碌判斷器；行程 prompt 段在互動期間不把互動開始之後才輪到的
+活動寫成「正在做」（含拿掉同場指引的私密時段一點）。不寫行程、不改 post-turn。
+
+| 項目 | 位置 |
+|---|---|
+| 推導函式與常數 | `src/kokoro_link/application/services/ongoing_interaction.py` |
+| 值物件與「行程讓位」判斷 | `src/kokoro_link/domain/value_objects/ongoing_interaction.py` |
+| 同場短路、判斷器參數、串流／非串流接線 | `src/kokoro_link/application/services/chat_service.py` |
+| 判斷器 port／adapter／template | `src/kokoro_link/contracts/busy_reply_decider.py`、`src/kokoro_link/infrastructure/busy/llm_decider.py`、`src/kokoro_link/data/prompts/busy/decider.txt` |
+| 行程段情況一／二與同場指引 | `src/kokoro_link/infrastructure/prompt/sections/schedule.py`、`src/kokoro_link/infrastructure/prompt/sections/dialogue.py`、`src/kokoro_link/infrastructure/prompt/sections/context.py` |
+| 唯讀時刻查詢 | `src/kokoro_link/application/services/schedule_service.py`（`resolve_activity_at`） |
+
+**相關 reference：** `ONGOING_INTERACTION_HOLD_REFERENCE.md`
+
+**溶合判斷：** 上游若自行處理互動中的行程切換，優先採用上游；`chat_service.py`
+與 prompt sections 在衝突熱區，merge 時預期衝突。

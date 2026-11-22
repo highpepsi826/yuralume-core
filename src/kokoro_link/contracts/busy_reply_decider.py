@@ -111,6 +111,7 @@ class BusyReplyDeciderPort(Protocol):
         recent_proactive_attempts: tuple[ProactiveAttempt, ...] = (),
         relationship_context_lines: tuple[str, ...] = (),
         interaction_context_lines: tuple[str, ...] = (),
+        ongoing_interaction_lines: tuple[str, ...] = (),
         now: datetime,
         local_tz: tzinfo | None = None,
         operator_primary_language: str = "zh-TW",
@@ -130,6 +131,11 @@ class BusyReplyDeciderPort(Protocol):
         layer resolves initial relationship seed and Layer-4 familiarity;
         the adapter renders them without exposing raw scores or message
         counts to the LLM.
+
+        ``ongoing_interaction_lines`` (I-21) are fact sentences, built by the
+        application layer, saying the player and the character were already
+        mid-conversation. Empty means they were not; the adapter then renders
+        nothing and the prompt is unchanged.
 
         ``recent_proactive_attempts`` are the character's own most-recent
         SENT proactive pushes (newest first). They let the decider tell

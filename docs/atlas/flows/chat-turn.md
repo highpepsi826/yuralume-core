@@ -1,8 +1,8 @@
 ---
 doc: flow-chat-turn
 tier: atlas
-verified_at_commit: 3fc5836
-verified_at: 2026-11-21
+verified_at_commit: a803ef8
+verified_at: 2026-11-22
 sources:
   - src/kokoro_link/application/services/chat_service.py
   - src/kokoro_link/application/services/active_llm_provider.py
@@ -14,6 +14,8 @@ sources:
   - src/kokoro_link/infrastructure/prompt/sections/schedule.py
   - src/kokoro_link/infrastructure/prompt/sections/dialogue.py
   - src/kokoro_link/domain/value_objects/presence_frame.py
+  - src/kokoro_link/application/services/ongoing_interaction.py
+  - src/kokoro_link/domain/value_objects/ongoing_interaction.py
   - src/kokoro_link/data/prompts/busy/decider.txt
   - src/kokoro_link/data/prompts/post_turn/processor.txt
 symbols:
@@ -31,6 +33,11 @@ symbols:
   - src/kokoro_link/infrastructure/prompt/sections/schedule.py::_render_schedule_block
   - src/kokoro_link/infrastructure/prompt/sections/dialogue.py::_STAGE_PRESENCE_GUIDANCE
   - src/kokoro_link/domain/value_objects/presence_frame.py::PresenceFrame
+  - src/kokoro_link/application/services/ongoing_interaction.py::resolve_ongoing_interaction
+  - src/kokoro_link/domain/value_objects/ongoing_interaction.py::OngoingInteraction
+  - src/kokoro_link/domain/value_objects/ongoing_interaction.py::schedule_yields_to_conversation
+  - src/kokoro_link/application/services/chat_service.py::_resolve_ongoing_interaction
+  - src/kokoro_link/application/services/schedule_service.py::resolve_activity_at
 ---
 
 # 流程：聊天回合
@@ -173,11 +180,12 @@ flowchart LR
 ## 行程如何影響一個回合
 
 行程在一個回合裡有三個作用點，順序固定。找「為什麼角色突然說在忙」「為什麼
-行程被改了」時從這裡開始。（查證於 `d066b3e`，2026-11-22）
+行程被改了」時從這裡開始。（查證於 `d066b3e`，2026-11-22；I-21 第一期的改動
+已併入下文，未 commit 時以 source 為準。）
 
 ```mermaid
 flowchart LR
-    A["_load_current_schedule<br/>當前／即將／剛結束"] --> B["_maybe_defer_reply<br/>忙碌延後短路"]
+    A["_load_current_schedule<br/>當前／即將／剛結束<br/>+ _resolve_ongoing_interaction"] --> B["_maybe_defer_reply<br/>忙碌延後短路"]
     B -->|"延後"| X["短回覆 + PendingFollowUp<br/>不組 prompt、不跑 post-turn"]
     B -->|"不延後"| C["prompt 行程段<br/>_render_schedule_block"]
     C --> D["LLM 回覆"]
@@ -194,13 +202,22 @@ flowchart LR
   `BUSY_REPLY_DECIDER_INVOKE_FLOOR`（0.7，`busy_defer_policy.py`）→ 才呼叫
   LLM 判斷器。
 - 0.7 只是「要不要問判斷器」的結構性閘門，延後與否由判斷器決定。
-- **它不接收 `presence_frame`**：同場（`WEB_STAGE`）回合與文字訊息回合走完全
-  相同的延後邏輯。
+- **互動中狀態（I-21 第一期）**：兩個入口在 `_load_current_schedule` 之後呼叫
+  `_resolve_ongoing_interaction`，由 `resolve_ongoing_interaction`（只看時間戳、
+  角色、kind，不讀文字）推導「最近 15 分鐘內有來回」。結果 `OngoingInteraction`
+  不落庫，傳給 `_maybe_defer_reply` 與 prompt。起點在 8 則窗口外時再讀一次較寬
+  的窗口（上限 6 小時）。brief ack 與一般回覆無法區分，照算；不會連續延後，
+  因為下一則玩家訊息一定先取消未完成的延後列。
+- **同場回合不延後**：`_maybe_defer_reply` 現在收到 `presence_frame`；`WEB_STAGE`
+  在取消既有延後列之後直接回 `None`，設界交給主 prompt 的同場指引。
 - 判斷器（`infrastructure/busy/llm_decider.py::_build_prompt` +
   `data/prompts/busy/decider.txt`）收到：角色資料與狀態、關係與互動脈絡句、
   當前活動（時段、類別、內容、`busy_score`）、**較舊的**對話摘要
   （`older_dialogue_summary`，截 300 字）、角色最近的主動訊息、本則玩家訊息。
-  它**收不到**最近幾則對話原文，也不知道上一次來回是幾分鐘前。
+  它**收不到**最近幾則對話原文；互動中時另收到 `ongoing_interaction_lines`
+  （「對話狀態」區塊：上一則回覆幾分鐘前、NORMAL 內容時附 80 字引文、活動是否
+  在這段對話開始後才輪到），`decider.txt` 有一條對應的判斷原則（通常傾向立即）。
+  互動中以外，區塊為空、prompt 不變。
 - 兩個入口（串流與非串流）各有一個呼叫點，改參數時兩邊都要改。
 - 測試：`test_chat_service_busy_defer.py`、`test_llm_busy_decider.py`、
   `busy_defer_harness.py`。
@@ -209,6 +226,13 @@ flowchart LR
 
 - `sections/schedule.py::_render_schedule_block` 把當前行程宣告為「此刻身處地點
   與正在做的事的**唯一真實來源**，其他段落衝突時一律以本段為準」。
+  `ScheduleContext.ongoing_interaction` 為 `None` 時輸出逐字如此。
+- 互動中（I-21）：**情況一**（當前活動在互動開始前就在進行）只追加一行
+  「互動狀態」，並把 0.6 以上的「忙碌程度」措辭改為中性；**情況二**
+  （`schedule_yields_to_conversation`：活動在 `streak_started_at` 之後才開始，
+  且不帶玩家參與的 `participant_refs`）改為「計畫 vs. 對話為準」寫法，不輸出
+  「正在」與「忙碌程度」，表頭改為「以下是你今天的計畫」；整段互動期間每回合
+  都如此。帶 `has_live_operator_commitment` 的活動視為對話的結果，走情況一。
 - 上一個活動（`just_finished`）只在**當前是空檔**時才顯示一行「剛結束」；
   當前有活動時，prompt 裡沒有上一個活動的任何痕跡。
 - 「忙碌程度」由 `_busy_hint` 把 `busy_score` 換成語氣指示；0.6 以上會要求
@@ -216,7 +240,9 @@ flowchart LR
 - 同場是**每回合由玩家宣告**的（`PresenceFrame`，`access_context` 固定為
   `PLAYER_DECLARED`），不是持續狀態；沒有任何欄位記錄「目前正在同場」。
 - `sections/dialogue.py::_STAGE_PRESENCE_GUIDANCE` 規定同場時行程仍然有效，
-  私密時段（洗澡等）由角色在劇情內設界。這段只有在第 1 步沒有延後時才會生效。
+  私密時段（洗澡等）由角色在劇情內設界。同場回合現在不會被延後，所以這段一定
+  會生效；唯獨情況二時略過「洗澡…隔著門說話」那一點（它預設角色已獨處），
+  其餘三點保留。
 
 ### 3. Post-turn 會改寫行程（`schedule_adjustments`）
 
@@ -237,8 +263,10 @@ flowchart LR
 
 ### 已知缺口
 
-- 行程切換會凌駕進行中的互動（`IDEAS_BACKLOG.md` I-21）：上面三點合起來的
-  結果。設計見 `ONGOING_INTERACTION_HOLD_REFERENCE.md`（未實作）。
+- I-21 第一期已解決「互動中被忙碌延後」與「prompt 把新活動寫成正在做」。
+  **仍未解決（第二期）**：行程本身不會因互動而改寫，其他讀行程的功能（主動訊息、
+  feed、記憶化）仍把該時段當成已發生；超過 15 分鐘後回來的約會延續不處理。
+  設計見 `ONGOING_INTERACTION_HOLD_REFERENCE.md`。
 - 排程中的約定訊息在聊天進行中仍會照發（I-19）。
 - 本頁其他段落的行號是 `3fc5836` 時的值，`chat_service.py` 之後有變動，行號
   已漂移（例如 `_maybe_defer_reply` 的呼叫點、`_run_post_turn` 本體）。以

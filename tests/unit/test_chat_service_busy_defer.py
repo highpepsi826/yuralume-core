@@ -841,3 +841,216 @@ async def test_upsert_merges_into_the_open_row_instead_of_opening_a_second(
         "conv-merge", first_at,
     )) == 1
     assert enqueuer.rows == []
+
+
+# ---------------------------------------------------------------------------
+# I-21: same-place turns never defer; messaging turns tell the decider when
+# the conversation is already under way.
+# ---------------------------------------------------------------------------
+
+from kokoro_link.domain.entities.conversation import (  # noqa: E402
+    Conversation,
+    Message,
+    MessageRole,
+)
+from kokoro_link.application.dto.chat import PresenceFramePayload  # noqa: E402
+
+
+def _defer_decision(activity) -> BusyDecision:
+    return BusyDecision(
+        mode=BusyReplyMode.BRIEF_DEFER,
+        brief_reply="先回，等等",
+        defer_until=activity.end_at,
+        defer_reason="會議中",
+    )
+
+
+async def _seed_recent_exchange(conv_repo, character_id: str) -> str:
+    now = datetime.now(timezone.utc)
+    conversation = Conversation.start(character_id=character_id)
+    conversation = conversation.append(
+        Message(
+            role=MessageRole.USER, content="在嗎",
+            created_at=now - timedelta(minutes=5),
+        ),
+    ).append(
+        Message(
+            role=MessageRole.ASSISTANT, content="在啊，剛好在想你",
+            created_at=now - timedelta(minutes=3),
+        ),
+    )
+    await conv_repo.save(conversation)
+    return conversation.id
+
+
+@pytest.mark.asyncio
+async def test_stage_turn_never_defers_even_when_very_busy() -> None:
+    activity = busy_activity(busy=0.95)
+    decider = ScriptedDecider([_defer_decision(activity)])
+    pending_repo = InMemoryPendingFollowUpRepository()
+    chat, character_service, _ = build_chat_service(
+        decider=decider,
+        schedule_service=StubScheduleService(current_activity=activity),
+        pending_repo=pending_repo,
+    )
+    created = await character_service.create_character(
+        CreateCharacterRequest(name="Airi", personality=[], interests=[]),
+    )
+    reply = await chat.send_message(
+        SendChatMessageRequest(
+            character_id=created.id, message="我來了",
+            presence_frame=PresenceFramePayload.web_stage(),
+        ),
+    )
+    assert decider.calls == []
+    assert reply.assistant_message.content != "先回，等等"
+    assert await pending_repo.list_open_for_character(created.id) == []
+
+
+@pytest.mark.asyncio
+async def test_stage_turn_still_cancels_an_open_defer_row() -> None:
+    activity = busy_activity(busy=0.95)
+    decider = ScriptedDecider([_defer_decision(activity)])
+    pending_repo = InMemoryPendingFollowUpRepository()
+    chat, character_service, _ = build_chat_service(
+        decider=decider,
+        schedule_service=StubScheduleService(current_activity=activity),
+        pending_repo=pending_repo,
+    )
+    created = await character_service.create_character(
+        CreateCharacterRequest(name="Airi", personality=[], interests=[]),
+    )
+    first = await chat.send_message(
+        SendChatMessageRequest(character_id=created.id, message="晚餐想吃什麼"),
+    )
+    pending = await pending_repo.find_open_for_conversation(first.conversation_id)
+    assert pending is not None
+
+    await chat.send_message(
+        SendChatMessageRequest(
+            character_id=created.id,
+            conversation_id=first.conversation_id,
+            message="我走到你旁邊了",
+            presence_frame=PresenceFramePayload.web_stage(),
+        ),
+    )
+    assert await pending_repo.list_open_for_character(created.id) == []
+    merged = await pending_repo.get(pending.id)
+    assert merged is not None
+    assert merged.status == PendingFollowUpStatus.CANCELLED
+    assert len(decider.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_decider_receives_ongoing_interaction_lines_mid_conversation() -> None:
+    activity = busy_activity(busy=0.9)
+    decider = ScriptedDecider([BusyDecision()])
+    chat, character_service, conv_repo = build_chat_service(
+        decider=decider,
+        schedule_service=StubScheduleService(current_activity=activity),
+        pending_repo=InMemoryPendingFollowUpRepository(),
+    )
+    created = await character_service.create_character(
+        CreateCharacterRequest(name="Airi", personality=[], interests=[]),
+    )
+    conversation_id = await _seed_recent_exchange(conv_repo, created.id)
+    await chat.send_message(
+        SendChatMessageRequest(
+            character_id=created.id, conversation_id=conversation_id,
+            message="那我們繼續聊",
+        ),
+    )
+    lines = decider.calls[0]["ongoing_interaction_lines"]
+    assert lines and "3 分鐘前" in lines[0]
+    assert any("在想你" in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_decider_receives_no_ongoing_lines_without_recent_exchange() -> None:
+    activity = busy_activity(busy=0.9)
+    decider = ScriptedDecider([BusyDecision()])
+    chat, character_service, _ = build_chat_service(
+        decider=decider,
+        schedule_service=StubScheduleService(current_activity=activity),
+        pending_repo=InMemoryPendingFollowUpRepository(),
+    )
+    created = await character_service.create_character(
+        CreateCharacterRequest(name="Airi", personality=[], interests=[]),
+    )
+    await chat.send_message(
+        SendChatMessageRequest(character_id=created.id, message="嗨"),
+    )
+    assert decider.calls[0]["ongoing_interaction_lines"] == ()
+
+
+@pytest.mark.asyncio
+async def test_streaming_entry_passes_stage_and_ongoing_arguments() -> None:
+    """T9: the streaming entry feeds the same new arguments as the other."""
+    activity = busy_activity(busy=0.9)
+    decider = ScriptedDecider([BusyDecision(), BusyDecision()])
+    chat, character_service, conv_repo = build_chat_service(
+        decider=decider,
+        schedule_service=StubScheduleService(current_activity=activity),
+        pending_repo=InMemoryPendingFollowUpRepository(),
+    )
+    created = await character_service.create_character(
+        CreateCharacterRequest(name="Airi", personality=[], interests=[]),
+    )
+    conversation_id = await _seed_recent_exchange(conv_repo, created.id)
+
+    stage_stream, _ = await chat.send_message_stream(
+        SendChatMessageRequest(
+            character_id=created.id, conversation_id=conversation_id,
+            message="我來了", presence_frame=PresenceFramePayload.web_stage(),
+        ),
+    )
+    async for _ in stage_stream:
+        pass
+    assert decider.calls == []  # same-place turn: decider never consulted
+
+    text_stream, _ = await chat.send_message_stream(
+        SendChatMessageRequest(
+            character_id=created.id, conversation_id=conversation_id,
+            message="繼續聊",
+        ),
+    )
+    async for _ in text_stream:
+        pass
+    assert len(decider.calls) == 1
+    assert decider.calls[0]["ongoing_interaction_lines"]
+
+
+@pytest.mark.asyncio
+async def test_streak_start_outside_the_prompt_window_is_found() -> None:
+    """T2b: an unbroken streak longer than the 8-message window is traced
+    through the wider timestamp read."""
+    activity = busy_activity(busy=0.9)
+    chat, character_service, conv_repo = build_chat_service(
+        decider=ScriptedDecider([]),
+        schedule_service=StubScheduleService(current_activity=activity),
+        pending_repo=InMemoryPendingFollowUpRepository(),
+    )
+    created = await character_service.create_character(
+        CreateCharacterRequest(name="Airi", personality=[], interests=[]),
+    )
+    now = datetime.now(timezone.utc)
+    conversation = Conversation.start(character_id=created.id)
+    for k in range(24):  # 24 messages, 1 minute apart, ending 2 minutes ago
+        role = MessageRole.USER if k % 2 == 0 else MessageRole.ASSISTANT
+        conversation = conversation.append(
+            Message(
+                role=role, content="x",
+                created_at=now - timedelta(minutes=2 + (23 - k)),
+            ),
+        )
+    await conv_repo.save(conversation)
+    window = await conv_repo.recent_messages_for_character(created.id, limit=8)
+    ongoing = await chat._resolve_ongoing_interaction(
+        character=await chat._character_repository.get(created.id),
+        recent_messages=window,
+        current_activity=activity,
+        now=now,
+        local_tz=None,
+    )
+    assert ongoing is not None
+    assert ongoing.streak_started_at <= now - timedelta(minutes=24)

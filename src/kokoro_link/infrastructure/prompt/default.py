@@ -51,6 +51,9 @@ from kokoro_link.domain.value_objects.content_flow import (
     CONTENT_TOLERANCE_FRONTIER,
     sanitize_messages_for_tolerance,
 )
+from kokoro_link.domain.value_objects.ongoing_interaction import (
+    OngoingInteraction,
+)
 from kokoro_link.domain.value_objects.presence_frame import PresenceFrame
 from kokoro_link.infrastructure.prompt.sections.context import (
     DialogueContext,
@@ -199,6 +202,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
         resolved_character_address: "ResolvedAddress | None" = None,
         address_change_lines: "list[str] | None" = None,
         stage_nudge: bool = False,
+        ongoing_interaction: "OngoingInteraction | None" = None,
     ) -> str:
         """Render the chat prompt.
 
@@ -264,6 +268,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
                 resolved_character_address=resolved_character_address,
                 address_change_lines=address_change_lines,
                 stage_nudge=stage_nudge,
+                ongoing_interaction=ongoing_interaction,
         )
         with request_template_overrides(template_overrides or {}):
             self.last_prompt_pack_hash = get_default_loader().prompt_pack_hash(
@@ -333,6 +338,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
         resolved_character_address: "ResolvedAddress | None",
         address_change_lines: "list[str] | None",
         stage_nudge: bool,
+        ongoing_interaction: "OngoingInteraction | None" = None,
     ) -> PromptSectionContext:
         """Freeze this turn into the snapshot every section reads.
 
@@ -387,6 +393,7 @@ class DefaultPromptContextBuilder(PromptContextBuilderPort):
                 weather_context=weather_context,
                 world_event_context=tuple(world_event_context or ()),
                 world_event_recall=tuple(world_event_recall or ()),
+                ongoing_interaction=ongoing_interaction,
             ),
             story=StoryContext(
                 story_events=tuple(story_events or ()),

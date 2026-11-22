@@ -66,6 +66,10 @@ from kokoro_link.application.services.dialogue_checkpoint import (
 from kokoro_link.application.services.dialogue_window_loader import (
     load_unified_recent_messages,
 )
+from kokoro_link.application.services.ongoing_interaction import (
+    ONGOING_INTERACTION_STREAK_SCAN_LIMIT,
+    resolve_ongoing_interaction,
+)
 from kokoro_link.application.services.material_digest_precompute import (
     MaterialDigestPrecomputer,
     digest_operator_id,
@@ -380,7 +384,13 @@ from kokoro_link.domain.value_objects.content_flow import (
     normalize_content_tolerance,
     sanitize_messages_for_tolerance,
 )
-from kokoro_link.domain.value_objects.presence_frame import PresenceFrame
+from kokoro_link.domain.value_objects.ongoing_interaction import (
+    OngoingInteraction,
+)
+from kokoro_link.domain.value_objects.presence_frame import (
+    ChatSurface,
+    PresenceFrame,
+)
 from kokoro_link.domain.value_objects.timezone import timezone_for_id, to_timezone
 from kokoro_link.domain.value_objects.tool_call import ToolAttachment, ToolCall
 from kokoro_link.infrastructure.localization import localized_fallback_text
@@ -2224,6 +2234,13 @@ class ChatService:
         ) = await self._load_current_schedule(
             character, now=now_utc, local_tz=operator_tz,
         )
+        ongoing_interaction = await self._resolve_ongoing_interaction(
+            character=character,
+            recent_messages=recent_messages,
+            current_activity=current_activity,
+            now=now_utc,
+            local_tz=operator_tz,
+        )
         story_events = await self._ensure_story_events(character, now=now_utc)
         today_local = to_timezone(now_utc, operator_tz).date()
         calendar_context = self._describe_calendar(today_local, operator=operator)
@@ -2351,6 +2368,8 @@ class ChatService:
             content_mode=content_mode,
             external_turn=external_turn,
             allow_defer=user_message is not None,
+            presence_frame=presence_frame,
+            ongoing_interaction=ongoing_interaction,
         )
         if defer is not None:
             _, defer_user_msg, defer_brief_msg, defer_state, _ = defer
@@ -2403,6 +2422,7 @@ class ChatService:
             just_finished_activity=just_finished_activity,
             completed_today_activities=completed_today_activities,
             pending_invite_activities=pending_invite_activities,
+            ongoing_interaction=ongoing_interaction,
             story_events=story_events,
             story_arc=story_arc,
             upcoming_arc_beats=upcoming_arc_beats,
@@ -2841,6 +2861,13 @@ class ChatService:
         ) = await self._load_current_schedule(
             character, now=now_utc, local_tz=operator_tz,
         )
+        ongoing_interaction = await self._resolve_ongoing_interaction(
+            character=character,
+            recent_messages=recent_messages,
+            current_activity=current_activity,
+            now=now_utc,
+            local_tz=operator_tz,
+        )
         story_events = await self._ensure_story_events(character, now=now_utc)
         today_local = to_timezone(now_utc, operator_tz).date()
         calendar_context = self._describe_calendar(today_local, operator=operator)
@@ -2937,6 +2964,8 @@ class ChatService:
             journal=journal,
             content_mode=content_mode,
             allow_defer=user_message is not None,
+            presence_frame=presence_frame,
+            ongoing_interaction=ongoing_interaction,
         )
         if defer is not None:
             defer_conv, defer_user_msg, defer_brief_msg, defer_state, _ = defer
@@ -3035,6 +3064,7 @@ class ChatService:
                 just_finished_activity=just_finished_activity,
                 completed_today_activities=completed_today_activities,
                 pending_invite_activities=pending_invite_activities,
+                ongoing_interaction=ongoing_interaction,
                 story_events=story_events,
                 story_arc=story_arc,
                 upcoming_arc_beats=upcoming_arc_beats,
@@ -3202,6 +3232,7 @@ class ChatService:
                 just_finished_activity=just_finished_activity,
                 completed_today_activities=completed_today_activities,
                 pending_invite_activities=pending_invite_activities,
+                ongoing_interaction=ongoing_interaction,
                 now=now_utc,
                 idle_minutes=idle_minutes,
                 # HV2 — this generator is the streaming branch, reached only
@@ -3842,6 +3873,56 @@ class ChatService:
                 character_id,
             )
 
+    async def _resolve_ongoing_interaction(
+        self,
+        *,
+        character: Character,
+        recent_messages: list[Message],
+        current_activity: "ScheduleActivity | None",
+        now: datetime,
+        local_tz: tzinfo | None,
+    ) -> OngoingInteraction | None:
+        """Derive the I-21 ongoing-interaction state for this turn.
+
+        Read-only and fail-soft: any error means "not ongoing", which leaves
+        every downstream behaviour exactly as before. Called before this
+        turn's player message is persisted, so it never sees it. When the
+        streak is still unbroken at the oldest message of the ordinary
+        window, one wider read (timestamps and kinds only are consulted)
+        finds the real start.
+        """
+        try:
+            ongoing = resolve_ongoing_interaction(
+                recent_messages=recent_messages,
+                current_activity=current_activity,
+                now=now,
+            )
+            if ongoing is None:
+                return None
+            if ongoing.streak_reaches_window_start:
+                wider = await load_unified_recent_messages(
+                    self._conversation_repository,
+                    character_id=character.id,
+                    limit=ONGOING_INTERACTION_STREAK_SCAN_LIMIT,
+                )
+                ongoing = resolve_ongoing_interaction(
+                    recent_messages=wider,
+                    current_activity=current_activity,
+                    now=now,
+                ) or ongoing
+            lookup = getattr(self._schedule_service, "resolve_activity_at", None)
+            if lookup is not None:
+                before = await lookup(
+                    character, ongoing.streak_started_at, local_tz=local_tz,
+                )
+                ongoing = replace(ongoing, activity_at_streak_start=before)
+            return ongoing
+        except Exception:
+            _LOGGER.exception(
+                "ongoing-interaction resolve failed character=%s", character.id,
+            )
+            return None
+
     async def _maybe_defer_reply(
         self,
         *,
@@ -3860,6 +3941,8 @@ class ChatService:
         content_mode: MessageContentMode = MessageContentMode.NORMAL,
         external_turn: ExternalChatTurnExecutionPort | None = None,
         allow_defer: bool = True,
+        presence_frame: PresenceFrame | None = None,
+        ongoing_interaction: OngoingInteraction | None = None,
     ) -> tuple[Conversation, Message, Message | None, CharacterState, PendingFollowUp] | None:
         """Ask the busy-reply decider whether to short-circuit this turn.
 
@@ -3906,6 +3989,20 @@ class ChatService:
         ):
             return None
         if not allow_defer:
+            return None
+        if (
+            presence_frame is not None
+            and presence_frame.surface is ChatSurface.WEB_STAGE
+        ):
+            # I-21: a same-place turn is face to face, where "I'll reply
+            # later" does not exist. The stage prompt already tells the
+            # character to set boundaries inside the scene; deferring here
+            # used to pre-empt that guidance. Runs after the cancellation
+            # above so an open defer row is still closed.
+            _LOGGER.info(
+                "busy-defer: skipped (same-place stage turn) character=%s",
+                character.id,
+            )
             return None
         if current_activity is None:
             _LOGGER.info(
@@ -3964,6 +4061,9 @@ class ChatService:
                 recent_proactive_attempts=recent_proactive_messages,
                 relationship_context_lines=tuple(relationship_context_lines),
                 interaction_context_lines=interaction_context_lines,
+                ongoing_interaction_lines=_render_ongoing_interaction_lines(
+                    ongoing_interaction,
+                ),
                 now=now_utc,
                 local_tz=_operator_timezone(operator),
                 # The brief ack is sent straight to the player, so it must
@@ -4509,6 +4609,7 @@ class ChatService:
         just_finished_activity: ScheduleActivity | None = None,
         completed_today_activities: list[ScheduleActivity] | None = None,
         pending_invite_activities: list[ScheduleActivity] | None = None,
+        ongoing_interaction: "OngoingInteraction | None" = None,
         story_events: list[StoryEvent] | None = None,
         story_arc: "StoryArc | None" = None,
         upcoming_arc_beats: "list[StoryArcBeat] | None" = None,
@@ -4681,6 +4782,7 @@ class ChatService:
                     just_finished_activity=just_finished_activity,
                     completed_today_activities=completed_today_activities,
                     pending_invite_activities=pending_invite_activities,
+                    ongoing_interaction=ongoing_interaction,
                     now=now,
                     idle_minutes=idle_minutes,
                     character_tool_names=character_tool_names,
@@ -4947,6 +5049,7 @@ class ChatService:
                 just_finished_activity=just_finished_activity,
                 completed_today_activities=completed_today_activities,
                 pending_invite_activities=pending_invite_activities,
+                ongoing_interaction=ongoing_interaction,
                 now=now,
                 idle_minutes=idle_minutes,
                 available_tools=tools_for_hop,
@@ -5290,6 +5393,7 @@ class ChatService:
                 just_finished_activity=just_finished_activity,
                 completed_today_activities=completed_today_activities,
                 pending_invite_activities=pending_invite_activities,
+                ongoing_interaction=ongoing_interaction,
                 now=now,
                 idle_minutes=idle_minutes,
                 available_tools=[],
@@ -8633,6 +8737,22 @@ def _tool_to_message_attachment(att: ToolAttachment) -> MessageAttachment:
         mime_type=att.mime_type,
         caption=att.caption,
     )
+
+
+def _render_ongoing_interaction_lines(
+    ongoing: OngoingInteraction | None,
+) -> tuple[str, ...]:
+    """Fact sentences for the busy decider; empty when not mid-conversation."""
+    if ongoing is None:
+        return ()
+    lines = [
+        f"- 你們正在一來一往地對話，你上一則回覆在約 {ongoing.minutes_since} 分鐘前。",
+    ]
+    if ongoing.last_reply_excerpt:
+        lines.append(f"- 你當時說的是：「{ongoing.last_reply_excerpt}」")
+    if ongoing.activity_started_during_streak:
+        lines.append("- 你目前的活動是在這段對話開始之後才輪到的。")
+    return tuple(lines)
 
 
 def _classify_assistant_kind(

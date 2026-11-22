@@ -13,6 +13,9 @@ from kokoro_link.domain.entities.conversation import (
 )
 from kokoro_link.domain.entities.feed_post import FeedPost
 from kokoro_link.domain.entities.proactive_attempt import ProactiveAttempt
+from kokoro_link.domain.value_objects.ongoing_interaction import (
+    schedule_yields_to_conversation,
+)
 from kokoro_link.domain.value_objects.presence_frame import (
     AccessContext,
     ChatSurface,
@@ -331,9 +334,18 @@ def _render_stage_nudge_block(
     return list(_STAGE_NUDGE_GUIDANCE)
 
 
+_STAGE_PRESENCE_PRIVATE_SLOT_INDEX = 2
+"""Index in :data:`_STAGE_PRESENCE_GUIDANCE` of the private-time point
+(洗澡 / 獨處 ... 隔著門說話). It presumes the character is already alone in
+that scene, so it is dropped while the schedule yields to a live interaction
+(I-21 case two): the player was with the character a moment ago."""
+
+
 def _render_presence_frame_block(
     presence_frame: "PresenceFrame | None",
     operator_language: str | None = None,
+    *,
+    schedule_yields: bool = False,
 ) -> list[str]:
     frame = presence_frame or PresenceFrame.web_stage()
     uses_texting_style = _presence_frame_uses_texting_style(frame)
@@ -359,7 +371,10 @@ def _render_presence_frame_block(
             "觸碰對方或和對方面對面做動作。",
         )
     else:
-        lines.extend(_STAGE_PRESENCE_GUIDANCE)
+        for index, point in enumerate(_STAGE_PRESENCE_GUIDANCE):
+            if schedule_yields and index == _STAGE_PRESENCE_PRIVATE_SLOT_INDEX:
+                continue
+            lines.append(point)
 
     if uses_texting_style:
         lines.extend(_render_texting_style_lines())
@@ -627,6 +642,9 @@ def _presence_frame(ctx: PromptSectionContext) -> list[str]:
     return _render_presence_frame_block(
         ctx.dialogue.presence_frame,
         operator_language=getattr(ctx.identity.operator, "primary_language", None),
+        schedule_yields=schedule_yields_to_conversation(
+            ctx.schedule.ongoing_interaction, ctx.schedule.current_activity,
+        ),
     )
 
 
