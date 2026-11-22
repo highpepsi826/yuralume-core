@@ -68,6 +68,7 @@ Rationale" below. This is a working suggestion, not an approval.
 | I-29 | Character travels abroad (leisure or business): temporary timezone and an out-of-town self-awareness | Schedule / Travel | idea | - | - | 2026-11-07 |
 | I-30 | NSFW mode has no content-direction prompt: output stays restrained because the system prompt never learns the mode is on | NSFW / Prompt | done | - | `NSFW_INTIMACY_DIRECTION_REFERENCE.md` | 2026-11-21 |
 | I-31 | NSFW mode reroutes every feature to the target, including structural tasks that do not need the transcript; give those a carve-out back to normal routing | NSFW / Routing | done | - | `NSFW_ROUTING_CARVE_OUT_REFERENCE.md` | 2026-11-22 |
+| I-32 | Other NPCs present in a co-presence chat never speak, even when the player addresses them directly; improve without affecting memory | Co-presence / NPC / Prompt | idea | - | - | 2026-11-22 |
 
 ## Priority Rationale
 
@@ -508,6 +509,21 @@ Group notes:
   - 回程後如何收尾（旅行記憶寫入）。
 - 相關：I-18（時間感）、I-13（世界觀）、I-27。
 
+### I-32 同場時其他 NPC 不說話
+
+- 用戶想法：同場聊天時，若有其他 NPC 在場，他們從不開口——即使玩家把話題直接引到
+  他們身上也一樣。希望改善，但**不能影響記憶**。
+- 「不影響記憶」的初步理解（待與用戶確認）：NPC 的台詞不應被寫成主角色的記憶事實、
+  不應污染主角色的長期記憶／關係值，也不應讓 NPC 產生獨立的記憶寫入。
+- 待分析：
+  - 現況：聊天 prompt 已有 `companion_roster`（私人 NPC 名單，見 I-09 進度），但回覆
+    是否被規定只能以主角色身分發言；NPC 在場資訊從哪裡來（排程／故事場景）。
+  - 方案方向：A) 主角色回覆內允許轉述／帶出 NPC 台詞（敘事式，單一回覆）；
+    B) NPC 以獨立訊息發言（需區分發言者、顯示名稱，及寫入歷史的標記）。
+  - 記憶隔離：NPC 台詞在對話歷史中如何標記，讓記憶抽取跳過或只當背景。
+  - 觸發條件：玩家點名／提問 NPC 時才發言，避免 NPC 搶話。
+- 相關：I-05、I-28、I-09。
+
 ## Change Log
 
 - 2026-10-21 Created backlog with I-01 to I-14. (by Claude)
@@ -625,3 +641,5 @@ Group notes:
      只保留最後 3 則原文，更早的會被壓成摘要。
    - 待分析：8 則對「每天聊」是否太窄；3 則原文是否讓話題在兩三回合內失去細節；
      window_limit 的實測值與 token 成本；是否要按對話密度自適應。
+- 2026-11-22 Added I-32 (other NPCs present in a co-presence chat never speak,
+  even when addressed; improve without affecting memory). (by Claude)
