@@ -22,6 +22,13 @@ Then, depending on what arrived:
 "Mandatory update" in `AGENTS.md` for the table of which register to touch.
 Run `make atlas-check` and `make fork-delta-check` before committing.
 
+**An investigation is not done until its findings are in the atlas.** Any
+structural fact verified against the code — a mechanism, a call order, a gate,
+who writes what, a governing prompt rule, a non-obvious absence — goes into the
+owning atlas page before it is reported, even when no source changed. A design
+reference is archived when its work ends, so it cannot be the only place a fact
+lives. See "Investigation findings" in `AGENTS.md`.
+
 If the atlas and the code disagree, the atlas is wrong — fix the atlas in that
 commit rather than working around it.
 

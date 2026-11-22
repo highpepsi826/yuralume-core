@@ -192,6 +192,12 @@ Provider 解析的順序完全相同（`_read_preferred_provider` :591）。
 - 帶排程時間的實體拒絕 naive datetime（`album_item.py:67`、`pending_follow_up.py:84`）。
 - 時間來源用 `ClockPort`，不要 `datetime.now(`（見 `invariants.md` §E）。
 
+**聊天回合也會寫行程：** 除了 planner，聊天回合的 post-turn 會透過
+`apply_adjustments` 改寫行程。改行程行為前先讀
+[flows/chat-turn.md](flows/chat-turn.md)「行程如何影響一個回合」，那裡記錄了
+行程在回合中的三個作用點與 post-turn 改寫的觸發條件。（查證於 `d066b3e`，
+2026-11-22）
+
 **必跑測試：** `tests/unit/test_schedule_service.py`（16）、`_calendar`(8)、
 `_cross_instance`(7)、`_future_commitment`(5)、`_weather_refresh`(7)、
 `_window`(7) — 合計 34。
@@ -215,6 +221,11 @@ Provider 解析的順序完全相同（`_read_preferred_provider` :591）。
 - 每個 delivery slot 對開啟中的 scheduled promise 只能有一列
   （`models.py:1920-1936`）；對同一開啟中的承諾重試要回傳既有列，不得新增。
 - deferred intent 的 TTL 是資料列屬性，過期列在注入前過濾。
+
+**忙碌延後（`BUSY_DEFER`）從哪裡來：** 聊天回合的 `_maybe_defer_reply`。判斷
+順序、0.7 閘門、判斷器看得到與看不到什麼，見
+[flows/chat-turn.md](flows/chat-turn.md)「行程如何影響一個回合」第 1 點。
+（查證於 `d066b3e`，2026-11-22）
 
 **必跑測試：** `tests/unit/test_pending_follow_up_entity.py`、
 `test_pending_follow_up_scheduled_promise_entity.py`、

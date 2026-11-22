@@ -258,6 +258,46 @@ make atlas-check
 make fork-delta-check
 ```
 
+### Investigation findings
+
+The atlas is updated by investigation, not only by code changes. Whenever an
+investigation — a bug hunt, design work for an idea, or a "how does X work"
+question — verifies a structural fact against the code that the atlas does not
+already record, write it into the atlas as part of that same piece of work,
+even when no source file changes.
+
+The test is one question: **would the next session have to re-read source to
+learn this?** If yes, it belongs in the atlas.
+
+| Write it | Do not write it |
+|---|---|
+| A mechanism or call order (what runs before what, what short-circuits) | A proposed or unimplemented design — that is a `*_REFERENCE.md` |
+| A gate or threshold and what it actually gates | Speculation that was not checked against code |
+| Who writes a given piece of data, and through which method | One-off data state, database rows, message content |
+| A rule inside a prompt template that governs behavior | Secrets |
+| A non-obvious absence ("this function never receives X") | Anything already recorded — update the existing entry instead |
+
+- **Where:** the existing page that owns the topic — a `flows/` page for
+  cross-layer order, a `domains/` page for one domain, `change-map.md` for
+  "where do I change this", `invariants.md` for rules, `glossary.md` for terms.
+  Add a cross-link from the `change-map.md` row. Open a new page only when no
+  existing page fits and the topic is likely to be revisited.
+- **When:** before reporting the finding to the owner, and in the same commit
+  as the design reference or backlog entry that relies on it.
+- **A reference is not the home of a fact.** `*_REFERENCE.md` files are
+  archived when their work ends. A reference may summarize what it relies on,
+  but the fact itself lives in the atlas and the reference points at it.
+- **Anchors:** prefer `file::Symbol` over line numbers; add the new symbols to
+  the page's `symbols` frontmatter so `make atlas-check` guards them.
+- **Freshness:** when only a section was added and the rest of the page was not
+  re-checked, mark the section `（查證於 <short-sha>，<date>）` and leave the
+  page-level `verified_at_commit` alone — that field means the whole page was
+  verified.
+- **Corrections count too:** when an investigation shows an atlas statement is
+  wrong or stale, fix it in the same work.
+- **Report it:** the final message for an investigation states which atlas
+  pages were updated, or says plainly that nothing new was found.
+
 - Every atlas page carries YAML frontmatter with `verified_at_commit`,
   `verified_at`, `sources` and `symbols`. `make atlas-check` verifies that
   every source path still exists and every symbol anchor still resolves.

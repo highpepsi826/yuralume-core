@@ -8,12 +8,29 @@ sources:
   - src/kokoro_link/application/services/active_llm_provider.py
   - src/kokoro_link/infrastructure/prompt
   - src/kokoro_link/infrastructure/post_turn/llm_processor.py
+  - src/kokoro_link/application/services/busy_defer_policy.py
+  - src/kokoro_link/application/services/schedule_service.py
+  - src/kokoro_link/infrastructure/busy/llm_decider.py
+  - src/kokoro_link/infrastructure/prompt/sections/schedule.py
+  - src/kokoro_link/infrastructure/prompt/sections/dialogue.py
+  - src/kokoro_link/domain/value_objects/presence_frame.py
+  - src/kokoro_link/data/prompts/busy/decider.txt
+  - src/kokoro_link/data/prompts/post_turn/processor.txt
 symbols:
   - src/kokoro_link/application/services/chat_service.py::send_message
   - src/kokoro_link/application/services/chat_service.py::send_message_stream
   - src/kokoro_link/application/services/chat_service.py::_send_message_turn
   - src/kokoro_link/application/services/chat_service.py::_run_post_turn
   - src/kokoro_link/application/services/chat_service.py::_generate_reply_with_tools
+  - src/kokoro_link/application/services/chat_service.py::_maybe_defer_reply
+  - src/kokoro_link/application/services/chat_service.py::_load_current_schedule
+  - src/kokoro_link/application/services/busy_defer_policy.py::BUSY_REPLY_DECIDER_INVOKE_FLOOR
+  - src/kokoro_link/application/services/schedule_service.py::apply_adjustments
+  - src/kokoro_link/application/services/schedule_service.py::resolve_current
+  - src/kokoro_link/infrastructure/busy/llm_decider.py::_build_prompt
+  - src/kokoro_link/infrastructure/prompt/sections/schedule.py::_render_schedule_block
+  - src/kokoro_link/infrastructure/prompt/sections/dialogue.py::_STAGE_PRESENCE_GUIDANCE
+  - src/kokoro_link/domain/value_objects/presence_frame.py::PresenceFrame
 ---
 
 # 流程：聊天回合
@@ -97,7 +114,7 @@ sequenceDiagram
 | 18 | `_load_recent_emotion_events` | 2282 | |
 | 19 | `_overlay_emotion_on_state` | 2285 | |
 | 20 | `_build_pre_turn_journal` | 2291 | undo 快照，**在任何短路之前** |
-| 21 | `_maybe_defer_reply` | 2321 | 忙碌延後短路 → 在 2347 提前返回 |
+| 21 | `_maybe_defer_reply` | 2321 | 忙碌延後短路 → 在 2347 提前返回。細節見「行程如何影響一個回合」 |
 | 22 | `_conversation_repository.save` | 2364 | **先存使用者訊息，再呼叫 LLM** |
 
 **模型解析與生成（23–25）：**
@@ -152,6 +169,80 @@ flowchart LR
 `_apply_observed_address_changes` (7972)、`_persist_peer_meet_intents` (8051)、
 `_persist_message_promises` (8124)、`_maybe_schedule_goal_review` (8348)、
 `_maybe_schedule_repetition_check` (8483)。
+
+## 行程如何影響一個回合
+
+行程在一個回合裡有三個作用點，順序固定。找「為什麼角色突然說在忙」「為什麼
+行程被改了」時從這裡開始。（查證於 `d066b3e`，2026-11-22）
+
+```mermaid
+flowchart LR
+    A["_load_current_schedule<br/>當前／即將／剛結束"] --> B["_maybe_defer_reply<br/>忙碌延後短路"]
+    B -->|"延後"| X["短回覆 + PendingFollowUp<br/>不組 prompt、不跑 post-turn"]
+    B -->|"不延後"| C["prompt 行程段<br/>_render_schedule_block"]
+    C --> D["LLM 回覆"]
+    D --> E["post-turn<br/>schedule_adjustments"]
+    E -->|"apply_adjustments"| F["今日行程被改寫"]
+```
+
+### 1. 忙碌延後短路（`_maybe_defer_reply`）
+
+- 發生在 **prompt 組裝之前**。一旦延後，本回合只回一句短確認並排一列
+  `PendingFollowUp`，主 prompt 的任何指引都不會執行。
+- 判斷順序：port 未接線 → 先取消既有的延後列（有則直接正常回覆）→
+  `allow_defer=False` → 無當前活動 → `busy_score` 低於
+  `BUSY_REPLY_DECIDER_INVOKE_FLOOR`（0.7，`busy_defer_policy.py`）→ 才呼叫
+  LLM 判斷器。
+- 0.7 只是「要不要問判斷器」的結構性閘門，延後與否由判斷器決定。
+- **它不接收 `presence_frame`**：同場（`WEB_STAGE`）回合與文字訊息回合走完全
+  相同的延後邏輯。
+- 判斷器（`infrastructure/busy/llm_decider.py::_build_prompt` +
+  `data/prompts/busy/decider.txt`）收到：角色資料與狀態、關係與互動脈絡句、
+  當前活動（時段、類別、內容、`busy_score`）、**較舊的**對話摘要
+  （`older_dialogue_summary`，截 300 字）、角色最近的主動訊息、本則玩家訊息。
+  它**收不到**最近幾則對話原文，也不知道上一次來回是幾分鐘前。
+- 兩個入口（串流與非串流）各有一個呼叫點，改參數時兩邊都要改。
+- 測試：`test_chat_service_busy_defer.py`、`test_llm_busy_decider.py`、
+  `busy_defer_harness.py`。
+
+### 2. Prompt 的行程段與同場指引
+
+- `sections/schedule.py::_render_schedule_block` 把當前行程宣告為「此刻身處地點
+  與正在做的事的**唯一真實來源**，其他段落衝突時一律以本段為準」。
+- 上一個活動（`just_finished`）只在**當前是空檔**時才顯示一行「剛結束」；
+  當前有活動時，prompt 裡沒有上一個活動的任何痕跡。
+- 「忙碌程度」由 `_busy_hint` 把 `busy_score` 換成語氣指示；0.6 以上會要求
+  「回覆保持簡潔」，0.85 以上會要求「之後再詳聊」。
+- 同場是**每回合由玩家宣告**的（`PresenceFrame`，`access_context` 固定為
+  `PLAYER_DECLARED`），不是持續狀態；沒有任何欄位記錄「目前正在同場」。
+- `sections/dialogue.py::_STAGE_PRESENCE_GUIDANCE` 規定同場時行程仍然有效，
+  私密時段（洗澡等）由角色在劇情內設界。這段只有在第 1 步沒有延後時才會生效。
+
+### 3. Post-turn 會改寫行程（`schedule_adjustments`）
+
+- post-turn 處理器的輸出含 `schedule_adjustments`（add／remove／modify），在
+  `_do_post_turn` 內依序交給 `ScheduleService.reconcile_commitment_adjustments`
+  與 `apply_adjustments` 寫回。聊天對話要改寫行程，走的就是這條路徑（手動行程
+  API 以 `manual=True` 呼叫同一個方法）。
+- 觸發條件寫在 `data/prompts/post_turn/processor.txt` 的 `schedule_adjustments`
+  欄位規則：預設空陣列，**僅當使用者或角色明確表達行程變動時**才產出，
+  「不確定就不要提」。對話沒有明說，行程就不會動。
+- 處理器看到的是今日全部活動的 id 清單與未來幾天的行程，沒有「哪一個是當前
+  活動」或「互動正在跨越行程邊界」的標記。
+- `apply_adjustments` 的規則：新增或修改的時段與既有時段重疊時，把既有時段的
+  **開始時間往後推**；已記憶化（`memorialized`）的活動不可 modify／remove；
+  remove／modify 只能針對今日既有活動，add 可以帶 `target_date_iso` 指向未來
+  日子（該日無行程時建立 `is_planned=False` 的種子）。
+- post-turn 在背景執行，改寫可能晚於下一個回合才生效。
+
+### 已知缺口
+
+- 行程切換會凌駕進行中的互動（`IDEAS_BACKLOG.md` I-21）：上面三點合起來的
+  結果。設計見 `ONGOING_INTERACTION_HOLD_REFERENCE.md`（未實作）。
+- 排程中的約定訊息在聊天進行中仍會照發（I-19）。
+- 本頁其他段落的行號是 `3fc5836` 時的值，`chat_service.py` 之後有變動，行號
+  已漂移（例如 `_maybe_defer_reply` 的呼叫點、`_run_post_turn` 本體）。以
+  symbol 名稱搜尋為準；整頁重新對照時一併修正。
 
 ## 串流路徑的差異
 

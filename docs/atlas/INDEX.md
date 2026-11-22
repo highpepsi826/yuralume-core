@@ -56,7 +56,7 @@ flowchart LR
 | 聊天回合 / 路由 | `domains/chat.md`, `domains/routing.md` | **待寫**（change-map #1、#9 已涵蓋大部分） |
 | Prompt 組裝 | `domains/prompt.md` | **待寫**（change-map #2、#3） |
 | NSFW / 內容流 | [domains/nsfw.md](domains/nsfw.md) | ✅ |
-| 排程與主動訊息 | `domains/scheduling.md` | **待寫**（change-map #4、#5、#6） |
+| 排程與主動訊息 | `domains/scheduling.md` | **待寫**（change-map #4、#5、#6；行程與聊天回合的交互見 `flows/chat-turn.md`） |
 | 記憶 | `domains/memory.md` | **待寫** |
 | 角色與人物 | `domains/character.md` | **待寫** |
 | 媒體生成 | `domains/media.md` | **待寫** |
@@ -69,7 +69,7 @@ flowchart LR
 
 | 流程 | 頁面 | 狀態 |
 |---|---|---|
-| 聊天回合 | `flows/chat-turn.md` | **待寫**（步驟清單已在 change-map #9 與本次盤點記錄） |
+| 聊天回合 | [flows/chat-turn.md](flows/chat-turn.md) | ✅（含「行程如何影響一個回合」：忙碌延後、行程 prompt 段、post-turn 改寫行程） |
 | 主動訊息 | `flows/proactive-message.md` | **待寫** |
 
 ## 現有 reference 歸屬對照
@@ -123,6 +123,7 @@ flowchart LR
 | `change-map.md` | ✅ |
 | `glossary.md` | ✅ |
 | `domains/nsfw.md` | ✅ |
+| `flows/chat-turn.md` | ✅ |
 | 其餘 domain / flow 頁 | 待寫 |
 
 驗證：`make atlas-check` 應回報所有頁面 0 error。
