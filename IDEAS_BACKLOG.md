@@ -414,6 +414,10 @@ Group notes:
     - 行程 prompt 段（`sections/schedule.py::_render_schedule_block`）把當前行程
       宣告為「唯一真實來源，衝突一律以本段為準」，行程一切換，上一個共同活動只剩
       一行「剛結束」（且只在當前為空檔時才顯示）。
+    - owner 觀察到「系統偶爾會改下一個行程來配合進行中的活動」：那是 post-turn
+      處理器的 `schedule_adjustments`（`post_turn/processor.txt:111` →
+      `ScheduleService.apply_adjustments`）。偶爾才發生，是因為它只在對話明確
+      表達行程變動時才動，預設不動。第二期應強化這條既有路徑，不必新建。
   - 分期：第一期只改判斷與 prompt，不寫行程、無 migration；第二期才讓共同活動
     寫回行程（與 I-27、I-19 一起考慮）。設計見
     `ONGOING_INTERACTION_HOLD_REFERENCE.md`。
