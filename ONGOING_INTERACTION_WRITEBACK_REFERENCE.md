@@ -102,6 +102,19 @@ payload。
 未答應的邀請（`operator_invite_pending`）與單方面的念頭（`operator_wish`）
 **不**顯示這一行，避免把沒約成的事說成一起。
 
+### 4.2b Part C — 行程表顯示「和你一起」（owner 2026-11-22 追加，與 Part A 同批）
+
+前端行程表（`SchedulePanel.vue`、`PlayerScheduleCard.vue`）目前只顯示角色型
+參與者與 `companion_names`，玩家參與被濾掉。新增一個標記：活動帶玩家的
+`operator_confirmed_shared` 參與時，顯示「和你一起」。
+
+- 只顯示已答應的共同活動；邀請中、單方面念頭、已過期的都不顯示。
+- 只讀既有 API 回傳的 `participant_refs`（`actor_kind`、`role`）；API 若沒有
+  回傳 `role`，補上該欄位的輸出，不改資料結構。
+- 文字走 i18n，三個語系檔都要加。
+- 用途：Part A 上線後系統會自行寫入共同活動，owner 可以在行程表上直接看到
+  寫了什麼。
+
 ### 4.3 這一期刻意不做的事
 
 - **不回頭改已記憶化的活動**（§2 第 1 點）。互動「開始時」的那個活動通常已經
@@ -123,7 +136,7 @@ payload。
 | `domain/value_objects/ongoing_interaction.py` | 視需要補一個小的結構化型別 |
 
 不動：persistence、migration、`ScheduleService.apply_adjustments` 的規則、
-記憶化流程、前端。
+記憶化流程。前端只動 §4.2b 的行程表標記。
 
 ## 6. 資料影響（需要 owner 明確同意）
 
@@ -173,6 +186,8 @@ payload。
 
 ## 設計變更紀錄
 
+- 2026-11-22：owner 要求行程表也顯示「和你一起」，併入 Part A 同批實作
+  （§4.2b）。本期因此包含前端改動。
 - 2026-11-22（by Claude，主 session 審查時）：互動中的措辭原為「對方此刻就在你
   身邊」。這一行在 Telegram 等文字介面也會出現，會與「這是文字訊息、不是面對面」
   的介面指引矛盾，故改為不描述實體位置的「你們正一起進行中」；是否面對面仍由
