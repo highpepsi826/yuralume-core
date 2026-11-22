@@ -1,8 +1,8 @@
 ---
 doc: flow-chat-turn
 tier: atlas
-verified_at_commit: a803ef8
-verified_at: 2026-11-22
+verified_at_commit: 3fc5836
+verified_at: 2026-11-21
 sources:
   - src/kokoro_link/application/services/chat_service.py
   - src/kokoro_link/application/services/active_llm_provider.py
