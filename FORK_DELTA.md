@@ -356,7 +356,7 @@ system prompt 與 NORMAL 逐位元組相同。本 fork 讓它同時切換**寫�
 ### F-15 — NSFW 路由分流（結構性任務不跟隨 NSFW target）
 
 **類型：** feature
-**狀態：** WATCH（source 完成 2026-11-22，未 commit／未部署）
+**狀態：** WATCH（`6da0c57`，2026-11-22 已部署）
 
 上游的 NSFW mode 只要開啟，任何 `feature_key` 都無條件改走 NSFW target。
 本 fork 讓「不吃對話原文」的結構性任務留在正常路由：排程規劃、劇情弧
@@ -414,7 +414,7 @@ target 才給 community，否則由實際 provider 決定，露骨原文仍會�
 ### F-16 — 互動中不被行程打斷（ongoing-interaction hold，I-21 第一期）
 
 **類型：** feature
-**狀態：** WATCH（source 完成 2026-11-22，未 commit／未部署）
+**狀態：** WATCH（`2aa978a`，2026-11-22 已部署）
 
 由最近一次來回對話的時間戳推導一個會自動過期（15 分鐘）的「互動中」狀態，
 不落庫、不讀訊息文字。三個效果：同場回合不再進忙碌延後；文字介面把「對話
