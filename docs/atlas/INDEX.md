@@ -86,7 +86,7 @@ flowchart LR
 | `DIAGNOSTIC_COMPLETENESS_IMPLEMENTATION_REFERENCE.md` | observability | 2026-10-15 | `change-map` #10 |
 | `FIRST_MEETING_PREMATURE_COMPLETION_FIX_REFERENCE.md` | story | 進行中 | `change-map` #7 |
 | `FIRST_MEETING_REASSESSMENT_REFERENCE.md` | story | 已批准，source 與資料未動 | `change-map` #7 |
-| `ONGOING_INTERACTION_HOLD_REFERENCE.md` | chat / scheduling | 設計完成，等待 owner 批准（I-21，2026-11-22） | `flows/chat-turn.md`、`change-map` #2、#6 |
+| `ONGOING_INTERACTION_HOLD_REFERENCE.md` | chat / scheduling | owner 已批准，實作中（I-21，2026-11-22） | `flows/chat-turn.md`、`change-map` #2、#6 |
 | `GENDER_AND_ADDRESS_SEPARATION_IMPLEMENTATION_REFERENCE.md` | character | **清單 1–12 在工作區完成；未 commit／未部署** | `change-map` #9 |
 | `PENDING_FOLLOW_UP_ADMIN_CRUD_REFERENCE.md` | scheduling | 已批准並部署 | `change-map` #6 |
 | `PLAYER_IDENTITY_AND_SETTINGS_PLACEMENT_REFERENCE.md` | character | **已發布** 2026-10-24（`32090f1`、`968a1bd`） | `change-map` #9 |

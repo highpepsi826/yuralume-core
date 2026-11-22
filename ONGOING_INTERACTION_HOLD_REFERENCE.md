@@ -1,6 +1,6 @@
 # 互動保持（行程切換不凌駕進行中的互動）— 第一期設計參考
 
-**Status:** 設計完成，**等待 owner 批准**。尚未動任何 source。
+**Status:** owner 已批准（2026-11-22），**實作中**。未 commit／未部署。
 **建立：** 2026-11-22 (by Claude)
 **Backlog：** `IDEAS_BACKLOG.md` I-21
 **Atlas 對應：** `docs/atlas/flows/chat-turn.md`、`docs/atlas/change-map.md` #2、#6
@@ -274,7 +274,9 @@ post-turn 是背景執行的，可能晚於下一回合才生效；情況二在�
    `FEATURE_MANUAL.md`、`IDEAS_BACKLOG.md` I-21 狀態、本文件 Status。
 7. 發布：app-only，無 migration、無資料寫入。
 
-## 9. 待 owner 決定
+## 9. owner 決定（2026-11-22 全部採用建議）
+
+三點皆已由 owner 批准，照建議實作。
 
 1. **同場一律不延後（§4.2a）**。建議採用：範圍比「只在互動中才不延後」略寬，
    但與同場 prompt 既有的設計意圖一致，也更簡單。替代方案是只在互動中才跳過，
