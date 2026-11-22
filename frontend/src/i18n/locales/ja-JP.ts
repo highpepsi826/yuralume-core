@@ -3800,6 +3800,7 @@ export const messages: MessageSchema = {
     participants: {
       characters: '実在キャラクター：{names}',
       companions: '同伴：{names}',
+      withYou: 'あなたと一緒',
     },
     fields: {
       start: '開始',

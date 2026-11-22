@@ -3777,6 +3777,7 @@ export const messages = {
     participants: {
       characters: '真實角色：{names}',
       companions: '同伴：{names}',
+      withYou: '和你一起',
     },
     fields: {
       start: '開始',

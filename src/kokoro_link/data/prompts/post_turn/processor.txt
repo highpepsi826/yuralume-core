@@ -14,7 +14,7 @@
 角色當前狀態（數值範圍 0-100）→ 情緒：${state_emotion}，好感度：${state_affection}/100，疲勞度：${state_fatigue}/100，信任度：${state_trust}/100，精力：${state_energy}/100
 ${operator_section}
 ${history_section}
-${schedule_section}
+${schedule_section}${boundary_section}
 ${arc_section}
 ${disclosure_section}
 
@@ -110,7 +110,7 @@ state 欄位：
 
 schedule_adjustments 欄位：
 - 是一個 JSON 陣列；若本輪對話沒提到行程異動，給空陣列 []（這是預設）。
-- 僅當使用者或角色明確表達行程變動時才產出調整建議。
+- 僅當使用者或角色明確表達行程變動時才產出調整建議。${boundary_rule}
 - 每個元素包含欄位：action, activity_id, start, end, description, category, location, busy_score, operator_involvement, operator_display_name, target_date_iso, reason。
 - action 必須是 add / remove / modify 其中之一。
 - remove 與 modify 需提供 activity_id（必須是上方 ID 清單中的值，否則該筆會被忽略）。

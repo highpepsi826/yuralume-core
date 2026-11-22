@@ -18,6 +18,7 @@ from kokoro_link.domain.entities.memory_item import MemoryItem
 from kokoro_link.domain.entities.operator_profile import OperatorProfile
 from kokoro_link.domain.entities.schedule import DailySchedule
 from kokoro_link.domain.entities.story_arc import StoryArc
+from kokoro_link.domain.value_objects.ongoing_interaction import BoundaryCrossing
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,6 +333,7 @@ class PostTurnProcessorPort(Protocol):
         peer_context_lines: list[str] | None = None,
         player_persona_note: str = "",
         disclosure_candidates: list[MemoryItem] | None = None,
+        boundary_crossing: BoundaryCrossing | None = None,
     ) -> PostTurnResult:
         """Extract memories, suggest state updates, propose schedule
         adjustments, and — when an arc is active — emit optional arc
@@ -359,4 +361,9 @@ class PostTurnProcessorPort(Protocol):
         ``None`` / empty means the turn had none, and the section is
         omitted from the prompt entirely rather than rendered empty —
         an empty list invites the model to fill it.
+
+        ``boundary_crossing`` (I-21 phase 2) is present only when the turn's
+        interaction ran across a schedule boundary that the conversation did
+        not settle; the processor then asks explicitly for a schedule
+        adjustment. ``None`` leaves the prompt exactly as before.
         """

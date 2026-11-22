@@ -20,6 +20,10 @@ sources:
   - src/kokoro_link/data/prompts/post_turn/processor.txt
   - src/kokoro_link/application/services/schedule_memorializer.py
   - src/kokoro_link/domain/services/shared_activity_evidence.py
+  - src/kokoro_link/contracts/post_turn.py
+  - frontend/src/utils/scheduleParticipants.ts
+  - frontend/src/components/SchedulePanel.vue
+  - frontend/src/components/PlayerScheduleCard.vue
 symbols:
   - src/kokoro_link/application/services/chat_service.py::send_message
   - src/kokoro_link/application/services/chat_service.py::send_message_stream
@@ -44,6 +48,13 @@ symbols:
   - src/kokoro_link/domain/value_objects/ongoing_interaction.py::schedule_yields_to_conversation
   - src/kokoro_link/application/services/chat_service.py::_resolve_ongoing_interaction
   - src/kokoro_link/application/services/schedule_service.py::resolve_activity_at
+  - src/kokoro_link/application/services/chat_service.py::_derive_boundary_crossing
+  - src/kokoro_link/application/services/chat_service.py::_locate_turn_messages
+  - src/kokoro_link/application/services/chat_service.py::run_post_turn_for_record
+  - src/kokoro_link/domain/value_objects/ongoing_interaction.py::BoundaryCrossing
+  - src/kokoro_link/contracts/post_turn.py::PostTurnProcessorPort
+  - src/kokoro_link/infrastructure/post_turn/llm_processor.py::_render_boundary_crossing_section
+  - frontend/src/utils/scheduleParticipants.ts::isSharedWithOperator
 ---
 
 # 流程：聊天回合
@@ -259,8 +270,36 @@ flowchart LR
 - 觸發條件寫在 `data/prompts/post_turn/processor.txt` 的 `schedule_adjustments`
   欄位規則：預設空陣列，**僅當使用者或角色明確表達行程變動時**才產出，
   「不確定就不要提」。對話沒有明說，行程就不會動。
-- 處理器看到的是今日全部活動的 id 清單與未來幾天的行程，沒有「哪一個是當前
-  活動」或「互動正在跨越行程邊界」的標記。
+- 處理器看到的是今日全部活動的 id 清單與未來幾天的行程。**（I-21 第二期 Part A，
+  查證於 Part A 的 source commit，2026-11-22）** 互動跨越行程邊界時，行程段之後
+  多一個「互動跨越行程邊界」區塊（`llm_processor.py::_render_boundary_crossing_section`），
+  並在 `schedule_adjustments` 規則尾端接上「例外：…依該區段判斷」一句；兩者在
+  事實缺席時都渲染為空字串，prompt 與先前逐字相同。區塊內容：互動起點時間與當時
+  活動、原定活動的時段與 id、現在時間（皆為營運者時區、回合當下）、四種處置
+  （還沒去→add 共同活動並 modify／remove 原活動；已動身→空陣列；對方加入→modify
+  成 `operator_confirmed_shared`；看不出來→不調整），估不出來的預設是「現在之後
+  30 分鐘」。
+- **跨越事實在 `_do_post_turn` 內重新推導**（`chat_service.py::_derive_boundary_crossing`）：
+  輸入是 `prior_messages`、本回合自己的 `(user, assistant)` 兩則訊息
+  （`_locate_turn_messages`，兩個入口各自由 `assistant_index` 定位：內嵌路徑從剛存
+  的 conversation，worker 路徑從 `run_post_turn_for_record` 重讀的 conversation）、
+  與儲存的行程。**判斷時刻是 assistant 訊息的 `created_at`，不是 post-turn 的
+  `_resolve_now()`**——worker 佇列可能晚到數分鐘，用 job 時鐘會讓 15 分鐘保持期
+  與「當前活動」錯位。歷史是 `prior_messages + 本回合兩則`，所以
+  `resolve_ongoing_interaction` 的最新回覆就是本回合自己的，起點由本回合往回找；
+  起點若貼著 prior 視窗最舊處，再讀一次較寬視窗（與 prior 取聯集，且截在本回合
+  玩家訊息之前，排在後面的回合不能把起點往後延）。判斷用第一期的
+  `schedule_yields_to_conversation`，所以當前活動已帶玩家參與就不輸出（收斂）。
+  沒有 schedule service、沒有本回合訊息（含無玩家訊息的靜默回合）、該時刻無活動、
+  或任何例外，一律回 `None`＝不傳＝prompt 不變。job payload 沒有改。
+- 事實經 `PostTurnProcessorPort.process(boundary_crossing=…)` 傳入，呼叫點用
+  `_accepts_keyword` 守衛，只在非 `None` 時才放進 kwargs。
+- 寫回沿用既有路徑：`reconcile_commitment_adjustments`（只管帶 commitment_key 的
+  modify）→ `apply_adjustments`；規則本身沒改。回合復原已涵蓋：
+  `_build_pre_turn_journal` 在回合前快照當日行程（`prev_daily_schedule`），
+  `ScheduleRestoreStep` 整日覆寫還原，測試鎖在
+  `tests/unit/test_post_turn_boundary_crossing.py`。**限制：** 快照只有「回合當下
+  的當日」一天，所以寫到其他日期的調整不會被還原（既有行為，非本期引入）。
 - `apply_adjustments` 的規則：新增或修改的時段與既有時段重疊時，把既有時段的
   **開始時間往後推**；已記憶化（`memorialized`）的活動不可 modify／remove；
   remove／modify 只能針對今日既有活動，add 可以帶 `target_date_iso` 指向未來
@@ -294,20 +333,26 @@ flowchart LR
 
 ### 6. 聊天 prompt 看不到「這個活動是和玩家一起的」（查證於 `d54864b`，2026-11-22）
 
-- **（I-21 第二期 Part B，查證於 Part B 的 source commit，2026-11-22）** 聊天 prompt 現在會顯示共同參與：當前活動帶 operator 的 `operator_confirmed_shared`（只看 `participant_refs` 結構化角色，`_is_confirmed_shared_with_operator`）時，`_render_schedule_block` 在一般分支（非情況二）於「忙碌程度」之後、「互動狀態」之前加一行；`ongoing_interaction` 非 `None` 與為 `None` 各一種措辭。`operator_invite_pending`、`operator_wish`、已過期角色、無玩家參與的活動輸出不變。前端行程表仍不顯示玩家參與。以下兩點是 Part B 之前的描述，聊天 prompt 部分已過時。
+- **（I-21 第二期 Part B，查證於 Part B 的 source commit，2026-11-22）** 聊天 prompt 現在會顯示共同參與：當前活動帶 operator 的 `operator_confirmed_shared`（只看 `participant_refs` 結構化角色，`_is_confirmed_shared_with_operator`）時，`_render_schedule_block` 在一般分支（非情況二）於「忙碌程度」之後、「互動狀態」之前加一行；`ongoing_interaction` 非 `None` 與為 `None` 各一種措辭。`operator_invite_pending`、`operator_wish`、已過期角色、無玩家參與的活動輸出不變。以下兩點是 Part B 之前的描述，聊天 prompt 與前端行程表部分已過時。
 - `_render_schedule_block` 的同伴顯示（`_companions`）只列角色型的
   `participant_refs` 與 `companion_names`，**不列玩家**。即使當前活動是玩家
   已答應的共同活動（`operator_confirmed_shared`），聊天 prompt 也只寫
   「正在「…」」，沒有任何一句說明這是和對方一起的。
-- 前端行程表也一樣：`SchedulePanel.vue` 與 `PlayerScheduleCard.vue` 的參與者
-  顯示只取 `actor_kind === 'character'` 與 `companion_names`，玩家參與不會顯示。
+- 前端行程表：`SchedulePanel.vue` 與 `PlayerScheduleCard.vue` 的角色同伴顯示仍只取
+  `actor_kind === 'character'` 與 `companion_names`；**（I-21 第二期 Part C，查證於
+  Part C 的 source commit，2026-11-22）** 另加一個「和你一起」標記，只在活動帶
+  operator 的 `operator_confirmed_shared`（`frontend/src/utils/scheduleParticipants.ts::isSharedWithOperator`）
+  時顯示；邀請中、念頭、過期角色都不顯示。API 的 `ParticipantRefResponse` 本來就輸出
+  `role`，沒有改後端；文字是 `schedulePanel.participants.withYou`（三個語系檔）。
 - 玩家參與狀態目前只被 post-turn、行程規劃、記憶化、主動訊息判斷與動態牆讀取。
 
 ### 已知缺口
 
 - 第 4、6 點合起來，就是「約會中離開一陣子再回來，角色當玩家不在」與
-  「對話裡沒去洗澡，事後卻記得洗過」的成因。設計見
-  `ONGOING_INTERACTION_WRITEBACK_REFERENCE.md`（I-21 第二期，未實作）。
+  「對話裡沒去洗澡，事後卻記得洗過」的成因。第二期（Part A/B/C）已在 source 處理
+  前者的 prompt／行程表側與後者的 post-turn 寫回，設計見
+  `ONGOING_INTERACTION_WRITEBACK_REFERENCE.md`。記憶化本身仍不讀對話，已記憶化的
+  活動（含互動開始時的那一個）不會被補寫成共同活動。
 - I-21 第一期已解決「互動中被忙碌延後」與「prompt 把新活動寫成正在做」。
   **仍未解決（第二期）**：行程本身不會因互動而改寫，其他讀行程的功能（主動訊息、
   feed、記憶化）仍把該時段當成已發生；超過 15 分鐘後回來的約會延續不處理。

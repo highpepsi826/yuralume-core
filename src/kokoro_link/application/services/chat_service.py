@@ -385,7 +385,9 @@ from kokoro_link.domain.value_objects.content_flow import (
     sanitize_messages_for_tolerance,
 )
 from kokoro_link.domain.value_objects.ongoing_interaction import (
+    BoundaryCrossing,
     OngoingInteraction,
+    schedule_yields_to_conversation,
 )
 from kokoro_link.domain.value_objects.presence_frame import (
     ChatSurface,
@@ -2620,6 +2622,10 @@ class ChatService:
                 item.id for item in select_private_candidates(memories)
             ),
             force_inline=callable(record_effect_intent),
+            turn_messages=_locate_turn_messages(
+                updated_conversation.messages, assistant_index,
+                has_user_message=user_message is not None,
+            ),
         )
         if callable(record_effect_intent):
             recovery_required = bool(
@@ -7235,7 +7241,14 @@ class ChatService:
         has_user_message: bool = True,
         private_memory_ids: tuple[str, ...] = (),
         force_inline: bool = False,
+        turn_messages: tuple[Message, ...] = (),
     ) -> dict:
+        # ``turn_messages`` (I-21 phase 2) are this turn's own stored
+        # messages, used only by the embedded path to tell ``_do_post_turn``
+        # *when* the turn happened. The hosted worker re-derives them from
+        # the conversation in ``run_post_turn_for_record``, so the job
+        # payload is untouched.
+        #
         # ``private_memory_ids`` (KB8) are the memories this turn's prompt
         # carried that the player has never been told. They ride the job
         # payload rather than being re-derived worker-side because they
@@ -7290,6 +7303,7 @@ class ChatService:
             persona_enabled=persona_enabled,
             content_mode=content_mode,
             private_memory_ids=private_memory_ids,
+            turn_messages=turn_messages,
         )
         if self._extract_in_background and not force_inline:
             self._schedule_background(coro)
@@ -7442,6 +7456,10 @@ class ChatService:
             persona_enabled=persona_enabled,
             content_mode=content_mode,
             private_memory_ids=private_memory_ids,
+            turn_messages=_locate_turn_messages(
+                conversation.messages, assistant_index,
+                has_user_message=has_user_message,
+            ),
         )
 
     def _rebuild_post_turn_texts(
@@ -7512,6 +7530,97 @@ class ChatService:
         prior = [m for m in deduped if ensure_utc(m.created_at) < anchor]
         return prior[-_RECENT_MESSAGE_LIMIT:]
 
+    async def _derive_boundary_crossing(
+        self,
+        *,
+        character: Character,
+        prior_messages: list[Message],
+        turn_messages: tuple[Message, ...],
+        local_tz: tzinfo | None,
+    ) -> BoundaryCrossing | None:
+        """I-21 phase 2 -- did this turn's interaction cross a schedule boundary?
+
+        Same structural test as phase 1's case two
+        (``schedule_yields_to_conversation``), evaluated at the turn's own
+        instant: the assistant message's ``created_at``. ``None`` whenever
+        the turn's messages are unknown, it had no player message, no
+        schedule service is wired, nothing was planned at that instant, or
+        anything fails -- never a guess from the job's wall clock.
+
+        ``resolve_ongoing_interaction`` wants history that ends with a
+        player message and a character reply; with this turn appended its
+        latest reply is the turn's own, so the streak start is traced
+        backwards from it through ``prior_messages``. A wider read (when the
+        run reaches the oldest prior message) is cut at the turn's player
+        message so a later turn queued behind this one cannot extend it.
+        """
+        if self._schedule_service is None:
+            return None
+        if len(turn_messages) != 2:
+            return None
+        user_msg, assistant_msg = turn_messages
+        if (
+            user_msg.role is not MessageRole.USER
+            or assistant_msg.role is not MessageRole.ASSISTANT
+        ):
+            return None
+        lookup = getattr(self._schedule_service, "resolve_activity_at", None)
+        if lookup is None:
+            return None
+        try:
+            judged_at = ensure_utc(assistant_msg.created_at)
+            current = await lookup(character, judged_at, local_tz=local_tz)
+            if current is None:
+                return None
+            history = [*prior_messages, user_msg, assistant_msg]
+            ongoing = resolve_ongoing_interaction(
+                recent_messages=history, current_activity=current, now=judged_at,
+            )
+            if ongoing is None:
+                return None
+            if ongoing.streak_reaches_window_start:
+                cut = ensure_utc(user_msg.created_at)
+                wider = await load_unified_recent_messages(
+                    self._conversation_repository,
+                    character_id=character.id,
+                    limit=ONGOING_INTERACTION_STREAK_SCAN_LIMIT,
+                )
+                # Union with the window already in hand so a repository that
+                # returns less than ``prior_messages`` can only widen the read.
+                seen: set[tuple[datetime, MessageRole, str]] = set()
+                older: list[Message] = []
+                for m in sorted(
+                    [*wider, *prior_messages],
+                    key=lambda m: ensure_utc(m.created_at),
+                ):
+                    key = (ensure_utc(m.created_at), m.role, m.content)
+                    if key in seen or ensure_utc(m.created_at) >= cut:
+                        continue
+                    seen.add(key)
+                    older.append(m)
+                ongoing = resolve_ongoing_interaction(
+                    recent_messages=[*older, user_msg, assistant_msg],
+                    current_activity=current,
+                    now=judged_at,
+                ) or ongoing
+            if not schedule_yields_to_conversation(ongoing, current):
+                return None
+            before = await lookup(
+                character, ongoing.streak_started_at, local_tz=local_tz,
+            )
+            return BoundaryCrossing(
+                streak_started_at=ongoing.streak_started_at,
+                activity_at_streak_start=before,
+                current_activity=current,
+                judged_at=judged_at,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "post-turn: boundary-crossing derivation failed character=%s",
+                character.id,
+            )
+            return None
+
     async def _do_post_turn(
         self,
         *,
@@ -7524,6 +7633,7 @@ class ChatService:
         persona_enabled: bool = True,
         content_mode: str = CONTENT_MODE_NORMAL,
         private_memory_ids: tuple[str, ...] = (),
+        turn_messages: tuple[Message, ...] = (),
     ) -> dict:
         """The one post-turn body — and therefore the one undo gate (TU2).
 
@@ -7654,6 +7764,22 @@ class ChatService:
                 self._post_turn_processor.process, "disclosure_candidates",
             ):
                 kwargs["disclosure_candidates"] = list(disclosure_candidates)
+            # I-21 phase 2 — re-derived here, from the turn's own stored
+            # messages and the stored schedule, because the hosted worker
+            # rebuilds this body from ids and nothing computed during the
+            # turn survives that hop. Judged at the turn's instant, never
+            # at this job's wall clock.
+            if _accepts_keyword(
+                self._post_turn_processor.process, "boundary_crossing",
+            ):
+                crossing = await self._derive_boundary_crossing(
+                    character=character,
+                    prior_messages=prior_messages,
+                    turn_messages=turn_messages,
+                    local_tz=_operator_timezone(operator),
+                )
+                if crossing is not None:
+                    kwargs["boundary_crossing"] = crossing
             result = await self._post_turn_processor.process(**kwargs)
         except Exception as exc:
             _LOGGER.exception("Post-turn processing crashed")
@@ -9901,6 +10027,11 @@ class StreamFinalizer:
                 item.id
                 for item in select_private_candidates(self._used_memories)
             ),
+            turn_messages=_locate_turn_messages(
+                updated_conversation.messages,
+                len(updated_conversation.messages) - 1,
+                has_user_message=self._user_message is not None,
+            ),
         )
         # HV4 — same audit as the non-streaming twin, and the surface the
         # whole "audit instead of gate" decision was made for.
@@ -10074,6 +10205,32 @@ def _session_messages_used(conversation: Conversation) -> int:
         if message.role == MessageRole.ASSISTANT
         and message.kind is not MessageKind.SCENE_NARRATION
     )
+
+
+def _locate_turn_messages(
+    messages: list[Message],
+    assistant_index: int,
+    *,
+    has_user_message: bool,
+) -> tuple[Message, ...]:
+    """This turn's own ``(user, assistant)`` messages by position, else ``()``.
+
+    Same anchoring rule as ``ChatService._rebuild_post_turn_texts``: the
+    assistant message sits at ``assistant_index`` and the player message is the
+    nearest preceding user-role message. A silent turn (no player message) or
+    any mismatch answers ``()`` so callers skip rather than guess.
+    """
+    if not has_user_message:
+        return ()
+    if assistant_index < 1 or assistant_index >= len(messages):
+        return ()
+    assistant_msg = messages[assistant_index]
+    if assistant_msg.role is not MessageRole.ASSISTANT:
+        return ()
+    for idx in range(assistant_index - 1, -1, -1):
+        if messages[idx].role is MessageRole.USER:
+            return (messages[idx], assistant_msg)
+    return ()
 
 
 def _accepts_keyword(func: object, name: str) -> bool:

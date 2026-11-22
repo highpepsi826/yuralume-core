@@ -3778,6 +3778,7 @@ export const messages: MessageSchema = {
     participants: {
       characters: 'Real characters: {names}',
       companions: 'Companions: {names}',
+      withYou: 'With you',
     },
     fields: {
       start: 'Start',

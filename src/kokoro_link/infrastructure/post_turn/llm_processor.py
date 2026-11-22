@@ -45,6 +45,7 @@ from kokoro_link.domain.entities.story_arc import StoryArc
 from kokoro_link.domain.value_objects.actor import ParticipantRef
 from kokoro_link.domain.value_objects.commitment import normalize_commitment_key
 from kokoro_link.domain.value_objects.memory_kind import CANONICAL_KINDS, MemoryKind
+from kokoro_link.domain.value_objects.ongoing_interaction import BoundaryCrossing
 from kokoro_link.domain.value_objects.resolved_address import ResolvedAddress
 from kokoro_link.domain.value_objects.timezone import timezone_for_id, to_timezone
 from kokoro_link.infrastructure.prompt.operator_language import (
@@ -140,6 +141,7 @@ class LLMPostTurnProcessor(PostTurnProcessorPort):
         resolved_player_address: ResolvedAddress | None = None,
         player_persona_note: str = "",
         disclosure_candidates: list[MemoryItem] | None = None,
+        boundary_crossing: BoundaryCrossing | None = None,
     ) -> PostTurnResult:
         # Short-circuit when the operator picked the fake provider —
         # fake emits deterministic text that won't parse as the JSON
@@ -164,6 +166,7 @@ class LLMPostTurnProcessor(PostTurnProcessorPort):
             resolved_player_address=resolved_player_address,
             player_persona_note=player_persona_note,
             disclosure_candidates=candidates,
+            boundary_crossing=boundary_crossing,
         )
         try:
             raw = await self._resolver.generate(prompt, character=character)
@@ -230,6 +233,7 @@ def _build_prompt(
     resolved_player_address: ResolvedAddress | None = None,
     player_persona_note: str = "",
     disclosure_candidates: "tuple[MemoryItem, ...]" = (),
+    boundary_crossing: BoundaryCrossing | None = None,
 ) -> str:
     state = character.state
     ref_now = ensure_utc(now) if now is not None else datetime.now(timezone.utc)
@@ -290,6 +294,12 @@ def _build_prompt(
         operator_section=operator_section,
         history_section=history_section,
         schedule_section=schedule_section,
+        boundary_section="\n".join(
+            _render_boundary_crossing_section(boundary_crossing, local_tz=local_tz),
+        ),
+        boundary_rule=(
+            _BOUNDARY_CROSSING_RULE if boundary_crossing is not None else ""
+        ),
         arc_section=arc_section,
         disclosure_section="\n".join(
             _render_disclosure_section(disclosure_candidates),
@@ -304,6 +314,63 @@ def _build_prompt(
     if peer_context_lines:
         prompt += _peer_meet_intent_extension(character_name=character.name)
     return prompt
+
+
+_BOUNDARY_CROSSING_RULE = (
+    "例外：上方出現「互動跨越行程邊界」區段時，依該區段的說明判斷並輸出。"
+)
+"""Spliced into the ``schedule_adjustments`` rule only when the section is
+present, so a turn without a crossing renders the template exactly as before."""
+
+BOUNDARY_DEFAULT_SHARED_MINUTES = 30
+"""When the model cannot estimate how long the shared time will last."""
+
+
+def _render_boundary_crossing_section(
+    crossing: BoundaryCrossing | None,
+    *,
+    local_tz: tzinfo,
+) -> list[str]:
+    """I-21 phase 2 -- ask explicitly for a schedule write-back.
+
+    Empty when the turn's interaction did not cross a schedule boundary, so
+    the rendered prompt is byte-identical to the one without this feature
+    (the template places the placeholder on the schedule section's own line).
+    All times are the turn's own, in the operator's local timezone.
+    """
+    if crossing is None:
+        return []
+
+    def _hm(moment: datetime) -> str:
+        return to_timezone(moment, local_tz).strftime("%H:%M")
+
+    current = crossing.current_activity
+    before = crossing.activity_at_streak_start
+    started = (
+        f"當時的活動是「{before.description}」。"
+        if before is not None
+        else "當時行程上沒有安排活動。"
+    )
+    minutes = BOUNDARY_DEFAULT_SHARED_MINUTES
+    return [
+        "",
+        "",
+        "互動跨越行程邊界：",
+        f"- 你們從 {_hm(crossing.streak_started_at)} 起一直在互動，{started}",
+        f"- 行程上原定 {_hm(current.start_at)}–{_hm(current.end_at)} 要"
+        f"「{current.description}」（id={current.id}），現在是 {_hm(crossing.judged_at)}。",
+        "請依對話內容判斷並用 schedule_adjustments 反映實際情況：",
+        "- 角色還沒去做原定活動、仍和對方在一起：",
+        f"  新增一筆 add，時段從 {_hm(current.start_at)} 到你估計這段共處會持續到的時間"
+        f"（不確定就估到現在之後 {minutes} 分鐘），描述你們實際在做的事，",
+        '  operator_involvement 填 "operator_confirmed_shared"；',
+        "  原定活動若只是延後，對它輸出 modify 改到之後的時段；若這次不做了，輸出 remove。",
+        "  這兩者一定要擇一輸出：原定活動留在原時段的話，新增的那筆會被它擠掉。",
+        "- 角色已經在對話裡動身去做原定活動：不需要調整，給空陣列。",
+        "- 對方一起加入了原定活動：對該 id 輸出 modify，把 operator_involvement 填成",
+        '  "operator_confirmed_shared"。',
+        "- 看不出來：不要調整。",
+    ]
 
 
 _MAX_DISCLOSURE_CANDIDATES = 8

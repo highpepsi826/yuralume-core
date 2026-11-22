@@ -10,6 +10,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { DailySchedule, ScheduleActivity } from '@/types/schedule'
+import { isSharedWithOperator } from '@/utils/scheduleParticipants'
 import { useTimezone } from '@/composables/useTimezone'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import {
@@ -367,6 +368,9 @@ function extractError(err: unknown): string | null {
             <div v-if="activity.location || activity.category" class="activity-meta">
               <span v-if="activity.category" class="meta-chip">{{ activity.category }}</span>
               <span v-if="activity.location" class="meta-chip meta-chip--loc">{{ activity.location }}</span>
+            </div>
+            <div v-if="isSharedWithOperator(activity)" class="activity-participants">
+              {{ t('schedulePanel.participants.withYou') }}
             </div>
             <div v-if="characterParticipants(activity).length" class="activity-participants">
               {{ t('schedulePanel.participants.characters', { names: characterParticipants(activity).join(t('common.listSeparator')) }) }}

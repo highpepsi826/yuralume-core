@@ -16,6 +16,7 @@ import { useI18n } from 'vue-i18n'
 import { usePlayerCopy } from '@/composables/usePlayerCopy'
 
 import type { DailySchedule, ScheduleActivity } from '@/types/schedule'
+import { isSharedWithOperator } from '@/utils/scheduleParticipants'
 import { useTimezone } from '@/composables/useTimezone'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import {
@@ -343,6 +344,9 @@ function characterParticipants(activity: ScheduleActivity): string[] {
               </div>
               <div class="activity-desc">{{ activity.description }}</div>
               <div v-if="activity.location" class="activity-location">📍 {{ activity.location }}</div>
+              <div v-if="isSharedWithOperator(activity)" class="activity-participants">
+                {{ t('schedulePanel.participants.withYou') }}
+              </div>
               <div v-if="characterParticipants(activity).length" class="activity-participants">
                 {{ t('schedulePanel.participants.characters', { names: characterParticipants(activity).join(t('common.listSeparator')) }) }}
               </div>

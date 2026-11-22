@@ -593,6 +593,9 @@ Group notes:
   one line when the current activity carries `operator_confirmed_shared`,
   two wordings by ongoing state). Not committed, not deployed; Part A not
   started. (by Claude)
+- 2026-11-22 I-21 phase 2 Part A (post-turn re-derives the boundary crossing
+  and asks for a schedule write-back) and Part C (schedule UI shows 和你一起)
+  implemented in source. Not committed, not deployed. (by Claude)
 
 ### I-09 遺留（非阻擋，未排程）
 

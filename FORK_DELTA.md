@@ -430,8 +430,12 @@ target 才給 community，否則由實際 provider 決定，露骨原文仍會�
 | 行程段情況一／二與同場指引 | `src/kokoro_link/infrastructure/prompt/sections/schedule.py`、`src/kokoro_link/infrastructure/prompt/sections/dialogue.py`、`src/kokoro_link/infrastructure/prompt/sections/context.py` |
 | 唯讀時刻查詢 | `src/kokoro_link/application/services/schedule_service.py`（`resolve_activity_at`） |
 | 第二期 Part B：共同活動一行（`_is_confirmed_shared_with_operator`） | `src/kokoro_link/infrastructure/prompt/sections/schedule.py` |
+| 第二期 Part A：跨越行程邊界時 post-turn 寫回（`_derive_boundary_crossing`、`_locate_turn_messages`、`BoundaryCrossing`、`boundary_crossing` 參數、區塊渲染與模板佔位） | `src/kokoro_link/application/services/chat_service.py`、`src/kokoro_link/domain/value_objects/ongoing_interaction.py`、`src/kokoro_link/contracts/post_turn.py`、`src/kokoro_link/infrastructure/post_turn/llm_processor.py`、`src/kokoro_link/data/prompts/post_turn/processor.txt` |
+| 第二期 Part C：行程表「和你一起」標記 | `frontend/src/utils/scheduleParticipants.ts`、`frontend/src/components/SchedulePanel.vue`、`frontend/src/components/PlayerScheduleCard.vue`、三個 locale 的 `schedulePanel.participants.withYou` |
 
-**第二期 Part B（實作中，未部署）：** 當前活動帶 `operator_confirmed_shared` 時，行程段在「忙碌程度」之後加一行（互動中／不在互動中兩種措辭）；只看結構化角色，不寫任何資料。Part A（post-turn 寫回）尚未實作。
+**第二期 Part B（已部署）：** 當前活動帶 `operator_confirmed_shared` 時，行程段在「忙碌程度」之後加一行（互動中／不在互動中兩種措辭）；只看結構化角色，不寫任何資料。
+
+**第二期 Part A、Part C（source 已實作，未 commit、未部署）：** `_do_post_turn` 以回合自己的時刻（assistant 訊息 `created_at`）重新推導「互動跨越行程邊界」，成立時 post-turn prompt 多一個區塊並放寬 `schedule_adjustments` 的觸發規則，讓模型決定新增共同活動／延後或移除原定活動；不成立時 prompt 逐字不變。不動 `apply_adjustments`、`_resolve_overlaps`、記憶化、job payload、persistence。Part C 只改前端顯示，API 本來就輸出 `role`。
 
 **相關 reference：** `ONGOING_INTERACTION_HOLD_REFERENCE.md`、`ONGOING_INTERACTION_WRITEBACK_REFERENCE.md`
 

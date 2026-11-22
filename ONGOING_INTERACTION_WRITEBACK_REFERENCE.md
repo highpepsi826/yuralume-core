@@ -1,6 +1,6 @@
 # 互動保持・第二期：讓行程跟上對話 — 設計參考
 
-**Status:** owner 已批准（2026-11-22，§9 三點全採用建議）。Part B 已在 source 實作並通過測試（未 commit、未部署）；Part A 待 Part B 發布後進行。
+**Status:** owner 已批准（2026-11-22，§9 三點全採用建議）。Part B 已發布（`a37af30`）；Part A 與 Part C 已在 source 實作並通過測試（未 commit、未部署）。
 **建立：** 2026-11-22 (by Claude)
 **Backlog：** `IDEAS_BACKLOG.md` I-21
 **前置：** `ONGOING_INTERACTION_HOLD_REFERENCE.md`（第一期，已發布 `2aa978a`）
@@ -208,3 +208,8 @@ payload。
 ## 11. 實作紀錄
 
 - 2026-11-22 Part B (by Claude)：`sections/schedule.py` 新增 `_is_confirmed_shared_with_operator`（只看 operator 的 `participant_refs` 角色），在一般分支於「忙碌程度」後加一行，兩種措辭同 §4.2。未動 post-turn、persistence、前端。測試 T6 加在 `tests/unit/test_prompt_builder_schedule.py`；golden 未變。Part A（§4.1）未開始。
+- 2026-11-22 Part A + Part C (by Claude)：
+  - Part A：`_do_post_turn` 新增 `turn_messages` 關鍵字，由 `_locate_turn_messages` 在兩個入口各自定位（內嵌：`_run_post_turn` 的呼叫點；worker：`run_post_turn_for_record` 重讀的 conversation），job payload 未改。`_derive_boundary_crossing` 以 assistant 訊息的 `created_at` 為判斷時刻（不用 `_resolve_now()`），歷史為 `prior_messages + 本回合兩則`；起點貼著 prior 視窗最舊處時再讀較寬視窗，與 prior 取聯集並截在本回合玩家訊息前。事實以 `BoundaryCrossing`（新值物件）經 `PostTurnProcessorPort.process(boundary_crossing=…)` 傳入（`_accepts_keyword` 守衛，非 `None` 才傳）。`llm_processor.py` 渲染區塊；`processor.txt` 加 `${boundary_section}`（緊接 `${schedule_section}` 同一行）與 `${boundary_rule}`（接在觸發規則句尾，不成立時為空字串）。預設 30 分鐘寫在區塊文字裡（常數 `BOUNDARY_DEFAULT_SHARED_MINUTES`）。
+  - 偏離設計之處：設計說「在 processor.txt 加一句」，實作把這句放在 Python 常數 `_BOUNDARY_CROSSING_RULE`、由 `${boundary_rule}` 條件插入，原因是要保證事實缺席時模板渲染逐字不變。
+  - T8：turn undo 已涵蓋（`ScheduleRestoreStep` 還原回合前快照的當日行程），測試通過；限制是快照只涵蓋回合當下的當日，寫到其他日期的調整不會被還原（既有行為）。
+  - Part C：`ParticipantRefResponse` 本來就輸出 `role`，後端未改。新增 `frontend/src/utils/scheduleParticipants.ts::isSharedWithOperator`，`SchedulePanel.vue` 與 `PlayerScheduleCard.vue` 在讀取模式顯示 `schedulePanel.participants.withYou`（zh-TW／en-US／ja-JP）。測試：`frontend/tests/scheduleParticipants.test.ts`、後端 `tests/unit/test_post_turn_boundary_crossing.py`（T1–T5、T8、worker 入口）。

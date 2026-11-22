@@ -52,3 +52,24 @@ def schedule_yields_to_conversation(
     if not ongoing.activity_started_during_streak:
         return False
     return not has_live_operator_commitment(current)
+
+
+@dataclass(frozen=True, slots=True)
+class BoundaryCrossing:
+    """Facts for a turn whose interaction ran across a schedule boundary
+    (I-21 phase 2, Part A).
+
+    Derived inside ``ChatService._do_post_turn`` -- never persisted, never
+    carried in the post-turn job payload -- and handed to the post-turn
+    processor so it can be asked, explicitly, whether the schedule should be
+    rewritten to match what actually happened in the conversation.
+    """
+
+    streak_started_at: datetime
+    """Start of the unbroken run of chat messages ending at this turn."""
+    activity_at_streak_start: ScheduleActivity | None
+    """What the schedule said at ``streak_started_at`` (``None`` = nothing)."""
+    current_activity: ScheduleActivity
+    """The planned activity that came due during the interaction."""
+    judged_at: datetime
+    """The turn's own instant, not the post-turn job's wall clock."""
