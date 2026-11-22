@@ -50,6 +50,7 @@ from kokoro_link.contracts.scheduled_promise_composer import (
     ScheduledPromiseComposerPort,
 )
 from kokoro_link.domain.entities.conversation import MessageContentMode
+from kokoro_link.domain.entities.schedule import OPERATOR_CONFIRMED_SHARED_ROLE
 from kokoro_link.domain.value_objects.content_flow import (
     CONTENT_TOLERANCE_COMMUNITY,
     CONTENT_TOLERANCE_FRONTIER,
@@ -225,6 +226,7 @@ def _build_prompt(payload: ScheduledPromiseComposeInput) -> str:
     schedule_block = "\n".join(_schedule_block(payload))
     summary = (payload.recent_dialogue_summary or "").strip()
     summary_block = "\n\n最近對話脈絡：\n" + summary[:400] if summary else ""
+    summary_block += _conversation_at_scheduled_block(payload)
     original_text = _promise_text_for_tolerance(
         payload.promise_text,
         content_mode=payload.promise_content_mode,
@@ -408,9 +410,36 @@ def _scheduled_freshness(payload: ScheduledPromiseComposeInput) -> str:
     late_minutes = (
         payload.now - payload.scheduled_for
     ).total_seconds() / 60.0
+    if payload.conversation_minutes_at_scheduled is not None:
+        # The delay is the hold on purpose, not lateness (I-19 Part 3c).
+        return "（約定時間到的時候你們正在對話中）"
     if late_minutes < _OVERDUE_FLOOR_MINUTES:
         return "（剛到）"
     return f"（已經過了 {format_gap_duration_label(late_minutes)}，你晚了）"
+
+
+def _conversation_at_scheduled_block(payload: ScheduledPromiseComposeInput) -> str:
+    """I-19 Part 3c -- the fact that stops a held promise reading as a
+    fresh arrival or an apology. Empty (so the prompt is unchanged) unless
+    the dispatcher held this release because the pair were talking."""
+    minutes = payload.conversation_minutes_at_scheduled
+    if minutes is None:
+        return ""
+    return (
+        "\n\n約定時間到的時候，你們正在對話中，最後一次來回在那之前約 "
+        f"{minutes} 分鐘；之後對方沒有再說話，所以現在才補上這則訊息。"
+        "\n- 這不算遲到：不要道歉，也不要寫成你剛到場或剛想起來；"
+        "接著剛才的對話自然地把這件事說完。"
+    )
+
+
+def _is_shared_with_operator(activity) -> bool:  # noqa: ANN001
+    """Structural: an operator ref in the confirmed-shared role."""
+    return any(
+        ref.actor_kind == "operator"
+        and ref.role == OPERATOR_CONFIRMED_SHARED_ROLE
+        for ref in activity.participant_refs
+    )
 
 
 def _promise_made_block(payload: ScheduledPromiseComposeInput) -> str:
@@ -474,6 +503,10 @@ def _schedule_block(payload: ScheduledPromiseComposeInput) -> list[str]:
             f"- 現在進行：{activity.category} — {activity.description}{loc}"
             f"（busy_score={activity.busy_score:.2f}）",
         )
+        if _is_shared_with_operator(activity):
+            # I-19 Part 3c -- the slot is the thing you two agreed to do
+            # together, not something competing with the promise.
+            lines.append("- 這個時段是你們約好一起的活動。")
         has_activity = True
     if not has_activity:
         lines.append("- 你目前沒有特別在做什麼，正好可以履行這個承諾。")

@@ -2,6 +2,11 @@
 
 ## Status
 
+> 2026-11-22 (by Claude): the paragraph below is stale. Migration
+> `u2c6m8p10046_commitment_identity` has been executed (see
+> `docs/archive/PROGRESS_LOG_ARCHIVE_PRE_2026-09.md`, Alembic head
+> `u2c6m8p10046`). The rest of this file has not been re-verified.
+
 Source implementation complete and committed on `local/customizations`.
 The additive migration is present but has not been executed; runtime,
 database, schedule, story, goal, pending-follow-up, and user data remain

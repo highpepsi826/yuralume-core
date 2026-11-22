@@ -85,6 +85,12 @@ from kokoro_link.application.services.proactive_dispatcher import (
 from kokoro_link.application.services.busy_defer_policy import (
     BUSY_FOLLOW_UP_RELEASE_CEILING,
 )
+from kokoro_link.application.services.dialogue_window_loader import (
+    load_unified_recent_messages,
+)
+from kokoro_link.application.services.ongoing_interaction import (
+    minutes_since_active_conversation,
+)
 from kokoro_link.application.services.schedule_service import ScheduleService
 from kokoro_link.contracts.dialogue_summarizer import DialogueSummarizerPort
 from kokoro_link.contracts.messaging import OutboundAttachment
@@ -108,7 +114,10 @@ from kokoro_link.contracts.scheduled_promise_composer import (
     ScheduledPromiseComposerPort,
 )
 from kokoro_link.domain.entities.character import Character
-from kokoro_link.domain.entities.conversation import MessageContentMode
+from kokoro_link.domain.entities.conversation import (
+    MessageContentMode,
+    MessageKind,
+)
 from kokoro_link.domain.entities.pending_follow_up import (
     PendingFollowUp,
     PendingFollowUpKind,
@@ -149,6 +158,13 @@ _MEDIA_DELIVERY_FAILURE_RE = re.compile(
     r"|(?:not sent|can(?:not|'t) send|unable to send)",
     re.IGNORECASE,
 )
+
+
+_UNIFIED_TIMELINE_LIMIT = 80
+"""Rows read for the I-19 "are they talking" check and the unified summary."""
+
+_SUMMARY_MESSAGE_LIMIT = 40
+"""Same window the per-conversation summary has always used."""
 
 
 HONESTY_PARK_ATTEMPT_LIMIT = 3
@@ -580,6 +596,21 @@ class PendingFollowUpDispatcher:
                 row.cancelled(now=now),
             )
             return False
+        # I-19 Part 3a -- the pair are talking right now: do not open a second
+        # thread beside the live one. The row stays ``queued`` with its
+        # ``scheduled_for`` untouched (the hold is not a reschedule), so the
+        # original promised instant survives for the composer; the next
+        # chance is the post-turn settling it, the chat prompt carrying it,
+        # or the reconciler's next sweep once the conversation has gone quiet.
+        timeline = await self._load_unified_timeline(row.character_id)
+        if timeline is not None:
+            held_minutes = _safe_minutes_since_active(timeline, now=now)
+            if held_minutes is not None:
+                _LOGGER.info(
+                    "scheduled-promise tick: holding id=%s — conversation "
+                    "active (last exchange %d min ago)", row.id, held_minutes,
+                )
+                return False
         _LOGGER.info(
             "scheduled-promise tick: releasing id=%s intent=%r",
             row.id, row.promise_intent[:80],
@@ -593,9 +624,19 @@ class PendingFollowUpDispatcher:
             )
             return False
 
+        # I-19 Part 3c -- summarise the cross-source timeline (a promise made
+        # on one channel is usually being kept on another), and tell the
+        # composer whether the pair were mid-conversation at the promised
+        # instant, i.e. this release is a held one rather than a late one.
         summary = await self._safe_summarize(
             character, conversation_id=resolving.conversation_id, now=now,
+            unified=True,
         )
+        conversation_minutes_at_scheduled = None
+        if timeline is not None:
+            conversation_minutes_at_scheduled = _safe_minutes_since_active(
+                timeline, now=resolving.scheduled_for,
+            )
         persona_lines = await self._safe_operator_persona_lines(character.id)
         # The "promise_text" is the original user-side wording captured
         # at queue time (entity invariant: at least one message in the
@@ -634,6 +675,7 @@ class PendingFollowUpDispatcher:
             local_tz=local_tz,
             promise_content_mode=promise_content_mode,
             promise_safe_summary=promise_safe_summary,
+            conversation_minutes_at_scheduled=conversation_minutes_at_scheduled,
         )
         try:
             composed, outcome_claim_metadata = await self._compose(
@@ -1298,27 +1340,46 @@ class PendingFollowUpDispatcher:
         )
         return schedule, current, just_finished
 
+    async def _load_unified_timeline(
+        self, character_id: str,
+    ) -> list | None:
+        """The character's cross-source recent messages, or ``None`` when
+        they cannot be read (no repository wired, or the read failed).
+
+        ``None`` means "do not know", which every caller treats as "not in a
+        conversation" -- the old behaviour (I-19 Part 3a/3c fail-soft)."""
+        if self._conversations is None:
+            return None
+        try:
+            return await load_unified_recent_messages(
+                self._conversations,
+                character_id=character_id,
+                limit=_UNIFIED_TIMELINE_LIMIT,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "scheduled-promise: unified timeline load failed character=%s",
+                character_id,
+            )
+            return None
+
     async def _safe_summarize(
         self, character: Character, *, conversation_id: str, now: datetime,
+        unified: bool = False,
     ) -> str | None:
         if (
             self._dialogue_summarizer is None
             or self._conversations is None
         ):
             return None
-        try:
-            conversation = await self._conversations.get(conversation_id)
-        except Exception:
-            _LOGGER.exception(
-                "pending-follow-up: conversation load failed id=%s",
+        if unified:
+            messages = await self._unified_messages_for_summary(
+                character.id, conversation_id=conversation_id,
+            )
+        else:
+            messages = await self._conversation_messages_for_summary(
                 conversation_id,
             )
-            return None
-        if conversation is None:
-            return None
-        messages = conversation.recent_messages(
-            limit=40, exclude_tool_only=True,
-        )
         if not messages:
             return None
         messages = sanitize_messages_for_tolerance(
@@ -1344,6 +1405,32 @@ class PendingFollowUpDispatcher:
                 character.id,
             )
             return None
+
+    async def _conversation_messages_for_summary(
+        self, conversation_id: str,
+    ) -> list | None:
+        try:
+            conversation = await self._conversations.get(conversation_id)
+        except Exception:
+            _LOGGER.exception(
+                "pending-follow-up: conversation load failed id=%s",
+                conversation_id,
+            )
+            return None
+        if conversation is None:
+            return None
+        return conversation.recent_messages(limit=40, exclude_tool_only=True)
+
+    async def _unified_messages_for_summary(
+        self, character_id: str, *, conversation_id: str,
+    ) -> list | None:
+        """Cross-source tail for the promise compose; falls back to the
+        row's own conversation when the unified read is unavailable."""
+        timeline = await self._load_unified_timeline(character_id)
+        if timeline is None:
+            return await self._conversation_messages_for_summary(conversation_id)
+        chat = [m for m in timeline if m.kind is not MessageKind.TOOL_ONLY]
+        return chat[-_SUMMARY_MESSAGE_LIMIT:]
 
     async def _resolve_operator_language(self, character) -> str:  # noqa: ANN001
         """Resolve the character owner's pinned ``primary_language``,
@@ -1525,6 +1612,26 @@ def _a_delivery_write_is_still_ours(status: PendingFollowUpStatus) -> bool:
     Anything non-terminal, ``queued`` included — see
     :meth:`PendingFollowUpDispatcher._write_release_outcome`."""
     return status not in _TERMINAL_STATUSES
+
+
+def promise_intent_has_media_obligation(promise_intent: str) -> bool:
+    """Whether a promise's intent promises a photo/image to be sent.
+
+    The same reference test ``_claims_media_delivery_without_attachment``
+    uses at the send boundary; public so the post-turn promise-update path
+    (I-19) agrees with it about which promises must really ship media.
+    """
+    return bool(_MEDIA_REFERENCE_RE.search(promise_intent or ""))
+
+
+def _safe_minutes_since_active(timeline: list, *, now: datetime) -> int | None:
+    """:func:`minutes_since_active_conversation`, but a bad message can only
+    ever mean "not in a conversation"."""
+    try:
+        return minutes_since_active_conversation(timeline, now=now)
+    except Exception:
+        _LOGGER.exception("scheduled-promise: conversation-activity check failed")
+        return None
 
 
 def _claims_media_delivery_without_attachment(

@@ -297,6 +297,12 @@ learn this?** If yes, it belongs in the atlas.
   wrong or stale, fix it in the same work.
 - **Report it:** the final message for an investigation states which atlas
   pages were updated, or says plainly that nothing new was found.
+- **Report every atlas change at the end of the turn:** whenever a
+  conversation turn adds, updates, or deletes anything under `docs/atlas/`
+  — for any reason, not only an investigation — the last message of that
+  turn lists each change: the page, the section, whether it was an add, an
+  update, or a delete, and one line on what it now says. Do not batch this
+  into a later turn or leave it only in a commit message.
 
 - Every atlas page carries YAML frontmatter with `verified_at_commit`,
   `verified_at`, `sources` and `symbols`. `make atlas-check` verifies that

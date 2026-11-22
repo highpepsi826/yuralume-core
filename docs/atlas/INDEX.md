@@ -69,7 +69,7 @@ flowchart LR
 
 | 流程 | 頁面 | 狀態 |
 |---|---|---|
-| 聊天回合 | [flows/chat-turn.md](flows/chat-turn.md) | ✅（含「行程如何影響一個回合」：忙碌延後、行程 prompt 段、post-turn 改寫行程） |
+| 聊天回合 | [flows/chat-turn.md](flows/chat-turn.md) | ✅（含「行程如何影響一個回合」：忙碌延後、行程 prompt 段、post-turn 改寫行程、約定訊息的交互） |
 | 主動訊息 | `flows/proactive-message.md` | **待寫** |
 
 ## 現有 reference 歸屬對照
@@ -81,7 +81,7 @@ flowchart LR
 |---|---|---|---|
 | `AIRP_IMAGE_DELIVERY_SCOPE_REFERENCE.md` | media | 無 Status 段 | `change-map` #8 |
 | `CHARACTER_VIDEO_PREVIEW_REFERENCE.md` | media | 進行中 | — |
-| `COMMITMENT_RECONCILIATION_IMPLEMENTATION_REFERENCE.md` | scheduling | **source 已提交；migration 尚未執行** | `change-map` #6 |
+| `COMMITMENT_RECONCILIATION_IMPLEMENTATION_REFERENCE.md` | scheduling | source 已提交；migration `u2c6m8p10046` 已執行（文件自身的 Status 段仍寫未執行，已加註） | `change-map` #6 |
 | `CROSS_CHANNEL_ARC_PLANNER_REFERENCE.md` | story | 已提交 `300218c`，2026-08-31 部署 | `change-map` #7 |
 | `DIAGNOSTIC_COMPLETENESS_IMPLEMENTATION_REFERENCE.md` | observability | 2026-10-15 | `change-map` #10 |
 | `FIRST_MEETING_PREMATURE_COMPLETION_FIX_REFERENCE.md` | story | 進行中 | `change-map` #7 |
@@ -89,6 +89,7 @@ flowchart LR
 | `ONGOING_INTERACTION_WRITEBACK_REFERENCE.md` | chat / scheduling | 已發布 `a37af30`、`53ab447`（I-21 第二期，2026-11-22）；待 owner 試玩 | `flows/chat-turn.md`、`change-map` #5 |
 | `ONGOING_INTERACTION_HOLD_REFERENCE.md` | chat / scheduling | 第一期已發布 `2aa978a`（I-21，2026-11-22） | `flows/chat-turn.md`、`change-map` #2、#6 |
 | `GENDER_AND_ADDRESS_SEPARATION_IMPLEMENTATION_REFERENCE.md` | character | **清單 1–12 在工作區完成；未 commit／未部署** | `change-map` #9 |
+| `PROMISE_DURING_CONVERSATION_REFERENCE.md` | scheduling / chat | source 已實作（I-19，2026-11-22）；發布狀態見該文件 Status | `change-map` #6 |
 | `PENDING_FOLLOW_UP_ADMIN_CRUD_REFERENCE.md` | scheduling | 已批准並部署 | `change-map` #6 |
 | `PLAYER_IDENTITY_AND_SETTINGS_PLACEMENT_REFERENCE.md` | character | **已發布** 2026-10-24（`32090f1`、`968a1bd`） | `change-map` #9 |
 | `PROACTIVE_AUDIT_RECORDING_FIX_REFERENCE.md` | proactive | 進行中 | `change-map` #4 |

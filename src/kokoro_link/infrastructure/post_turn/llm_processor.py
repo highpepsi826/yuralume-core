@@ -22,9 +22,12 @@ from kokoro_link.contracts.post_turn import (
     ArcAdjustmentSignal,
     EmotionEventCandidate,
     GoalAdjustmentSignal,
+    PROMISE_UPDATE_ACTIONS,
+    OpenPromise,
     PeerMeetIntent,
     PostTurnProcessorPort,
     PostTurnResult,
+    PromiseUpdate,
     ScheduleAdjustment,
     StateSuggestion,
 )
@@ -142,6 +145,7 @@ class LLMPostTurnProcessor(PostTurnProcessorPort):
         player_persona_note: str = "",
         disclosure_candidates: list[MemoryItem] | None = None,
         boundary_crossing: BoundaryCrossing | None = None,
+        open_promises: list[OpenPromise] | None = None,
     ) -> PostTurnResult:
         # Short-circuit when the operator picked the fake provider —
         # fake emits deterministic text that won't parse as the JSON
@@ -167,6 +171,7 @@ class LLMPostTurnProcessor(PostTurnProcessorPort):
             player_persona_note=player_persona_note,
             disclosure_candidates=candidates,
             boundary_crossing=boundary_crossing,
+            open_promises=tuple(open_promises or ()),
         )
         try:
             raw = await self._resolver.generate(prompt, character=character)
@@ -183,6 +188,14 @@ class LLMPostTurnProcessor(PostTurnProcessorPort):
             for activity in schedule.activities:
                 if activity.commitment_key:
                     activity_keys.setdefault(activity.commitment_key, set()).add(activity.id)
+        # I-19 Part 2 -- which known ids live on a *future* day. Only a
+        # ``remove`` may carry that day through to ``apply_adjustments``.
+        future_activity_dates = {
+            a.id: schedule.date.isoformat()
+            for schedule in (upcoming_schedules or [])
+            if schedule is not None
+            for a in schedule.activities
+        }
         known_beat_ids = (
             {b.id for b in active_arc.beats if b.status in {"pending", "active"}}
             if active_arc is not None
@@ -213,6 +226,8 @@ class LLMPostTurnProcessor(PostTurnProcessorPort):
             # it is enforced here rather than only at the call site so
             # the port can never hand back an id the prompt never showed.
             known_disclosure_ids={item.id for item in candidates},
+            open_promises=tuple(open_promises or ()),
+            future_activity_dates=future_activity_dates,
         )
 
 def _build_prompt(
@@ -234,6 +249,7 @@ def _build_prompt(
     player_persona_note: str = "",
     disclosure_candidates: "tuple[MemoryItem, ...]" = (),
     boundary_crossing: BoundaryCrossing | None = None,
+    open_promises: "tuple[OpenPromise, ...]" = (),
 ) -> str:
     state = character.state
     ref_now = ensure_utc(now) if now is not None else datetime.now(timezone.utc)
@@ -296,6 +312,9 @@ def _build_prompt(
         schedule_section=schedule_section,
         boundary_section="\n".join(
             _render_boundary_crossing_section(boundary_crossing, local_tz=local_tz),
+        ),
+        promise_section="\n".join(
+            _render_open_promise_section(open_promises, local_tz=local_tz),
         ),
         boundary_rule=(
             _BOUNDARY_CROSSING_RULE if boundary_crossing is not None else ""
@@ -371,6 +390,65 @@ def _render_boundary_crossing_section(
         '  "operator_confirmed_shared"。',
         "- 看不出來：不要調整。",
     ]
+
+
+PROMISE_SHORT_ID_CHARS = 8
+"""Length of the id prefix shown to the model for an open promise."""
+
+_MAX_OPEN_PROMISES_SHOWN = 8
+_MAX_PROMISE_UPDATES = 6
+
+
+def _promise_short_id(promise: OpenPromise) -> str:
+    return promise.id[:PROMISE_SHORT_ID_CHARS]
+
+
+def _render_open_promise_section(
+    promises: "tuple[OpenPromise, ...]",
+    *,
+    local_tz: tzinfo,
+) -> list[str]:
+    """I-19 -- the character's still-queued promises, plus the rules for
+    reporting which of them this conversation already settled.
+
+    Empty when there is none, so the rendered prompt is byte-identical to
+    the one without this feature (the template places the placeholder on
+    the boundary section's own line).
+    """
+    if not promises:
+        return []
+    lines = [
+        "",
+        "",
+        "尚未發送的約定訊息（角色答應過、時間到了系統會自動發出；id 供 promise_updates 引用）：",
+    ]
+    for promise in promises[:_MAX_OPEN_PROMISES_SHOWN]:
+        when = to_timezone(promise.scheduled_for, local_tz).strftime("%Y-%m-%d %H:%M")
+        media = "｜含需要真的送出的照片／圖片" if promise.has_media_obligation else ""
+        lines.append(
+            f"- id={_promise_short_id(promise)} {when}｜{promise.intent}{media}"
+        )
+    lines.extend([
+        "",
+        "請依「近期對話脈絡」和本輪對話，額外輸出欄位 promise_updates（JSON 陣列，預設空陣列 []）：",
+        "- 預設不動。只有對話**明確顯示**某筆約定已完成、已不需要或要改時間時，才輸出一筆。",
+        "- 每筆欄位：promise_id（必須是上方清單的 id，否則該筆被忽略）、action、"
+        "scheduled_for_iso（僅 rescheduled）、reason（一句話）。",
+        "- action 只能是：",
+        "  - fulfilled：這件事在對話中已經完成（兩人已經實際開始約好的那件事、"
+        "已經提醒過、已經回報過）。玩家只是傳了一句話、或只是提到這件事，不算。",
+        "  - cancelled：這件事已不需要了（對方說不用了、前提已不存在，例如已經起床）。",
+        "  - rescheduled：同一件事改到另一個時間；scheduled_for_iso 填新的完整時間"
+        "（`YYYY-MM-DDTHH:MM`，角色所在時區，必須是未來，禁止相對詞）。",
+        "- 標示「含需要真的送出的照片／圖片」的約定不可輸出 fulfilled（照片必須真的送出），"
+        "只能 cancelled 或 rescheduled。",
+        "- 約定改期時，請輸出 rescheduled，不要另外在 message_promises 重寫一筆同樣的約定。",
+        "- 行程對齊：若某筆見面型約定被判為 fulfilled（提早開始了）：今日行程裡有對應的共同活動，"
+        "就對該 activity_id 在 schedule_adjustments 輸出 modify，把 start 改成實際開始的時間；"
+        '今日行程沒有對應活動，就 add 一筆從現在起的共同活動，operator_involvement 填 '
+        '"operator_confirmed_shared"。',
+    ])
+    return lines
 
 
 _MAX_DISCLOSURE_CANDIDATES = 8
@@ -654,6 +732,8 @@ def _parse_response(
     goal_key_ids: dict[str, set[str]] | None = None,
     known_peer_lines: list[str] | None = None,
     known_disclosure_ids: set[str] | None = None,
+    open_promises: "tuple[OpenPromise, ...]" = (),
+    future_activity_dates: dict[str, str] | None = None,
 ) -> PostTurnResult:
     # This processor asks for the single largest JSON object any prompt
     # in the codebase requests — memories, state, schedule, arc and
@@ -674,6 +754,7 @@ def _parse_response(
         obj.get("schedule_adjustments"),
         known_activity_ids=known_activity_ids or set(),
         activity_key_ids=activity_key_ids or {},
+        future_activity_dates=future_activity_dates or {},
     )
     arc_adjustments = _parse_arc_adjustments(
         obj.get("arc_adjustments"),
@@ -681,6 +762,9 @@ def _parse_response(
         beat_key_ids=beat_key_ids or {},
     )
     message_promises = _parse_message_promises(obj.get("message_promises"))
+    promise_updates = _parse_promise_updates(
+        obj.get("promise_updates"), open_promises=open_promises,
+    )
     goal_adjustments = _parse_goal_adjustments(obj.get("goal_adjustments"), goal_key_ids=goal_key_ids or {})
     peer_ids, peer_names = _known_peers_from_lines(known_peer_lines or [])
     peer_meet_intents = _parse_peer_meet_intents(
@@ -702,6 +786,7 @@ def _parse_response(
         schedule_adjustments=adjustments,
         arc_adjustments=arc_adjustments,
         message_promises=message_promises,
+        promise_updates=promise_updates,
         goal_adjustments=goal_adjustments,
         peer_meet_intents=peer_meet_intents,
         emotion_events=emotion_events,
@@ -913,6 +998,60 @@ def _parse_message_promises(raw: Any) -> list:
                 intent=intent,
                 source_text=source_text,
                 commitment_key=commitment_key,
+            )
+        )
+    return out
+
+
+def _parse_promise_updates(
+    raw: Any, *, open_promises: "tuple[OpenPromise, ...]",
+) -> list[PromiseUpdate]:
+    """Parse ``promise_updates`` against the promises the prompt showed.
+
+    An id that is not in the shown list (or whose short form is ambiguous)
+    drops the entry; a media promise never accepts ``fulfilled``;
+    ``rescheduled`` needs a parseable timestamp. One verdict per promise
+    (the first wins). No shown promises means nothing can be accepted.
+    """
+    if not open_promises or not isinstance(raw, list):
+        return []
+    shown = open_promises[:_MAX_OPEN_PROMISES_SHOWN]
+    out: list[PromiseUpdate] = []
+    seen: set[str] = set()
+    for entry in raw[:_MAX_PROMISE_UPDATES]:
+        if not isinstance(entry, dict):
+            continue
+        ref = _coerce_plain_str(entry.get("promise_id")).strip()
+        if not ref:
+            continue
+        matches = [p for p in shown if p.id == ref]
+        if not matches and len(ref) == PROMISE_SHORT_ID_CHARS:
+            matches = [p for p in shown if _promise_short_id(p) == ref]
+        if len(matches) != 1:
+            continue
+        promise = matches[0]
+        if promise.id in seen:
+            continue
+        action_raw = entry.get("action")
+        if not isinstance(action_raw, str):
+            continue
+        action = action_raw.strip().lower()
+        if action not in PROMISE_UPDATE_ACTIONS:
+            continue
+        if action == "fulfilled" and promise.has_media_obligation:
+            continue
+        scheduled = None
+        if action == "rescheduled":
+            scheduled = _coerce_iso_datetime(entry.get("scheduled_for_iso"))
+            if scheduled is None:
+                continue
+        seen.add(promise.id)
+        out.append(
+            PromiseUpdate(
+                promise_id=promise.id,
+                action=action,
+                scheduled_for_iso=scheduled,
+                reason=_coerce_adj_text(entry.get("reason"), limit=_MAX_REASON_CHARS) or "",
             )
         )
     return out
@@ -1402,6 +1541,7 @@ def _parse_adjustments(
     *,
     known_activity_ids: set[str],
     activity_key_ids: dict[str, set[str]] | None = None,
+    future_activity_dates: dict[str, str] | None = None,
 ) -> list[ScheduleAdjustment]:
     if not isinstance(raw, list):
         return []
@@ -1454,9 +1594,14 @@ def _parse_adjustments(
         if action == "add":
             if start is None or end is None or not description or not category:
                 continue
+        elif action == "remove" and activity_id in (future_activity_dates or {}):
+            # I-19 Part 2 -- a ``remove`` of a future-day activity keeps that
+            # day (taken from the shown schedule, not from the model) so
+            # ``apply_adjustments`` looks in the right day's schedule.
+            target_date_iso = (future_activity_dates or {})[activity_id]
         else:
-            # remove / modify never carry a future date — those operate
-            # on known today-existing activities, identified by id.
+            # modify (and a remove of a today activity) never carry a future
+            # date -- those operate on known today-existing activities.
             target_date_iso = None
 
         out.append(

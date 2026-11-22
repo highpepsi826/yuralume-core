@@ -12,11 +12,27 @@ sources:
   - src/kokoro_link/infrastructure/post_turn/llm_processor.py
   - src/kokoro_link/infrastructure/persistence/models.py
   - src/kokoro_link/bootstrap/container.py
+  - src/kokoro_link/application/services/pending_follow_up_dispatcher.py
+  - src/kokoro_link/application/services/pending_follow_up_release.py
+  - src/kokoro_link/application/services/proactive_dispatcher.py
+  - src/kokoro_link/data/prompts/busy/scheduled_promise_composer.txt
+  - src/kokoro_link/application/services/ongoing_interaction.py
+  - src/kokoro_link/infrastructure/prompt/sections/schedule.py
 symbols:
   - src/kokoro_link/application/services/active_llm_provider.py::PreferenceBackedActiveLLMProvider
   - src/kokoro_link/application/services/chat_service.py::ChatService
   - src/kokoro_link/infrastructure/prompt/sections/order.py::SECTION_ORDER
   - src/kokoro_link/infrastructure/post_turn/llm_processor.py::LLMPostTurnProcessor
+  - src/kokoro_link/application/services/pending_follow_up_dispatcher.py::PendingFollowUpDispatcher
+  - src/kokoro_link/application/services/pending_follow_up_release.py::PendingFollowUpReleaseReconciler
+  - src/kokoro_link/application/services/proactive_dispatcher.py::ProactiveDispatcher
+  - src/kokoro_link/application/services/schedule_service.py::ScheduleService
+  - src/kokoro_link/application/services/ongoing_interaction.py::minutes_since_active_conversation
+  - src/kokoro_link/application/services/pending_follow_up_dispatcher.py::promise_intent_has_media_obligation
+  - src/kokoro_link/infrastructure/post_turn/llm_processor.py::_render_open_promise_section
+  - src/kokoro_link/infrastructure/post_turn/llm_processor.py::_parse_promise_updates
+  - src/kokoro_link/infrastructure/prompt/sections/schedule.py::_render_due_promises_block
+  - src/kokoro_link/application/services/chat_service.py::_rescheduled_promise
 ---
 
 # 改動地圖
@@ -198,6 +214,10 @@ Provider 解析的順序完全相同（`_read_preferred_provider` :591）。
 行程在回合中的作用點、post-turn 改寫的觸發條件、記憶化不看對話、重疊規則，
 以及聊天 prompt 看不到玩家參與狀態。（查證於 `d54864b`，2026-11-22）
 
+**未來日子的活動：** post-turn 的 `remove` 可以指向「未來行程」清單裡的活動
+（I-19 Part 2）；`modify` 仍只限今日。細節見 #6「I-19 之後的約定流程」。
+（查證於 I-19 的 source 改動，2026-11-22）
+
 **必跑測試：** `tests/unit/test_schedule_service.py`（16）、`_calendar`(8)、
 `_cross_instance`(7)、`_future_commitment`(5)、`_weather_refresh`(7)、
 `_window`(7) — 合計 34。
@@ -227,10 +247,119 @@ Provider 解析的順序完全相同（`_read_preferred_provider` :591）。
 [flows/chat-turn.md](flows/chat-turn.md)「行程如何影響一個回合」第 1 點。
 （查證於 `d066b3e`，2026-11-22）
 
+**約定訊息（`SCHEDULED_PROMISE`）到期時怎麼放行：**（查證於 `fe4910b`，2026-11-22）
+
+- 建立：post-turn 的 `message_promises` →
+  `chat_service.py::ChatService._persist_message_promises`
+  （`PendingFollowUp.new_promise`）。帶 `commitment_key` 的改期走
+  `_reconcile_message_promises`，只會改時間與 intent。**post-turn 沒有「這個約定
+  已在對話中履行／取消」的輸出**，也收不到開啟中的約定清單。
+- 放行：`pending_follow_up_dispatcher.py::PendingFollowUpDispatcher._maybe_release`
+  → `_release_scheduled_promise`。只擋兩件事：角色不存在（取消）、角色 frozen
+  （留在 queued）。**不看 `busy_score`，也不看玩家此刻是否正在和角色對話**——
+  到點就 `marked_resolving` → 組稿 → `deliver_pre_composed`。
+- 組稿（`data/prompts/busy/scheduled_promise_composer.txt`）收到：intent、約定
+  時間與遲到標記、原始玩家句、當前／剛結束的活動、**一段對話摘要**
+  （`_safe_summarize`：只讀 `row.conversation_id` 那一條 conversation 的最近
+  40 則，不是跨來源的統一時間線）。它不知道「對話正在進行中」，模板對赴約型的
+  指引是「我來了，我們開始吧」。
+- 派送：`ProactiveDispatcher.deliver_pre_composed` 對 web thread 與綁定的通訊
+  軟體同時 fan-out，不經過主動訊息的冷卻與 `_is_playing_a_scene` 暫停
+  （該方法的 docstring 明說：延後應該由 follow-up dispatcher 自己的放行判斷
+  負責，這裡擋下等於刪掉訊息）。
+- 聊天回合看不到約定：`infrastructure/prompt/sections/` 沒有任何一段列出開啟中
+  或到期的約定，角色在對話中只能靠對話歷史／記憶想起自己答應過什麼。
+- 「現在不放行」的兩種既有寫法：(1) 原樣留在 queued 回 `False`（frozen、
+  busy-defer 仍在忙）；(2) `PendingFollowUp.honesty_parked(retry_at=…)`，會把
+  `scheduled_for` **往後改寫**，原約定時間就此遺失（沒有另一個欄位保存）。
+- 託管環境的重試節奏：放行由到期事件 job 觸發
+  （`pending_follow_up_release.py::PendingFollowUpReleaseEnqueuer`，
+  `due_at == scheduled_for`）；job 回 `not_released` 後，下一次機會來自
+  `PendingFollowUpReleaseReconciler`（約 15 分鐘一次）掃到「仍 queued 且已到期」
+  的列再重新入列。
+- 回合復原：回合開始時快照的是**該 conversation** 的開啟列
+  （`list_open_for_conversation`），不是角色的全部開啟列。
+- 同場聊天沒有獨立的 conversation：它是 web conversation 上帶
+  `presence_frame.surface = web_stage` 的回合；`Message` 本身不記錄 surface。
+
+**約定改期與提早履行時，哪些東西會動：**（查證於 `fe4910b`，2026-11-22）
+
+- post-turn 的輸入有今日與未來幾天的行程、進行中的目標、story beat，**沒有開啟中
+  的約定清單**。它不知道角色還欠著哪些約定，所以無法把舊約定收掉。
+- 約定就地改期只有一條路：`ChatService._reconcile_message_promises`，條件是新的
+  `message_promises` 帶 `commitment_key`，且該 key 恰好對到一列開啟中的約定。
+  成立時改 `scheduled_for`／intent 並重算 `dedupe_key`、`delivery_slot_key`；
+  之後 `_persist_message_promises` 的 `repo.add` 以 delivery slot 去重，不會多一列。
+- **沒有任何 prompt 模板要求模型為約定產生 `commitment_key`**
+  （`data/prompts/` 全目錄無此字樣；`processor.txt` 的輸出範例也沒有）。模型只會
+  在渲染出的行程／目標行尾看到既有的 key（`llm_processor.py` 的行程與目標區塊）。
+  所以 key 只在模型自發輸出時才存在。未帶 key 的改期：舊列原樣留著，新列另外
+  建立，兩個時間各發一則。
+- 改期後舊的到期事件 job 不會重排：`_reconcile_message_promises` 只 `repo.save`，
+  沒有呼叫 `_maybe_enqueue_follow_up_release`。舊 job 觸發時因未到期而略過，
+  新時間由 reconciler（約 15 分鐘）補入列。
+- 行程側：`llm_processor.py` 的 adjustment 解析對 `remove`／`modify` 一律把
+  `target_date_iso` 清成 `None`，`ScheduleService.apply_adjustments` 因此把它們
+  歸到今日；指向未來日子活動的 `remove`／`modify` 即使 id 通過驗證（未來行程的
+  id 在 `known_ids` 內）也找不到目標，等同沒做。唯一能碰未來日子活動的是
+  `reconcile_commitment_adjustments`（僅帶 key 的 `modify`），但目標日期同樣已被
+  清掉，只能在原日期內改時間，**不能跨日搬移**（見 `PENDING_FIXES.md` PF-10）。
+- 提早到場：行程只在對話明說變動或互動跨越行程邊界時才被改寫（見
+  [flows/chat-turn.md](flows/chat-turn.md) §3）。玩家比約定時間早出現、自然聊起來，
+  兩者都不成立，約定的共同活動仍停在原時段。
+
+**I-19 之後的約定流程：**（查證於 `fe4910b` 加上 I-19 的 source 改動，2026-11-22；
+與上面兩段衝突時以本段為準——上面兩段保留的是改動前的機制與成因。）
+
+- **post-turn 看得到約定**：`ChatService._do_post_turn` 透過
+  `_load_open_promises_for_post_turn` 自己讀該角色 `queued` 的約定（排除
+  `resolving` 與 honesty-repair 列），以 `open_promises` 傳給處理器（`_accepts_keyword`
+  守衛，空清單不傳）。`llm_processor.py::_render_open_promise_section` 渲染到模板
+  的 `${promise_section}`（與 `${boundary_section}` 同一行，無約定時為空字串）。
+  模型看到的是 id 前 8 碼，最多列 8 筆。
+- **`promise_updates`**：`_parse_promise_updates` 只接受清單內的 id（短碼需唯一），
+  action 為 `fulfilled`／`cancelled`／`rescheduled`；含媒體交付的約定拒絕
+  `fulfilled`；每筆約定只取第一個判定，最多 6 筆。媒體判斷是
+  `pending_follow_up_dispatcher.py::promise_intent_has_media_obligation`
+  （與派送端同一個 regex，屬關鍵字判斷）。
+- **套用**：`ChatService._apply_promise_updates`，在 `message_promises` 落庫
+  **之前**執行。逐列重讀，只在列仍是該角色 `queued` 的約定時寫入。`fulfilled` →
+  `marked_resolved`，`resolved_message` 以
+  `PROMISE_FULFILLED_IN_CONVERSATION_MARKER`（「在對話中履行」）開頭；`cancelled` →
+  `cancelled`；`rescheduled` → `_rescheduled_promise`（與 `commitment_key` 路徑共用
+  的重算）後 `_maybe_enqueue_follow_up_release`。release job 的 idempotency key 含
+  時間窗，所以新時間會得到新 job，舊 job 觸發時因未到期而略過。
+- **未來日子的 `remove`**：`_parse_adjustments` 對 id 屬於未來行程的 `remove`
+  保留該活動所在日期（取自渲染出的行程，不取模型輸出），`apply_adjustments` 因此
+  到那一天移除。`modify` 仍只能改今日（PF-10 第 2 點的跨日搬移未做）。
+- **放行前的保留**：`_release_scheduled_promise` 在 `marked_resolving` 之前讀跨來源
+  時間線（`_load_unified_timeline`，80 則），
+  `ongoing_interaction.py::minutes_since_active_conversation` 非 `None` 就原樣留在
+  `queued` 回 `False`。成立條件：15 分鐘內角色回過玩家，或最新一則 CHAT 是玩家
+  發的且在 15 分鐘內。讀不到時間線視為不在對話。只套用於約定，`BUSY_DEFER`
+  不變。下一次機會是 reconciler（約 15 分鐘）。
+- **補發的組稿**：約定的摘要改讀跨來源時間線（`_safe_summarize(unified=True)`；
+  busy-defer 仍讀單一 conversation）。
+  `ScheduledPromiseComposeInput.conversation_minutes_at_scheduled` 是「在約定時刻
+  當下是否正在對話」（同一函式以 `scheduled_for` 為 now 計算）；非 `None` 時遲到
+  標記改為「約定時間到的時候你們正在對話中」並多一段「不算遲到」。當前活動帶
+  `operator_confirmed_shared` 時行程區塊多一行。三者皆無時 prompt 不變。
+- **聊天回合注入**：`ChatService._load_due_promises` 在忙碌延後短路**之後**讀已
+  到期、`queued`、非媒體、非 honesty-repair 的約定，以 `due_promises` 傳到 prompt
+  builder；`sections/schedule.py::_render_due_promises_block` 是 `SECTION_ORDER` 中
+  `relationship_anchor` 之後的 `due_promises` 段，最多列 3 筆。聊天回合本身不結案，
+  由該回合的 post-turn 判定。
+- **回合復原**：journal 快照除了同一 conversation 的開啟列，另加該角色其他
+  conversation 上的開啟約定。復原其他 conversation 的列時，只有現況是 `queued`、
+  `cancelled`，或帶「在對話中履行」標記的 `resolved` 才寫回；已被 dispatcher 送出
+  或處理中的列不動。
+
 **必跑測試：** `tests/unit/test_pending_follow_up_entity.py`、
 `test_pending_follow_up_scheduled_promise_entity.py`、
 `test_pending_follow_up_dispatcher_promise.py`、
-`test_llm_pending_follow_up_composer.py`、`test_llm_scheduled_promise_composer.py`。
+`test_llm_pending_follow_up_composer.py`、`test_llm_scheduled_promise_composer.py`、
+`test_post_turn_promise_updates.py`、`test_promise_hold_and_compose.py`、
+`test_chat_due_promises.py`、`test_turn_undo_follow_ups.py`。
 
 ---
 

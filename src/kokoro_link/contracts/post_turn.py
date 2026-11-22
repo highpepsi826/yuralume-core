@@ -169,6 +169,43 @@ class MessagePromise:
 
 
 @dataclass(frozen=True, slots=True)
+class OpenPromise:
+    """One still-queued scheduled promise, as shown to the post-turn model.
+
+    Built by ``ChatService._do_post_turn`` from the character's open
+    ``SCHEDULED_PROMISE`` rows each time it runs (never carried over from
+    turn time: the hosted worker only has ids).
+    """
+
+    id: str
+    scheduled_for: datetime
+    """Timezone-aware promised instant."""
+    intent: str
+    has_media_obligation: bool = False
+    """The intent promises a photo/image; such a promise cannot be judged
+    ``fulfilled`` by conversation alone (the media must really be sent)."""
+
+
+PROMISE_UPDATE_ACTIONS = frozenset({"fulfilled", "cancelled", "rescheduled"})
+
+
+@dataclass(frozen=True, slots=True)
+class PromiseUpdate:
+    """A post-turn verdict about an already-open scheduled promise.
+
+    ``promise_id`` is always the full row id of one of the
+    :class:`OpenPromise` entries the processor was shown (the processor
+    drops anything else). ``scheduled_for_iso`` is only set for
+    ``rescheduled``.
+    """
+
+    promise_id: str
+    action: str  # "fulfilled" | "cancelled" | "rescheduled"
+    scheduled_for_iso: str | None = None
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class PeerMeetIntent:
     """A chat-extracted agreement for this character to meet a known peer."""
 
@@ -277,6 +314,10 @@ class PostTurnResult:
     schedule_adjustments: list[ScheduleAdjustment] = field(default_factory=list)
     arc_adjustments: list[ArcAdjustmentSignal] = field(default_factory=list)
     message_promises: list[MessagePromise] = field(default_factory=list)
+    promise_updates: list[PromiseUpdate] = field(default_factory=list)
+    """Verdicts about promises that were already open (fulfilled in the
+    conversation / no longer needed / moved to another time). Empty when
+    the processor was shown no open promises."""
     goal_adjustments: list[GoalAdjustmentSignal] = field(default_factory=list)
     """Future-time promises the character made to message the user.
     Routed through :class:`PendingFollowUp` to bypass proactive gates.
@@ -334,6 +375,7 @@ class PostTurnProcessorPort(Protocol):
         player_persona_note: str = "",
         disclosure_candidates: list[MemoryItem] | None = None,
         boundary_crossing: BoundaryCrossing | None = None,
+        open_promises: list[OpenPromise] | None = None,
     ) -> PostTurnResult:
         """Extract memories, suggest state updates, propose schedule
         adjustments, and — when an arc is active — emit optional arc
@@ -366,4 +408,9 @@ class PostTurnProcessorPort(Protocol):
         interaction ran across a schedule boundary that the conversation did
         not settle; the processor then asks explicitly for a schedule
         adjustment. ``None`` leaves the prompt exactly as before.
+
+        ``open_promises`` (I-19) lists the character's still-queued scheduled
+        promises so the model can report which ones the conversation has
+        already fulfilled, cancelled or moved. ``None`` / empty leaves the
+        prompt exactly as before and ``promise_updates`` empty.
         """

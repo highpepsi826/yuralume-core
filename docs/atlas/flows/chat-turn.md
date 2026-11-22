@@ -346,6 +346,17 @@ flowchart LR
   `role`，沒有改後端；文字是 `schedulePanel.participants.withYou`（三個語系檔）。
 - 玩家參與狀態目前只被 post-turn、行程規劃、記憶化、主動訊息判斷與動態牆讀取。
 
+### 7. 約定訊息與回合的交互（I-19，查證於 I-19 的 source 改動，2026-11-22）
+
+- 回合開始（忙碌延後短路之後）：`_load_due_promises` 把已到期仍未發的約定放進
+  prompt 的 `due_promises` 段。延後短路的回合不讀、不注入。
+- 回合結束的 post-turn：看得到該角色所有未發的約定，可輸出 `promise_updates`
+  把它們判為已履行、取消或改期；見面型約定提前履行時，同一區塊要求用
+  `schedule_adjustments` 把行程對齊。
+- 回合之外：dispatcher 在對話進行中不放行約定。
+- 完整機制、閘門與檔案位置在 [change-map.md](../change-map.md) #6
+  「I-19 之後的約定流程」。
+
 ### 已知缺口
 
 - 第 4、6 點合起來，就是「約會中離開一陣子再回來，角色當玩家不在」與
@@ -357,7 +368,7 @@ flowchart LR
   **仍未解決（第二期）**：行程本身不會因互動而改寫，其他讀行程的功能（主動訊息、
   feed、記憶化）仍把該時段當成已發生；超過 15 分鐘後回來的約會延續不處理。
   設計見 `ONGOING_INTERACTION_HOLD_REFERENCE.md`。
-- 排程中的約定訊息在聊天進行中仍會照發（I-19）。
+- 「排程中的約定訊息在聊天進行中仍會照發」（I-19）已處理，見上方第 7 點。
 - 本頁其他段落的行號是 `3fc5836` 時的值，`chat_service.py` 之後有變動，行號
   已漂移（例如 `_maybe_defer_reply` 的呼叫點、`_run_post_turn` 本體）。以
   symbol 名稱搜尋為準；整頁重新對照時一併修正。

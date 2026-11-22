@@ -52,6 +52,16 @@ class ToolOutcomeMessage:
     error: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class DuePromise:
+    """A scheduled promise whose time has come but which is still queued
+    (I-19 Part 3b): the chat prompt asks the character to keep it inside
+    the reply instead of a separate opener."""
+
+    scheduled_for: datetime
+    intent: str
+
+
 class PromptContextBuilderPort(Protocol):
     def build(
         self,
@@ -99,8 +109,12 @@ class PromptContextBuilderPort(Protocol):
         content_tolerance: str = CONTENT_TOLERANCE_FRONTIER,
         stage_nudge: bool = False,
         ongoing_interaction: "OngoingInteraction | None" = None,
+        due_promises: "tuple[DuePromise, ...]" = (),
     ) -> str:
         """Build prompt context for model generation.
+
+        ``due_promises`` (I-19 Part 3b) are the character's queued promises
+        that are already due; empty leaves the prompt byte-identical.
 
         ``stage_nudge`` (SN1) says the player pulled this turn instead of
         speaking: they asked the character to open, optionally after

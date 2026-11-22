@@ -29,6 +29,10 @@ owning atlas page before it is reported, even when no source changed. A design
 reference is archived when its work ends, so it cannot be the only place a fact
 lives. See "Investigation findings" in `AGENTS.md`.
 
+**Every turn that touches `docs/atlas/` ends with a report of it.** List each
+add, update, or delete — page, section, and one line on what it now says — in
+the last message of that turn. See "Investigation findings" in `AGENTS.md`.
+
 If the atlas and the code disagree, the atlas is wrong — fix the atlas in that
 commit rather than working around it.
 

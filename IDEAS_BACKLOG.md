@@ -56,7 +56,7 @@ Rationale" below. This is a working suggestion, not an approval.
 | I-11 | Real-time generated picture-book stories | Media / Story | idea | 13 | - | 2026-10-21 |
 | I-16 | Improve image-generation prompt rules (wrong body features, extra objects) | Media / Prompt | idea | - | - | 2026-10-23 |
 | I-18 | Investigate why chat lacks date/time awareness (weekday, upcoming holidays) | Chat / Prompt | idea | - | - | 2026-10-24 |
-| I-19 | Scheduled promise messages still fire during an active co-presence chat, breaking immersion | Co-presence / Scheduling | idea | - | - | 2026-10-24 |
+| I-19 | Scheduled promise messages still fire during an active co-presence chat, breaking immersion | Co-presence / Scheduling | in-progress | - | `PROMISE_DURING_CONVERSATION_REFERENCE.md` | 2026-11-22 |
 | I-20 | Maximise existing messaging apps (Telegram/WhatsApp) with mode flags/prefixes before building an APP | Platform / Telegram | idea | - | - | 2026-10-25 |
 | I-21 | Schedule slot changes override an ongoing interaction: shared co-presence activity forgotten, or active conversation abruptly ended ("busy, talk later") | Co-presence / Chat / Schedule | in-progress | - | `ONGOING_INTERACTION_HOLD_REFERENCE.md`, `ONGOING_INTERACTION_WRITEBACK_REFERENCE.md` | 2026-11-22 |
 | I-23 | Interaction still feels thinner/degrades even with daily Telegram chat | Relationship / Emotion | idea | - | - | 2026-11-01 |
@@ -371,6 +371,9 @@ Group notes:
   照傳「我來找你了，你想聊什麼？」之類的句子，打破臨場感。
 - 待分析：排程/約定訊息發送前是否檢查當前是否正在對話中，或約定是否已被提前履行；
   相關：COMMITMENT_RECONCILIATION_IMPLEMENTATION_REFERENCE.md（約定同步）、I-05。
+- 2026-11-22 調查（by Claude）：放行時不檢查是否正在對話；聊天回合也看不到到期的
+  約定。結構事實見 `docs/atlas/change-map.md` #6，設計見
+  `PROMISE_DURING_CONVERSATION_REFERENCE.md`（等待 owner 批准）。
 
 ### I-20 開發 APP 前先「用盡」現有大眾通訊 app
 
@@ -643,3 +646,11 @@ Group notes:
      window_limit 的實測值與 token 成本；是否要按對話密度自適應。
 - 2026-11-22 Added I-32 (other NPCs present in a co-presence chat never speak,
   even when addressed; improve without affecting memory). (by Claude)
+- 2026-11-22 I-19 → `designing`: investigated the scheduled-promise release
+  path; design written to `PROMISE_DURING_CONVERSATION_REFERENCE.md`, awaiting
+  owner approval. (by Claude)
+- 2026-11-22 I-19 design rewritten (v2): post-turn sees open promises and can
+  mark them fulfilled / cancelled / rescheduled; covers early arrival and
+  rescheduling; PF-10 recorded. Still awaiting owner approval. (by Claude)
+- 2026-11-22 I-19 → `in-progress`: owner approved design v2 including Part 2.
+  (by Claude)

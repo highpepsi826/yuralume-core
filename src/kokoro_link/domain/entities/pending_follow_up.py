@@ -276,6 +276,11 @@ class PendingFollowUpKind:
 PendingFollowUpKind.BUSY_DEFER = PendingFollowUpKind("busy_defer")
 PendingFollowUpKind.SCHEDULED_PROMISE = PendingFollowUpKind("scheduled_promise")
 
+PROMISE_FULFILLED_IN_CONVERSATION_MARKER: str = "在對話中履行"
+"""Prefix of ``resolved_message`` on a promise the post-turn judged already
+fulfilled by the conversation (I-19), as opposed to one the dispatcher
+delivered. Turn-undo uses it to tell the two apart."""
+
 SCHEDULED_PROMISE_DEFER_REASON: str = "scheduled_promise"
 """``defer_reason`` of a promise the *character* made to the player."""
 

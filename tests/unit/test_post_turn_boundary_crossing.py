@@ -292,7 +292,7 @@ async def test_prompt_is_unchanged_without_a_crossing() -> None:
     template = mod.get_default_loader().raw("post_turn/processor")
     assert template.count("${boundary_section}") == 1
     assert template.count("${boundary_rule}") == 1
-    assert "${schedule_section}${boundary_section}\n" in template
+    assert "${schedule_section}${boundary_section}${promise_section}\n" in template
 
 
 async def test_prompt_renders_the_block_with_local_times_and_the_id() -> None:

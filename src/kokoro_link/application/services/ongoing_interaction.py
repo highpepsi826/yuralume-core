@@ -119,7 +119,48 @@ def resolve_ongoing_interaction(
     )
 
 
+def minutes_since_active_conversation(
+    recent_messages: Sequence[Message],
+    *,
+    now: datetime,
+    hold: timedelta = ONGOING_INTERACTION_HOLD,
+) -> int | None:
+    """Minutes since the last chat exchange, when the pair is mid-conversation.
+
+    "Mid-conversation" is either of two structural facts, both read from
+    roles, kinds and timestamps only (never text):
+
+    * :func:`resolve_ongoing_interaction` -- the character replied to the
+      player within ``hold``; or
+    * the latest chat message is the player's own and is within ``hold``
+      (a reply may still be generating, so no character reply exists yet).
+
+    ``None`` when neither holds. ``recent_messages`` must be chronological;
+    messages stamped after ``now`` are ignored, so the same call answers
+    "were they talking at instant T" for a past T (I-19 Part 3c).
+    """
+    now_utc = _aware(now)
+    chat = [
+        m for m in recent_messages
+        if m.kind is MessageKind.CHAT and _aware(m.created_at) <= now_utc
+    ]
+    ongoing = resolve_ongoing_interaction(
+        recent_messages=chat, current_activity=None, now=now_utc, hold=hold,
+    )
+    if ongoing is not None:
+        return ongoing.minutes_since
+    if not chat:
+        return None
+    latest = chat[-1]
+    if latest.role is MessageRole.USER:
+        elapsed = now_utc - _aware(latest.created_at)
+        if elapsed <= hold:
+            return max(0, int(elapsed.total_seconds() // 60))
+    return None
+
+
 __all__ = [
+    "minutes_since_active_conversation",
     "ONGOING_INTERACTION_HOLD",
     "ONGOING_INTERACTION_MAX_LOOKBACK",
     "ONGOING_INTERACTION_STREAK_SCAN_LIMIT",

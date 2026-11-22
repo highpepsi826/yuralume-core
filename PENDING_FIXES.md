@@ -173,6 +173,22 @@ frontend 目錄下另一個測試設定，需確認是否仍存在並納入常�
 
 ---
 
+### PF-10 — 約定改期後，舊約定與舊行程不會被收掉
+
+**發現：** 2026-11-22（I-19 調查，by Claude）。只讀程式碼查證，未在執行環境重現。
+
+1. **舊約定訊息照發。** post-turn 看不到開啟中的約定，就地改期只靠
+   `commitment_key`，而沒有任何 prompt 要求模型產生它。未帶 key 的改期會留下舊列
+   並另建新列，兩個時間各發一則。
+2. **未來日子的舊活動收不掉。** `remove`／`modify` 的目標日期在解析時被清掉，
+   指向未來日子活動的調整等同沒做；帶 key 的 `modify` 也只能在原日期內改時間，
+   不能跨日搬移。
+
+**狀態（2026-11-22）：** 第 1 點已由 I-19 修正（post-turn 的 `promise_updates`，
+`rescheduled` 就地改期）。第 2 點部分修正：未來日子的 `remove` 已可用；`modify`
+的跨日搬移仍未做，改期目前靠「新的一天 add ＋ 舊的一天 remove」。修正仰賴模型
+判斷，真實模型下的表現待試玩確認。
+
 ### PF-08 — NSFW 摘要失敗是靜默的
 
 **事實：** `LLMNsfwSafeSummarizer.summarize` 失敗時回傳空字串
@@ -207,6 +223,7 @@ frontend 目錄下另一個測試設定，需確認是否仍存在並納入常�
 | PF-03, PF-04, PF-05 | `docs/atlas/layers.md` §已知缺口 |
 | PF-06, PF-07 | `docs/atlas/layers.md` §已知缺口 |
 | PF-08, PF-09 | `docs/atlas/domains/nsfw.md` §已知缺口 |
+| PF-10 | `docs/atlas/change-map.md` #6「約定改期與提早履行時，哪些東西會動」 |
 
 本檔是**可執行**的版本（有優先序、有建議修法）；atlas 是**描述**的版本
 （說明現況）。兩邊都要在同一個 commit 更新。

@@ -104,7 +104,10 @@ from kokoro_link.application.services.turn_undo.step import (
 from kokoro_link.contracts.pending_follow_up import (
     PendingFollowUpRepositoryPort,
 )
-from kokoro_link.domain.entities.pending_follow_up import PendingFollowUp
+from kokoro_link.domain.entities.pending_follow_up import (
+    PROMISE_FULFILLED_IN_CONVERSATION_MARKER,
+    PendingFollowUp,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -150,7 +153,10 @@ class PendingFollowUpRestoreStep(UndoStep):
         await self._delete_rows_the_turn_queued(
             context, repository, snapshot, tally,
         )
-        await self._restore_pre_turn_rows(repository, snapshot, tally)
+        await self._restore_pre_turn_rows(
+            repository, snapshot, tally,
+            conversation_id=context.journal.conversation_id,
+        )
 
     async def _delete_rows_the_turn_queued(
         self,
@@ -215,6 +221,8 @@ class PendingFollowUpRestoreStep(UndoStep):
         repository: PendingFollowUpRepositoryPort,
         snapshot: _PreTurnRows,
         tally: UndoTally,
+        *,
+        conversation_id: str | None = None,
     ) -> None:
         for row in snapshot.rows:
             current = await repository.get(row.id)
@@ -222,6 +230,20 @@ class PendingFollowUpRestoreStep(UndoStep):
                 # The turn left it alone. Writing it back would be
                 # harmless but would report a restore that never
                 # happened — and most turns land here.
+                continue
+            if (
+                current is not None
+                and conversation_id is not None
+                and row.conversation_id != conversation_id
+                and not _is_post_turn_settled(current, row)
+            ):
+                # I-19: the snapshot also names the character's promises on
+                # *other* conversations, because the post-turn can settle or
+                # move them. Rewind such a row only when the current state is
+                # one the post-turn could have written (cancelled, marked
+                # fulfilled-in-conversation, or still queued). A row the
+                # dispatcher has since taken (resolving / delivered) is not
+                # this turn's to reopen: that would re-send it.
                 continue
             await repository.save(row)
             tally.restored_follow_ups += 1
@@ -236,6 +258,20 @@ class PendingFollowUpRestoreStep(UndoStep):
             # so there is no queued job to take back. Absent, not broken.
             return None
         return PendingFollowUpReleaseWithdrawer(queue=queue)
+
+
+def _is_post_turn_settled(
+    current: PendingFollowUp, snapshot_row: PendingFollowUp,
+) -> bool:
+    """Whether ``current`` looks like the post-turn's doing (I-19)."""
+    status = current.status.value
+    if status in ("queued", "cancelled"):
+        return True
+    if status == "resolved":
+        return (current.resolved_message or "").startswith(
+            PROMISE_FULFILLED_IN_CONVERSATION_MARKER,
+        )
+    return False
 
 
 __all__ = ["PendingFollowUpRestoreStep"]

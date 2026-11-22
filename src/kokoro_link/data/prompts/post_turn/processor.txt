@@ -14,7 +14,7 @@
 角色當前狀態（數值範圍 0-100）→ 情緒：${state_emotion}，好感度：${state_affection}/100，疲勞度：${state_fatigue}/100，信任度：${state_trust}/100，精力：${state_energy}/100
 ${operator_section}
 ${history_section}
-${schedule_section}${boundary_section}
+${schedule_section}${boundary_section}${promise_section}
 ${arc_section}
 ${disclosure_section}
 
@@ -132,11 +132,12 @@ schedule_adjustments 欄位：
   - 使用者明確婉拒 → 不要把它 add 成共同活動；角色若仍想自己去，可以 add 但給 operator_wish，
     否則不要輸出這筆。
   - 使用者要改期 → 對**新的那一天**輸出 add 並沿用同樣的確認狀態；原本那天的活動若在
-    今日清單裡，再輸出 remove／modify 收掉。
+    今日清單裡，再輸出 remove／modify 收掉；若在上方「未來行程」清單裡，輸出 remove 收掉
+    （未來日子只能 remove，不能 modify）。
   - 同一件約定不要同時輸出兩個不同日期的 add；以最後談定的那一天為準。
 - description 不要寫相對時間詞：這筆活動已經綁在 target_date_iso 那一天，不必在描述裡再寫「明天」；
   若描述必須提到別的日子，請依上方「時間紀律」寫絕對日期。
-- **target_date_iso**：若 add 的時段是「未來日子」（例：「明天 7 點看電影」「下禮拜五要去看醫生」），請填當天的 YYYY-MM-DD（角色所在時區的民曆日）。今日的調整、或 remove / modify 上方既有 activity，留空 / null 即可（系統會視為今日）。**只接受 add 跨未來日；remove / modify 必須是今日既有 activity**。
+- **target_date_iso**：若 add 的時段是「未來日子」（例：「明天 7 點看電影」「下禮拜五要去看醫生」），請填當天的 YYYY-MM-DD（角色所在時區的民曆日）。今日的調整、或 remove / modify 上方既有 activity，留空 / null 即可（系統會視為今日）。**add 可跨未來日；modify 必須是今日既有 activity；remove 可以是今日既有 activity，或上方「未來行程」清單裡的 activity（填那一筆的 id 即可，日期由系統帶入）**。
 - 最多 ${max_adjustments} 筆。不確定就不要提。
 
 arc_adjustments 欄位：

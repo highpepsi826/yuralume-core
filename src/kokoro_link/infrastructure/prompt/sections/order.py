@@ -164,6 +164,10 @@ SECTION_ORDER: Final[tuple[str, ...]] = (
     "memory",
     "initial_relationship",
     "relationship_anchor",
+    #    ``due_promises`` (I-19 Part 3b) is a per-turn fact like the
+    #    transcript above it; it renders nothing unless a queued promise
+    #    is already due.
+    "due_promises",
     # -- this turn's tail -------------------------------------------
     #    Recency-load-bearing from ``recent_dialogue`` down; the footer
     #    quotes half a dozen 上方 sections by name. Nothing here moves

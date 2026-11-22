@@ -630,6 +630,44 @@ def _pending_invites(ctx: PromptSectionContext) -> list[str]:
     )
 
 
+_DUE_PROMISE_MAX_SHOWN = 3
+
+
+def _render_due_promises_block(
+    due_promises: tuple,
+    *,
+    local_tz: tzinfo,
+) -> list[str]:
+    """I-19 Part 3b -- promises whose time has come while the pair talk.
+
+    Empty when there is none, so the prompt is byte-identical. The block
+    asks the character to keep the promise inside this reply instead of a
+    separate opener; whether it actually did is judged by the turn's
+    post-turn, not here.
+    """
+    if not due_promises:
+        return []
+    lines = [
+        "",
+        "到期的約定：你之前答應對方的下列事情，時間已經到了，而你們正在對話中。",
+    ]
+    for promise in due_promises[:_DUE_PROMISE_MAX_SHOWN]:
+        when = to_timezone(promise.scheduled_for, local_tz).strftime("%H:%M")
+        lines.append(f"- 原定 {when}：{promise.intent}")
+    lines.extend([
+        "不要另外開一個新話題或另起一則開場；在這次回覆裡，順著對話自然地把這件事"
+        "做完或說出來（提醒就提醒、赴約就視為已經在一起了）。",
+        "如果這次回覆不適合提（例如對方正在說更重要的事），可以不提，之後仍會再給你機會。",
+    ])
+    return lines
+
+
+def _due_promises(ctx: PromptSectionContext) -> list[str]:
+    return _render_due_promises_block(
+        ctx.schedule.due_promises, local_tz=ctx.time.local_tz,
+    )
+
+
 def _upcoming_days(ctx: PromptSectionContext) -> list[str]:
     return _render_upcoming_days_block(
         list(ctx.schedule.upcoming_day_schedules),
@@ -639,6 +677,7 @@ def _upcoming_days(ctx: PromptSectionContext) -> list[str]:
 
 
 SECTIONS: tuple[PromptSection, ...] = (
+    section("due_promises", _due_promises),
     section("timing", _timing),
     section("calendar", _calendar),
     section("weather", _weather),

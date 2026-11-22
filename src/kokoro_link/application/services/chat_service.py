@@ -247,6 +247,7 @@ from kokoro_link.application.services.experiment_overlay_service import (
 )
 from kokoro_link.domain.entities.pending_follow_up import (
     MAX_QUEUED_MESSAGES,
+    PROMISE_FULFILLED_IN_CONVERSATION_MARKER,
     PendingFollowUp,
     PendingFollowUpKind,
     PendingFollowUpMessage,
@@ -313,6 +314,7 @@ from kokoro_link.contracts.post_turn import PostTurnProcessorPort, StateSuggesti
 from kokoro_link.contracts.proactive import ProactiveAttemptRepositoryPort
 from kokoro_link.contracts.self_repetition import SelfRepetitionExtractorPort
 from kokoro_link.contracts.prompt import (
+    DuePromise,
     PromptContextBuilderPort,
     PromptToolDescriptor,
     ToolOutcomeMessage,
@@ -2389,6 +2391,13 @@ class ChatService:
                 state=defer_state,
             )
 
+        # I-19 Part 3b -- read only now that the busy-defer short-circuit has
+        # been passed: a deferred turn builds no prompt, so it must not carry
+        # (or appear to have delivered) a due promise.
+        due_promises = await self._load_due_promises(
+            character_id=character.id, now=now_utc,
+        )
+
         # Persist the user's turn BEFORE the LLM call so a timeout /
         # network drop can't lose it. The client refreshes → reads the
         # conversation → sees their own message and can retry the reply.
@@ -2425,6 +2434,7 @@ class ChatService:
             completed_today_activities=completed_today_activities,
             pending_invite_activities=pending_invite_activities,
             ongoing_interaction=ongoing_interaction,
+            due_promises=due_promises,
             story_events=story_events,
             story_arc=story_arc,
             upcoming_arc_beats=upcoming_arc_beats,
@@ -3000,6 +3010,13 @@ class ChatService:
             )
             return token_stream, finalizer
 
+        # I-19 Part 3b -- read only now that the busy-defer short-circuit has
+        # been passed: a deferred turn builds no prompt, so it must not carry
+        # (or appear to have delivered) a due promise.
+        due_promises = await self._load_due_promises(
+            character_id=character.id, now=now_utc,
+        )
+
         # Persist the user's turn BEFORE we kick off streaming so a
         # mid-stream network drop / timeout cannot lose it — client
         # refresh will still see the user message in history. A silent
@@ -3071,6 +3088,7 @@ class ChatService:
                 completed_today_activities=completed_today_activities,
                 pending_invite_activities=pending_invite_activities,
                 ongoing_interaction=ongoing_interaction,
+                due_promises=due_promises,
                 story_events=story_events,
                 story_arc=story_arc,
                 upcoming_arc_beats=upcoming_arc_beats,
@@ -3239,6 +3257,7 @@ class ChatService:
                 completed_today_activities=completed_today_activities,
                 pending_invite_activities=pending_invite_activities,
                 ongoing_interaction=ongoing_interaction,
+                due_promises=due_promises,
                 now=now_utc,
                 idle_minutes=idle_minutes,
                 # HV2 — this generator is the streaming branch, reached only
@@ -3533,6 +3552,26 @@ class ChatService:
                 prev_follow_ups = [follow_up_to_dict(r) for r in open_rows]
             except Exception:
                 _LOGGER.exception("journal: pending follow-up snapshot failed")
+            # I-19 -- the post-turn can now settle or move any of the
+            # character's open promises, including ones made on another
+            # conversation. Snapshot those too (restored by id on undo; the
+            # undo step only ever *deletes* rows of the journal's own
+            # conversation, so these are write-back-only).
+            try:
+                seen_ids = {d["id"] for d in prev_follow_ups}
+                for row in await (
+                    self._pending_follow_up_repository
+                    .list_open_for_character(character.id)
+                ):
+                    if (
+                        row.id not in seen_ids
+                        and row.kind == PendingFollowUpKind.SCHEDULED_PROMISE
+                    ):
+                        prev_follow_ups.append(follow_up_to_dict(row))
+            except Exception:
+                _LOGGER.exception(
+                    "journal: character-wide promise snapshot failed",
+                )
         prev_address: dict | None = None
         if self._address_preference_repository is not None:
             # ``_fetch_address_preference`` already fail-softs to ``None``.
@@ -4616,6 +4655,7 @@ class ChatService:
         completed_today_activities: list[ScheduleActivity] | None = None,
         pending_invite_activities: list[ScheduleActivity] | None = None,
         ongoing_interaction: "OngoingInteraction | None" = None,
+        due_promises: "tuple[DuePromise, ...]" = (),
         story_events: list[StoryEvent] | None = None,
         story_arc: "StoryArc | None" = None,
         upcoming_arc_beats: "list[StoryArcBeat] | None" = None,
@@ -4789,6 +4829,7 @@ class ChatService:
                     completed_today_activities=completed_today_activities,
                     pending_invite_activities=pending_invite_activities,
                     ongoing_interaction=ongoing_interaction,
+                    due_promises=due_promises,
                     now=now,
                     idle_minutes=idle_minutes,
                     character_tool_names=character_tool_names,
@@ -5056,6 +5097,7 @@ class ChatService:
                 completed_today_activities=completed_today_activities,
                 pending_invite_activities=pending_invite_activities,
                 ongoing_interaction=ongoing_interaction,
+                due_promises=due_promises,
                 now=now,
                 idle_minutes=idle_minutes,
                 available_tools=tools_for_hop,
@@ -5400,6 +5442,7 @@ class ChatService:
                 completed_today_activities=completed_today_activities,
                 pending_invite_activities=pending_invite_activities,
                 ongoing_interaction=ongoing_interaction,
+                due_promises=due_promises,
                 now=now,
                 idle_minutes=idle_minutes,
                 available_tools=[],
@@ -7769,6 +7812,17 @@ class ChatService:
             # rebuilds this body from ids and nothing computed during the
             # turn survives that hop. Judged at the turn's instant, never
             # at this job's wall clock.
+            # I-19 -- loaded here (not carried from turn time) for the same
+            # reason: the hosted worker only has ids, and a promise may have
+            # been settled by another path since the turn started.
+            if _accepts_keyword(
+                self._post_turn_processor.process, "open_promises",
+            ):
+                open_promises = await self._load_open_promises_for_post_turn(
+                    character.id,
+                )
+                if open_promises:
+                    kwargs["open_promises"] = open_promises
             if _accepts_keyword(
                 self._post_turn_processor.process, "boundary_crossing",
             ):
@@ -7993,6 +8047,25 @@ class ChatService:
                     )
             except Exception:
                 _LOGGER.exception("Failed to apply arc adjustments")
+
+        # I-19 -- verdicts about promises that were already open. Applied
+        # before ``message_promises`` are persisted so a rescheduled row
+        # claims its new delivery slot first and the persist's slot
+        # de-duplication absorbs a same-turn restatement of it.
+        promise_updates = getattr(result, "promise_updates", None)
+        if promise_updates and self._pending_follow_up_repository is not None:
+            try:
+                await self._apply_promise_updates(
+                    character_id=character.id,
+                    updates=promise_updates,
+                    operator=operator,
+                    turn_record_id=turn_record_id,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Failed to apply promise updates character=%s",
+                    character.id,
+                )
 
         # Persist any "I'll message you at X" promises as scheduled-
         # promise PendingFollowUp rows. These trigger the proactive
@@ -8466,6 +8539,163 @@ class ChatService:
                     character_id,
                 )
 
+    async def _load_due_promises(
+        self, *, character_id: str, now: datetime,
+    ) -> "tuple[DuePromise, ...]":
+        """Queued scheduled promises that are already due (I-19 Part 3b).
+
+        Empty when nothing is due, which leaves the chat prompt unchanged.
+        Fail-soft: any error means "none". Promises that must really ship
+        media are left out (a sentence in the reply cannot keep them), and so
+        are honesty-repair rows (the auditor owns those). Nothing is written
+        here -- closing the promise is the turn's post-turn's call.
+        """
+        repo = self._pending_follow_up_repository
+        if repo is None:
+            return ()
+        try:
+            from kokoro_link.application.services.pending_follow_up_dispatcher import (
+                promise_intent_has_media_obligation,
+            )
+
+            rows = await repo.list_open_for_character(character_id)
+            due = [
+                row for row in rows
+                if row.kind == PendingFollowUpKind.SCHEDULED_PROMISE
+                and row.status.value == "queued"
+                and row.scheduled_for <= now
+                and not row.is_honesty_repair
+                and not promise_intent_has_media_obligation(row.promise_intent)
+            ]
+            due.sort(key=lambda row: (row.scheduled_for, row.id))
+            return tuple(
+                DuePromise(scheduled_for=row.scheduled_for, intent=row.promise_intent)
+                for row in due
+            )
+        except Exception:
+            _LOGGER.exception(
+                "Failed to load due promises character=%s", character_id,
+            )
+            return ()
+
+    async def _load_open_promises_for_post_turn(
+        self, character_id: str,
+    ) -> list:
+        """The character's still-queued scheduled promises (I-19).
+
+        Fail-soft: any error yields an empty list, which leaves the
+        post-turn prompt exactly as it was. ``resolving`` rows are left out
+        (the dispatcher owns them) and so are honesty-repair rows (the
+        outcome-claim auditor owns those).
+        """
+        repo = self._pending_follow_up_repository
+        if repo is None:
+            return []
+        try:
+            from kokoro_link.application.services.pending_follow_up_dispatcher import (
+                promise_intent_has_media_obligation,
+            )
+            from kokoro_link.contracts.post_turn import OpenPromise
+
+            rows = await repo.list_open_for_character(character_id)
+            eligible = [
+                row for row in rows
+                if row.kind == PendingFollowUpKind.SCHEDULED_PROMISE
+                and row.status.value == "queued"
+                and not row.is_honesty_repair
+            ]
+            eligible.sort(key=lambda row: (row.scheduled_for, row.id))
+            return [
+                OpenPromise(
+                    id=row.id,
+                    scheduled_for=row.scheduled_for,
+                    intent=row.promise_intent,
+                    has_media_obligation=promise_intent_has_media_obligation(
+                        row.promise_intent,
+                    ),
+                )
+                for row in eligible
+            ]
+        except Exception:
+            _LOGGER.exception(
+                "Failed to load open promises for post-turn character=%s",
+                character_id,
+            )
+            return []
+
+    async def _apply_promise_updates(
+        self,
+        *,
+        character_id: str,
+        updates: list,
+        operator: OperatorProfile | None,
+        turn_record_id: str | None,
+    ) -> None:
+        """Apply the post-turn's verdicts on already-open promises (I-19).
+
+        Each row is re-read and written only while it is still a ``queued``
+        scheduled promise of this character -- a row the dispatcher moved to
+        ``resolving`` (or anything terminal) is never touched. Every change
+        is logged at INFO; one failing update never blocks the others.
+        """
+        repo = self._pending_follow_up_repository
+        if repo is None:
+            return
+        for update in updates:
+            try:
+                row = await repo.get(update.promise_id)
+                if (
+                    row is None
+                    or row.character_id != character_id
+                    or row.kind != PendingFollowUpKind.SCHEDULED_PROMISE
+                    or row.status.value != "queued"
+                ):
+                    _LOGGER.info(
+                        "promise-update skipped: row not queued id=%s action=%s",
+                        update.promise_id, update.action,
+                    )
+                    continue
+                now = self._resolve_now()
+                if update.action == "fulfilled":
+                    await repo.save(row.marked_resolved(
+                        message_text=(
+                            f"{PROMISE_FULFILLED_IN_CONVERSATION_MARKER}"
+                            f"（turn {turn_record_id}）"
+                            if turn_record_id
+                            else PROMISE_FULFILLED_IN_CONVERSATION_MARKER
+                        ),
+                        now=now,
+                    ))
+                elif update.action == "cancelled":
+                    await repo.save(row.cancelled(now=now))
+                elif update.action == "rescheduled":
+                    parsed = _parse_promise_datetime(
+                        update.scheduled_for_iso or "",
+                        local_tz=_operator_timezone(operator),
+                    )
+                    if parsed is None or parsed <= now:
+                        _LOGGER.info(
+                            "promise-update skipped: bad reschedule time "
+                            "id=%s iso=%r", row.id, update.scheduled_for_iso,
+                        )
+                        continue
+                    updated = _rescheduled_promise(row, parsed, now=now)
+                    await repo.save(updated)
+                    await self._maybe_enqueue_follow_up_release(updated, now=now)
+                else:
+                    continue
+                _LOGGER.info(
+                    "promise-update applied id=%s action=%s turn=%s "
+                    "reason=%r",
+                    row.id, update.action, turn_record_id,
+                    (update.reason or "")[:120],
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "promise-update failed id=%s action=%s",
+                    update.promise_id, update.action,
+                )
+
     async def _reconcile_message_promises(
         self, *, character_id: str, promises: list,
         operator: OperatorProfile | None,
@@ -8490,11 +8720,6 @@ class ChatService:
                 and row.commitment_key
             ):
                 by_key.setdefault(row.commitment_key, []).append(row)
-        from dataclasses import replace
-        from kokoro_link.domain.entities.pending_follow_up import (
-            scheduled_promise_dedupe_key,
-            scheduled_promise_delivery_slot_key,
-        )
         now = self._resolve_now()
         local_tz = _operator_timezone(operator)
         for promise in keyed:
@@ -8508,20 +8733,9 @@ class ChatService:
                 continue
             row = rows[0]
             intent = (promise.intent or "").strip() or row.promise_intent
-            updated = replace(
-                row,
-                scheduled_for=parsed,
-                promise_intent=intent,
+            updated = _rescheduled_promise(
+                row, parsed, now=now, intent=intent,
                 commitment_key=promise.commitment_key,
-                dedupe_key=scheduled_promise_dedupe_key(
-                    character_id=character_id,
-                    promise_intent=intent,
-                    scheduled_for=parsed,
-                ),
-                delivery_slot_key=scheduled_promise_delivery_slot_key(
-                    character_id=character_id, scheduled_for=parsed,
-                ),
-                updated_at=now,
             )
             if updated != row:
                 await repo.save(updated)
@@ -10231,6 +10445,46 @@ def _locate_turn_messages(
         if messages[idx].role is MessageRole.USER:
             return (messages[idx], assistant_msg)
     return ()
+
+
+def _rescheduled_promise(
+    row: "PendingFollowUp",
+    scheduled_for: datetime,
+    *,
+    now: datetime,
+    intent: str | None = None,
+    commitment_key: str | None = None,
+) -> "PendingFollowUp":
+    """The same promise row moved to ``scheduled_for``.
+
+    Recomputes ``dedupe_key`` / ``delivery_slot_key`` (both derive from the
+    time) and leaves everything else -- id, anchor turn, obligations --
+    alone. Shared by the exact-key reconcile and the I-19 post-turn
+    ``rescheduled`` verdict so the two cannot drift apart.
+    """
+    from dataclasses import replace
+
+    from kokoro_link.domain.entities.pending_follow_up import (
+        scheduled_promise_dedupe_key,
+        scheduled_promise_delivery_slot_key,
+    )
+
+    new_intent = (intent or "").strip() or row.promise_intent
+    return replace(
+        row,
+        scheduled_for=scheduled_for,
+        promise_intent=new_intent,
+        commitment_key=commitment_key or row.commitment_key,
+        dedupe_key=scheduled_promise_dedupe_key(
+            character_id=row.character_id,
+            promise_intent=new_intent,
+            scheduled_for=scheduled_for,
+        ),
+        delivery_slot_key=scheduled_promise_delivery_slot_key(
+            character_id=row.character_id, scheduled_for=scheduled_for,
+        ),
+        updated_at=now,
+    )
 
 
 def _accepts_keyword(func: object, name: str) -> bool:

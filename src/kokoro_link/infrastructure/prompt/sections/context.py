@@ -107,6 +107,9 @@ class ScheduleContext:
     ongoing_interaction: OngoingInteraction | None = None
     """I-21: the derived "we were just talking" state, ``None`` when the
     player was not mid-conversation. ``None`` renders exactly as before."""
+    due_promises: tuple = ()
+    """I-19 Part 3b: queued promises already due (``DuePromise``); empty
+    renders nothing."""
 
 
 @dataclass(frozen=True, slots=True)

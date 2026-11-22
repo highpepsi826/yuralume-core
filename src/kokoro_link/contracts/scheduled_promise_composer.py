@@ -114,6 +114,12 @@ class ScheduledPromiseComposeInput:
     rendered prompt is byte-identical to the pre-HV1 one — which is what
     makes the field safe to add to a dual-tracked prompt surface without
     touching a shipped template."""
+    conversation_minutes_at_scheduled: int | None = None
+    """I-19 Part 3c. Set only when, at the promised instant, the player and
+    the character were mid-conversation (the dispatcher held the release for
+    that reason): minutes since the last exchange *as of the promised
+    instant*. The composer then must not treat the delay as lateness.
+    ``None`` leaves the rendered prompt byte-identical."""
     promise_made_at: datetime | None = None
     """When the promise was recorded — ``PendingFollowUp.queued_at`` on
     the row, i.e. the moment the post-turn extractor lodged it (not the

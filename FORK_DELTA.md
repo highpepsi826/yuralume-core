@@ -441,3 +441,28 @@ target 才給 community，否則由實際 provider 決定，露骨原文仍會�
 
 **溶合判斷：** 上游若自行處理互動中的行程切換，優先採用上游；`chat_service.py`
 與 prompt sections 在衝突熱區，merge 時預期衝突。
+
+### F-17 — 約定訊息跟上對話（I-19）
+
+**類型：** feature
+**狀態：** WATCH（source 已實作，2026-11-22）
+
+post-turn 看得到角色未發的約定並可輸出 `promise_updates`（已履行／取消／改期）；
+約定到期時若對話正在進行，dispatcher 不放行，改由聊天 prompt 的 `due_promises`
+段讓角色在回覆裡接上，或在對話結束後補發；post-turn 的 `remove` 可指向未來日子
+的活動。無 migration、無新欄位。上游合併時的衝突點：`processor.txt` 的
+`${promise_section}` 佔位與 `schedule_adjustments` 規則文字、`SECTION_ORDER`、
+`_release_scheduled_promise`。
+
+| 項目 | 位置 |
+|---|---|
+| post-turn contract（`OpenPromise`、`PromiseUpdate`、`open_promises` 參數） | `src/kokoro_link/contracts/post_turn.py` |
+| 約定區塊、`promise_updates` 解析、未來日子 `remove` | `src/kokoro_link/infrastructure/post_turn/llm_processor.py`、`src/kokoro_link/data/prompts/post_turn/processor.txt` |
+| 套用、到期約定讀取、journal 快照 | `src/kokoro_link/application/services/chat_service.py` |
+| 對話中不放行、補發組稿輸入 | `src/kokoro_link/application/services/pending_follow_up_dispatcher.py`、`src/kokoro_link/application/services/ongoing_interaction.py` |
+| 組稿 contract 與 prompt | `src/kokoro_link/contracts/scheduled_promise_composer.py`、`src/kokoro_link/infrastructure/busy/llm_scheduled_promise_composer.py` |
+| 聊天 prompt 的 `due_promises` 段 | `src/kokoro_link/contracts/prompt.py`、`src/kokoro_link/infrastructure/prompt/default.py`、`src/kokoro_link/infrastructure/prompt/sections/schedule.py`、`src/kokoro_link/infrastructure/prompt/sections/order.py`、`src/kokoro_link/infrastructure/prompt/sections/context.py` |
+| 回合復原 | `src/kokoro_link/application/services/turn_undo/steps/pending_follow_ups.py` |
+| 「在對話中履行」標記 | `src/kokoro_link/domain/entities/pending_follow_up.py` |
+
+**相關 reference：** `PROMISE_DURING_CONVERSATION_REFERENCE.md`
