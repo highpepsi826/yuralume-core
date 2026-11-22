@@ -64,7 +64,7 @@ symbols:
 
 | # | 分支 | routing_source | 行 |
 |---|---|---|---|
-| 1 | Active NSFW-mode target | `nsfw_mode` | 192–195 |
+| 1 | Active NSFW-mode target（feature 在 `structural_features` 內則跳過） | `nsfw_mode` | 192–195 |
 | 2 | Community tolerance → 已配置 NSFW target（無則拋錯） | `nsfw_content` | 196–205 |
 | 3 | 角色層 `feature_model_for(key)` | `character_feature` | 209–223 |
 | 4 | 全域 `feature_models[key]` | `global_feature` | 225–245 |

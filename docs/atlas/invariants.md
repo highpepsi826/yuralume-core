@@ -37,7 +37,7 @@ symbols:
 |---|---|---|
 | `content_mode` 是寫入時的事實，不得由文字推斷，不得由內容掃描回填 | HARD（僅 docstring） | `domain/entities/conversation.py:44-54` |
 | 內容流輔助函式不得新增關鍵字偵測；tolerance 只讀標記 | HARD | `domain/value_objects/content_flow.py:1-5` |
-| NSFW mode 的 tolerance 在構造上就是 `community` | HARD | `content_flow.py:41,46-53` |
+| NSFW 呼叫的 tolerance 由它**實際走到的 provider** 決定；只有真的走 NSFW target 才是 `community` | HARD | `content_flow.py:56-80`（route-aware）；舊判定 `content_flow.py:46-53` |
 | frontier prompt 必須用 `safe_summary` 替換受限訊息，或整則丟棄；永不外送原文 | HARD | `content_flow.py:66-90`；欄位契約 `models.py:575-582` |
 | 沒有 `safe_summary` 的 NSFW 檢索必須改路由到社群模型，而不是被清洗掉 | HARD | `content_flow.py:97-116` |
 | `image_profile_id = None` 表示「運營者關閉產圖」，永不 fallback 到正常 profile | HARD | `nsfw_mode.py:49-53`；`active_image_provider.py:109-121` |

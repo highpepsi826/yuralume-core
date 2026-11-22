@@ -1,7 +1,7 @@
 ---
 doc: nsfw
 tier: atlas
-verified_at_commit: c0668c1
+verified_at_commit: 6da0c57
 verified_at: 2026-11-22
 sources:
   - src/kokoro_link/application/services/nsfw_mode.py
@@ -223,6 +223,13 @@ NSFW mode 不只換模型，也換**寫作方向**。`content_mode` 從 `chat_se
 - `image_profile_id` 的空字串在 `_target_or_raise` 收斂為 `None`，
   不允許假 profile id 進入 registry 查詢。
 - 雲端模式下 NSFW 不可開啟。
+- **tolerance 必須由呼叫實際走到的 provider 決定**。分流後「NSFW 模式＝
+  community」不再恆真：被 cut-out 的任務可能落到 frontier provider，此時若
+  沿用舊判定，露骨原文就不會被清洗。新的外送點若同時可能被分流，必須用
+  `content_tolerance_for_route`（或等價的 route-aware 判定），不可用
+  `content_tolerance_for_llm_provider` 的 `current_content_mode` 覆寫。
+- **`structural_features` 預設 fail-closed**。未列入的 feature（含日後新增）
+  一律留在 NSFW target；不得改成型別白名單「預設安全」。
 
 ## 相關 feature reference
 
@@ -245,5 +252,9 @@ NSFW mode 不只換模型，也換**寫作方向**。`content_mode` 從 `chat_se
 - **分流清單的灰區尚未以實測證據決策**。翻譯、場景寫作、改寫、判讀、圖片／
   影片等 feature 仍全部走 target；要放行必須先用 diagnostic export 確認輸入
   不含對話原文。
+  - **翻譯類（含 `tts_translate`）已由 owner 於 2026-11-22 明確決定維持在
+    NSFW target**，不列入分流。理由是翻譯可能拿到需要原文才能處理的內容，
+    放回一般路由反而會失敗。這是產品決定，不是待辦；不要「順手」把它加進
+    `structural_features`。
 - **分流只影響 LLM 路由**。圖片 profile 的選擇不受 `structural_features`
   影響，NSFW 模式期間仍沿用 target 的 `image_profile_id`。
