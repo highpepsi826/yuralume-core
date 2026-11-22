@@ -1,6 +1,6 @@
 # 互動保持（行程切換不凌駕進行中的互動）— 第一期設計參考
 
-**Status:** owner 已批准（2026-11-22）。**實作暫停**：§4.1 有一項設計修訂待 owner 確認（見 §10 最後一條）。尚未動任何 source。
+**Status:** owner 已批准（2026-11-22，含 §4.1 修訂）。**實作中**。未 commit／未部署。
 **建立：** 2026-11-22 (by Claude)
 **Backlog：** `IDEAS_BACKLOG.md` I-21
 **Atlas 對應：** `docs/atlas/flows/chat-turn.md`、`docs/atlas/change-map.md` #2、#6
@@ -79,7 +79,9 @@ def resolve_ongoing_interaction(
 
 來源是既有的跨介面統一窗口（`load_unified_recent_window`），所以 Telegram 聊到
 一半轉同場也算連續。主動訊息、`TOOL_ONLY`、`SCENE_NARRATION` 不算來回。
-被延後的短回覆（brief ack）**不算**角色回覆，否則一次延後會自己續命。
+被延後的短回覆（brief ack）**照算**角色回覆：它在資料裡與一般回覆無法區分，
+而且不會造成連續延後（未完成的延後列會被下一則玩家訊息取消並直接回覆）。
+見 §10 的修訂紀錄。
 
 **連續互動的起點（`streak_started_at`）**：從最後一次來回往回走，只要相鄰兩則
 `CHAT` 訊息的間隔不超過 `hold`，就屬於同一段；第一個超過 `hold` 的間隔之後那則
@@ -245,7 +247,7 @@ post-turn 是背景執行的，可能晚於下一回合才生效；情況二在�
 
 | # | 測試 | 檔案 |
 |---|---|---|
-| T1 | `resolve_ongoing_interaction`：窗口內有來回且在保持時間內 → 成立；超時 → `None`；只有主動訊息 → `None`；只有 brief ack → `None`；本回合的玩家訊息不算 | 新 `test_ongoing_interaction.py` |
+| T1 | `resolve_ongoing_interaction`：窗口內有來回且在保持時間內 → 成立；超時 → `None`；只有主動訊息 → `None`；brief ack 視同一般回覆；本回合的玩家訊息不算 | 新 `test_ongoing_interaction.py` |
 | T2 | `streak_started_at`：連續訊息往回串到第一個超過 `hold` 的間隔；回溯上限。`activity_started_during_streak` 在切換後第二、第三回合仍為真 | 同上 |
 | T2b | 起點落在 8 則窗口之外時，能靠時間戳查詢找到 | 同上 |
 | T3 | 同場回合 + `busy_score` 0.9 → 不呼叫判斷器、不建延後列、走正常回覆 | `test_chat_service_busy_defer.py` |
@@ -299,7 +301,7 @@ post-turn 是背景執行的，可能晚於下一回合才生效；情況二在�
   互動時可靠觸發」，不是新建寫回機制（§12）。owner 同日確認接受第一期的
   對話／行程落差。
 
-- 2026-11-22（by Claude）**待 owner 確認的修訂**：implementer 查明延後時的短
+- 2026-11-22（by Claude）**修訂，owner 同日確認**：implementer 查明延後時的短
   回覆在資料裡無法與一般回覆區分（同為 `role=ASSISTANT`、`kind=CHAT`，訊息與
   資料列都沒有標記；唯一關聯是 `PendingFollowUp.brief_reply` 的文字），因此
   §4.1「短回覆不算角色回覆」無法在不改資料結構、不靠文字比對的前提下實作。
