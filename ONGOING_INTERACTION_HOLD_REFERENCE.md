@@ -53,7 +53,8 @@ ONGOING_INTERACTION_HOLD = timedelta(minutes=15)
 class OngoingInteraction:
     last_exchange_at: datetime      # 上一次角色回覆玩家的時間
     minutes_since: int
-    activity_changed_since: bool    # 當前行程是在 last_exchange_at 之後才開始的
+    streak_started_at: datetime     # 這段連續互動的起點
+    activity_started_during_streak: bool  # 當前行程在 streak_started_at 之後才開始
 
 def resolve_ongoing_interaction(
     *, recent_messages, current_activity, now, hold=ONGOING_INTERACTION_HOLD,
@@ -69,6 +70,20 @@ def resolve_ongoing_interaction(
 來源是既有的跨介面統一窗口（`load_unified_recent_window`），所以 Telegram 聊到
 一半轉同場也算連續。主動訊息、`TOOL_ONLY`、`SCENE_NARRATION` 不算來回。
 被延後的短回覆（brief ack）**不算**角色回覆，否則一次延後會自己續命。
+
+**連續互動的起點（`streak_started_at`）**：從最後一次來回往回走，只要相鄰兩則
+`CHAT` 訊息的間隔不超過 `hold`，就屬於同一段；第一個超過 `hold` 的間隔之後那則
+訊息就是起點。
+
+為什麼不用「行程是否在上一次來回之後才開始」：那個條件只在切換後的第一回合
+成立，角色回一句之後就失效，prompt 又變回「正在洗澡」，瞬移只是晚一回合發生
+（owner 2026-11-22 提出的「前一秒還在懷中」案例）。用整段互動的起點，過渡才能
+維持到互動結束。
+
+預設聊天窗口只有 8 則訊息，一段長互動的起點會落在窗口之外。若整個窗口都連續，
+需要另外讀取更早訊息的**時間戳**（只讀 `created_at` 與 `kind`，不讀內容）來找
+起點；實作第 1 步先確認 repository 是否已有合適的查詢，沒有就新增一個唯讀方法。
+回溯設上限（建議 6 小時），超過就以上限為起點。
 
 不成立時回傳 `None`，所有下游行為與現在完全相同。
 
@@ -94,7 +109,7 @@ owner 確認。
 對話狀態：
 - 你們正在一來一往地對話，你上一則回覆在約 3 分鐘前。
 - 你當時說的是：「……」          ← 僅在可安全引用時才附，見下
-- 你目前的活動是在那之後才開始的。  ← activity_changed_since 為真時
+- 你目前的活動是在這段對話開始之後才輪到的。  ← activity_started_during_streak 為真時
 ```
 
 `decider.txt` 增加一條判斷原則：
@@ -106,35 +121,53 @@ owner 確認。
 上一則回覆的引文：只在該訊息 `content_mode` 為 NORMAL 時附上（截 80 字）；
 NSFW 訊息只給時間事實，不給文字，避免把原文送進未必走 NSFW 路由的判斷器。
 
-### 4.3 主 prompt：行程切換時的過渡指引
+### 4.3 主 prompt：連續互動期間，場景以對話為準
 
-`ScheduleContext` 新增 `ongoing_interaction: OngoingInteraction | None = None`，
-`_render_schedule_block` 在它存在時追加幾行（放在行程段內，緊接「忙碌程度」）。
+原則：**連續互動期間，場景以對話為準，行程只是計畫。** 行程段不得把一個在
+互動開始之後才輪到的活動寫成「正在做」。
+
+`ScheduleContext` 新增 `ongoing_interaction: OngoingInteraction | None = None`。
 為 `None` 時輸出逐字不變，既有 golden prompt 不受影響。
 
-**互動中、行程沒變：**
+**情況一：互動中，當前行程在互動開始之前就已經在進行。**
+行程段維持原樣，只追加一行：
 
 ```
 互動狀態：你和對方約 N 分鐘前還在對話，這是同一段互動的延續，不是對方重新出現。
 ```
 
-同時，互動中時「忙碌程度」那行的 0.6 以上措辭（「回覆保持簡潔」「之後再詳聊」）
-改為中性版本：「手邊有事要做，但你們正聊到一半，依你的性格決定怎麼兼顧」。
+「忙碌程度」0.6 以上的措辭（「回覆保持簡潔」「之後再詳聊」）改為中性版本：
+「手邊有事要做，但你們正聊到一半，依你的性格決定怎麼兼顧」。
 
-**互動中、行程在上次來回之後才切換（`activity_changed_since`）：**
+**情況二：互動中，當前行程是在互動開始之後才輪到的
+（`activity_started_during_streak`）。**
+整段互動期間每一回合都這樣渲染，不只第一回合：
+
+- 不輸出「目前活動：… 正在「{當前活動}」」與「忙碌程度」兩行。
+- 改為：
 
 ```
-互動狀態：你和對方約 N 分鐘前還在對話，當時你正在「{上一個活動}」。
-行程上現在輪到「{當前活動}」，但這是原定計畫，不代表你已經丟下對方去做了。
-依你的性格和當下氣氛自然過渡：可以晚一點再去、邀對方一起、或先把話收尾再動身；
-不要當作對方已經不在，也不要沒有交代就直接變成在做新的事。
+互動狀態：你和對方從 {streak 起點時間} 起一直在互動，當時你正在「{互動開始時的活動}」。
+行程上原定 {時段} 要「{當前活動}」，但這只是計畫——你有沒有動身去做，以你們的
+對話內容為準；對話裡沒有發生過的事，就還沒發生。
+你此刻身在何處、正在做什麼，延續對話裡最後的場景，不要自行跳到新的地點或活動。
+要不要去、何時去，依你的性格和當下氣氛決定：可以再待一下、邀對方一起、
+或把話收尾後動身；動身要在對話裡演出來，不能略過。
 ```
 
-上一個活動取 `just_finished_activity`（目前只在當前為空檔時才帶入，需要讓
-`resolve_current` 在有當前活動時也回傳它——純讀取，不改行程資料）。
+- 行程段表頭的「唯一真實來源」在此情況改為「以下是你今天的計畫；你此刻的
+  實際處境見『互動狀態』」。
+- 同場時，`_STAGE_PRESENCE_GUIDANCE` 的私密時段那一點（「迴避、請他稍等、
+  隔著門說話」）不輸出，因為它預設角色已經獨自在那個私密場景裡。其餘三點保留。
+  這需要把 `ongoing_interaction` 也傳進 `DialogueContext`（或由 presence 段讀
+  `ctx.schedule`）。
 
-這段文字與行程段表頭的「唯一真實來源」並列時，以這段為準；表頭在互動中時
-加半句「（下方『互動狀態』另有說明時依其說明）」。
+「互動開始時的活動」＝ `streak_started_at` 當下的行程活動，由行程資料按時間
+查出（純讀取）。互動跨了多個行程時段時，只提起點那一個與當前這一個，中間的
+不列。
+
+角色在對話裡真的動身之後，下一回合 prompt 仍是情況二，但因為指示是「延續
+對話裡最後的場景」，他會接著在洗澡。行程與對話在這裡一致，不需要額外狀態。
 
 ### 4.4 玩家消失時
 
@@ -146,9 +179,10 @@ NSFW 訊息只給時間事實，不給文字，避免把原文送進未必走 NS
 
 | 現象 | 第一期結果 |
 |---|---|
-| A 同場共同活動被忘記 | §4.3 過渡指引 + §4.2(a) |
+| A 同場共同活動被忘記 | §4.3 情況二 + §4.2(a) |
+| A′ 前一秒還在懷中，下一秒隔著浴室門說話 | §4.3 情況二：整段互動期間不把新行程寫成「正在做」，並拿掉「隔著門」指引 |
 | B 聊到一半變「等下再回」 | 同場：§4.2(a) 直接消除。Telegram：§4.2(b) + §4.3 |
-| C 約會中短暫離開再回來 | 15 分鐘內回來：§4.3 視為延續。超過 15 分鐘：**第一期不處理**，屬第二期 |
+| C 約會中短暫離開再回來 | 15 分鐘內回來：§4.3 視為同一段互動。超過 15 分鐘：**第一期不處理**，屬第二期 |
 
 ## 5. 受影響的元件
 
@@ -159,9 +193,11 @@ NSFW 訊息只給時間事實，不給文字，避免把原文送進未必走 NS
 | `contracts/busy_reply_decider.py` | `decide` 新增可選參數 |
 | `infrastructure/busy/llm_decider.py` | 渲染「對話狀態」區塊 |
 | `data/prompts/busy/decider.txt` | 一條判斷原則 + `${ongoing_interaction_block}` |
-| `infrastructure/prompt/sections/context.py` | `ScheduleContext.ongoing_interaction` |
-| `infrastructure/prompt/sections/schedule.py` | `_render_schedule_block` 追加行 |
-| `application/services/schedule_service.py` | `resolve_current` 在有當前活動時也回傳剛結束的活動（需先確認現有呼叫端） |
+| `infrastructure/prompt/sections/context.py` | `ScheduleContext.ongoing_interaction`；presence 段可讀到同一個值 |
+| `infrastructure/prompt/sections/schedule.py` | `_render_schedule_block` 的情況一／情況二 |
+| `infrastructure/prompt/sections/dialogue.py` | 情況二時不輸出同場指引的私密時段一點 |
+| `application/services/schedule_service.py` | 新增唯讀方法：查某一時刻的行程活動（不改 `resolve_current` 簽名） |
+| conversation repository（視第 1 步確認結果） | 唯讀：讀取較早訊息的時間戳以找出互動起點 |
 
 不動：domain entity、persistence、migration、前端、pending follow-up 派送。
 
@@ -180,12 +216,14 @@ NSFW 訊息只給時間事實，不給文字，避免把原文送進未必走 NS
 | # | 測試 | 檔案 |
 |---|---|---|
 | T1 | `resolve_ongoing_interaction`：窗口內有來回且在保持時間內 → 成立；超時 → `None`；只有主動訊息 → `None`；只有 brief ack → `None`；本回合的玩家訊息不算 | 新 `test_ongoing_interaction.py` |
-| T2 | `activity_changed_since`：當前活動 `start_at` 在上次來回之後 → 真 | 同上 |
+| T2 | `streak_started_at`：連續訊息往回串到第一個超過 `hold` 的間隔；回溯上限。`activity_started_during_streak` 在切換後第二、第三回合仍為真 | 同上 |
+| T2b | 起點落在 8 則窗口之外時，能靠時間戳查詢找到 | 同上 |
 | T3 | 同場回合 + `busy_score` 0.9 → 不呼叫判斷器、不建延後列、走正常回覆 | `test_chat_service_busy_defer.py` |
 | T4 | 同場回合仍會取消既有的延後列 | 同上 |
 | T5 | Telegram 回合 + 互動中 → 判斷器收到 `ongoing_interaction_lines`；非互動中 → 空 tuple | 同上 |
 | T6 | 判斷器 prompt：有／無「對話狀態」區塊；NSFW 訊息不附引文 | `test_llm_busy_decider.py` |
-| T7 | 行程段：`ongoing_interaction=None` 輸出逐字不變；互動中兩種變體的文字 | `test_prompt_builder_schedule.py` |
+| T7 | 行程段：`ongoing_interaction=None` 輸出逐字不變；情況一追加一行；情況二不含「正在「{當前活動}」」與「忙碌程度」 | `test_prompt_builder_schedule.py` |
+| T7b | 同場 + 情況二：prompt 不含「隔著門」那一點，其餘同場指引仍在 | `test_prompt_builder_presence_frame.py` |
 | T8 | 既有 golden prompt 逐字不變 | `tests/unit/prompt_golden/` |
 | T9 | 串流與非串流兩個入口都傳了新參數 | `chat_stream_route_harness.py` 相關測試 |
 
@@ -199,7 +237,7 @@ NSFW 訊息只給時間事實，不給文字，避免把原文送進未必走 NS
 1. `ongoing_interaction.py` + T1、T2。
 2. `_maybe_defer_reply` 的同場短路（§4.2a）+ T3、T4。
 3. 判斷器 port／adapter／template（§4.2b）+ T5、T6。
-4. `resolve_current` 回傳剛結束活動；`ScheduleContext` 與行程段渲染（§4.3）+ T7、T8。
+4. 行程的時刻查詢方法；`ScheduleContext`、行程段與同場指引渲染（§4.3）+ T7、T7b、T8。
 5. 兩個入口接線 + T9。
 6. 同 commit 更新：`docs/atlas/flows/chat-turn.md`、`FORK_DELTA.md`（新 `F-16`）、
    `FEATURE_MANUAL.md`、`IDEAS_BACKLOG.md` I-21 狀態、本文件 Status。
@@ -215,13 +253,23 @@ NSFW 訊息只給時間事實，不給文字，避免把原文送進未必走 NS
 3. **互動中是否也放寬 0.6 以上的「忙碌程度」措辭（§4.3）**。建議採用，否則
    Telegram 上角色仍會被「回覆保持簡潔、之後再詳聊」這句推向收尾。
 
-## 10. 風險
+## 10. 設計變更紀錄
+
+- 2026-11-22（by Claude）：owner 指出「前一秒還在懷中，下一秒隔著浴室門說話」
+  更奇怪。確認原設計有兩個缺陷：(1) 行程段仍寫「正在洗澡」，同場指引又鼓勵
+  隔著門說話；(2) `activity_changed_since` 只在切換後第一回合成立。改為以整段
+  連續互動的起點為基準（`streak_started_at`），並改寫 §4.1、§4.3 及對應測試。
+
+## 11. 風險
 
 - **角色永遠不去忙**：玩家一直聊，行程就一直被延後。第一期不寫行程，行程本身
   照常推進，只是角色在對話中「晚一點再去」；長時間後敘事與行程會脫節。可接受，
   第二期處理。
-- **`resolve_current` 回傳值變動**影響其他呼叫端（proactive、feed 等）。實作第 4
-  步先列出所有呼叫端；若有風險，改為新增獨立的讀取方法而不改既有簽名。
+- **prompt 與行程表面上矛盾**：情況二時行程說該洗澡、prompt 說還沒去。其他讀
+  行程的功能（主動訊息、feed、行程記憶化）仍會把那個時段當成已發生，事後可能
+  出現「我剛洗完澡」而對話裡他其實沒去。第一期接受這個落差，第二期寫回行程時
+  一併解決。
+- **起點查詢的成本**：只在整個窗口都連續時才多一次唯讀查詢。
 - **判斷器多一段輸入**：token 成本略增，只在 `busy_score` ≥ 0.7 且互動中時發生。
 - **同場不延後後的私密時段**：完全交給主 prompt 的同場指引演出設界。模型若演得
   太配合（洗澡中仍長談），需要調 `_STAGE_PRESENCE_GUIDANCE`，不在本期範圍。
