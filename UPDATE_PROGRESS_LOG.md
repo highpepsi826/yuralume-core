@@ -1346,3 +1346,26 @@ database rows.
   四個應用角色重啟後日誌無錯誤。
 - 未由本次驗證：admin 登入、代表性媒體讀取、Telegram polling 擁有者；真實模型
   是否照指示改寫行程；行程表新標記在瀏覽器中的實際顯示。待 owner 試玩。
+
+## 2026-11-22 — I-19 約定訊息跟上對話：發布 (by Claude)
+
+- Source commit `106bf4e`（`local/customizations`）。設計：
+  `PROMISE_DURING_CONVERSATION_REFERENCE.md`。無 migration、無資料操作。
+- 內容：post-turn 看得到未發的約定並可判為已履行／取消／改期；約定到期時對話
+  進行中則不放行，改由聊天 prompt 帶入或對話結束後補發；post-turn 的 `remove`
+  可指向未來日子的活動。另記錄 PF-10 與「動到 atlas 的回合要在結尾回報」規則。
+- 檢查：約定、post-turn、prompt builder、行程、回合復原相關套件 669 passed。
+  `tests/unit` 全套有 22 個失敗，實作代理在乾淨的 HEAD worktree 上重現同樣 22
+  個（外部檔案缺失、編碼、一個主動訊息冷啟動測試），與本次改動無關；主 session
+  只重跑並確認了其中 `test_feature_key_manifest`、`test_proactive_dispatcher`
+  的失敗原因。`atlas_check` 0 error；`fork_delta_check` OK。
+- 發布：Actions run `45027075771` 成功；不可變 digest
+  `sha256:2b6eff914d737c848a3cf35355dcc1e7cf85a73beb05aa0aa0409c74a2344e31`
+  （tag `sha-106bf4e`）。改動前 compose 備份於
+  `C:\Entertainment\yuralumeackups\coolify-compose-pre-106bf4e-20261122-2128.yml`。
+  `postgresql`、`storage` 映像、volumes、secrets 未變更。
+- Coolify：四角色改指上述 digest 並部署；六個服務全部 `running:healthy`、
+  `/health` 回 `status=ok`、`/api/v1/system/version` 回報 commit `106bf4e`；
+  四個應用角色重啟後日誌無錯誤。
+- 未由本次驗證：admin 登入、代表性媒體讀取、Telegram polling 擁有者；真實模型
+  是否照指示判定約定與改寫行程；託管佇列中改期後的 release job。待 owner 試玩。

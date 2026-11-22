@@ -445,7 +445,7 @@ target 才給 community，否則由實際 provider 決定，露骨原文仍會�
 ### F-17 — 約定訊息跟上對話（I-19）
 
 **類型：** feature
-**狀態：** WATCH（source 已實作，2026-11-22）
+**狀態：** WATCH（`106bf4e`，2026-11-22 已部署）
 
 post-turn 看得到角色未發的約定並可輸出 `promise_updates`（已履行／取消／改期）；
 約定到期時若對話正在進行，dispatcher 不放行，改由聊天 prompt 的 `due_promises`

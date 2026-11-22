@@ -654,3 +654,5 @@ Group notes:
   rescheduling; PF-10 recorded. Still awaiting owner approval. (by Claude)
 - 2026-11-22 I-19 → `in-progress`: owner approved design v2 including Part 2.
   (by Claude)
+- 2026-11-22 I-19 implemented and released (`106bf4e`); awaiting owner playtest.
+  (by Claude)
